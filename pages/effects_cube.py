@@ -241,10 +241,11 @@ def group_and_combine(group1,group2,filter,filter2):
             rules_sum = 0
             if year != 2024:
                 for rule_index,rule_obj in enumerate(rules,start=1):
-                    rules_sum += row[f'Доходы {year}_{rule_index}, тыс.руб']
-                    res_row[f'rules_{rule_index}_2024'] = 0
-                    res_row[f'rules_{rule_index}_{year}'] = row[f'Доходы {year}_{rule_index}, тыс.руб']
+                    row[f'Доходы 2024_{rule_index}, тыс.руб'] = 0
 
+                    res_row[f'rules_{rule_index}_2024'] = 0
+                    res_row[f'rules_{rule_index}_{year}'] = (res_row[f'rules_{rule_index}_{year-1}'] + row[f'Доходы {year}_{rule_index}, тыс.руб']) * indexation[year_index]
+                    rules_sum += res_row[f'rules_{rule_index}_{year}']
             res_row[f'rules_{year}'] = rules_sum
             if year != 2024:
                 res_row[f'prev_rules_{year}'] = 0

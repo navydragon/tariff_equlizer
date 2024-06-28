@@ -638,6 +638,21 @@ def recount_graph(costs,bases, rules,
                                 children='Маржинальность грузоотправителя',
                             ),
                         ]),
+                        html.Div(className="custom-card__item", children=[
+                            html.Div(className="custom-card__row", children=[
+                                html.P(className="custom-card__procent",
+                                       children=f"{get_elastic_coefficient(current_route, marginality_real_percent[index])}",
+                                       style={'display': 'inline-block'}),
+                                # html.P(
+                                #     className="custom-card__text custom-card__text-count",
+                                #     children=f" {round(marginality_real[index])} руб.",
+                                # ),
+                            ]),
+                            html.P(
+                                className="custom-card__text",
+                                children='Коэффициент сохранения грузовой базы',
+                            ),
+                        ]),
 
                     ]),
                 ]),
@@ -941,6 +956,19 @@ def make_tabs(route,trip, message, price_message,period,cif_fob):
 
     return res
 
+
+def get_elastic_coefficient(route, marginality_percent):
+    route = route.iloc[0]
+    if route['vid'] == 'Внутр. перевозки' or marginality_percent > 0:
+        return 1
+    else:
+        elastic_df = pd.read_excel('data/elastic.xlsx')
+        elastic_actual = elastic_df[elastic_df['Категория']==route['elastic_category']]
+        if len(elastic_actual) == 0:
+            return 'неиз.'
+        marginality = marginality_percent / 100
+        coeff = elastic_actual[elastic_actual['Значение'] <= marginality]['Коэффициент'].max()
+        return coeff
 
 
 @callback(
