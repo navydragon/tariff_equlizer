@@ -225,10 +225,15 @@ def group_data_cube(df):
 
 
 def  calculate_base_revenues(df, YEARS, INDEXES, EPL_CHANGE):
+    base_revenue_col = 'Доходы 2024, тыс.руб'
+    revenue_base = CON.PR_P
+    epl_base = f'2024 ЦЭКР груззоборот, тыс ткм'
+    rules = tr.load_rules(active_only=True)
+    df = create_new_columns(df, YEARS, base_revenue_col,rules)
 
     prev_rules = tr_prev.load_rules(active_only=True)
-    base_revenue_col = 'Доходы 2024, тыс.руб'
-    df['2024_lost'] = df[base_revenue_col]
+
+    # df['2024_lost'] = df[base_revenue_col]
     for rule_obj in prev_rules:
         filters = []
         for condition in rule_obj["conditions"]:
@@ -252,13 +257,13 @@ def  calculate_base_revenues(df, YEARS, INDEXES, EPL_CHANGE):
 
     df['2024_lost'] = df[base_revenue_col] - df['2024_lost']
     year_index = 1
-    rules = tr.load_rules(active_only=True)
+
     rule_indexation = {}
     for rule_obj in rules:
         rule_indexation[rule_obj["id"]] = []
 
-    revenue_base = CON.PR_P
-    epl_base = f'2024 ЦЭКР груззоборот, тыс ткм'
+
+
     df['epl_tarif_base'] = df[revenue_base] / df[epl_base]
     df['rules_total'] = 0
     for i, year in enumerate(YEARS):
@@ -283,10 +288,8 @@ def  calculate_base_revenues(df, YEARS, INDEXES, EPL_CHANGE):
 
         df[revenue] = df[revenue_noindex] + df[revenue_base]
         rule_index = 0
-        df[f'rules%_{year}'] = 1.0
         for rule_obj in rules:
             rule_index += 1
-            df[f'rules%_{year}_{rule_index}'] = 1.0
             revenue_rule = f'Доходы {year}_{rule_index}, тыс.руб'
             revenue_rule_prev = f'Доходы {int(year)-1}_{rule_index}, тыс.руб'
             filters = []
@@ -301,7 +304,6 @@ def  calculate_base_revenues(df, YEARS, INDEXES, EPL_CHANGE):
                 else:
                     filters.append(~df[parameter].isin(values))
 
-            df[revenue_rule] = 0.0
             rule_coef = float(rule_obj['index_'+str(year)]) - 1
             df.loc[np.logical_and.reduce(filters), revenue_rule] = df[revenue_noindex] * rule_coef * df['rules_diff'] * int(rule_obj['base_percent'])/100
             df.loc[np.logical_and.reduce(filters), f'rules%_{year}'] *=  float(rule_obj['index_'+str(year)]) * df['rules_diff']
@@ -312,6 +314,22 @@ def  calculate_base_revenues(df, YEARS, INDEXES, EPL_CHANGE):
     return df
 
 
+def create_new_columns (df, years, base_revenue_col, rules):
+    new_columns = {}
+    new_columns['2024_lost'] = df[base_revenue_col]
+    for year in years:
+        rule_index = 0
+        new_columns[f'rules%_{year}'] = 1.0
+        for rule_obj in rules:
+            rule_index += 1
+            revenue_rule = f'Доходы {year}_{rule_index}, тыс.руб'
+            new_columns[f'rules%_{year}_{rule_index}'] = 1.0
+            new_columns[revenue_rule] = 0.0
+            new_columns[f'rules%_{year}_{rule_index}'] = 1.0
+
+    new_df = pd.DataFrame(new_columns)
+    df = pd.concat([df, new_df], axis=1)
+    return df
 def calculate_data_ipem(df, index_df, params):
 
     related_df = pd.read_feather('data/ipem_related_routes.feather')

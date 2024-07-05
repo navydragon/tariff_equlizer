@@ -244,7 +244,7 @@ def base_percent_input(value):
         id='base_percent',
         max=200,
         min=0,
-        step=0.01,
+        step=0.0001,
         marks=None,
         value=value
     )
@@ -337,11 +337,11 @@ def create_modal_body():
                 html.Div([],id='rule_stat', className='mt-2'),
 
                 dbc.Row([
-                    dbc.Col(width=2),
+                    dbc.Col(width=1),
                     *[dbc.Col(year, width=1) for year in years]
                 ], className="border-bottom mb-2 text-center"),
                 dbc.Row([
-                    dbc.Col('Индексация', width=2,id='indexation_label'),
+                    dbc.Col('Индекс', width=1,id='indexation_label'),
                     dbc.Col(dcc.Dropdown(
                         id='rule_indexation_variant',
                         options=['=','*','млрд'],
@@ -351,7 +351,7 @@ def create_modal_body():
                     *[dbc.Col([
                         dbc.Input(id={'type': 'rule_indexation_input', 'index': str(year)},
                             value=1,
-                            type='number', step=0.01, className="form-control form-control-sm")
+                            type='number', step=0.0001, className="form-control form-control-sm")
                     ],  width=1, className='d-flex align-items-center') for idx, year in enumerate(years)]
                 ], className="border-bottom mb-2"),
                 # print_alert()
@@ -372,11 +372,11 @@ def edit_modal_body(rule):
         ]),
         html.Div([], id='rule_stat', className='mt-2'),
         dbc.Row([
-            dbc.Col(width=2),
+            dbc.Col(width=1),
             *[dbc.Col(year, width=1) for year in years]
         ], className="border-bottom mb-2 text-center"),
         dbc.Row([
-            dbc.Col('Индексация', width=2,id='indexation_label'),
+            dbc.Col('Индекс', width=1,id='indexation_label'),
             dbc.Col(dcc.Dropdown(
                 id='rule_indexation_variant',
                 options=['=', '*', 'млрд'],
@@ -387,7 +387,7 @@ def edit_modal_body(rule):
                 dbc.Input(id={'type': 'rule_indexation_input',
                               'index': str(year)},
                           value=rule['index_'+str(year)],
-                          type='number', step=0.01,
+                          type='number', step=0.0001,
                           className="form-control form-control-sm")
             ], width=1, className='d-flex align-items-center') for
                 idx, year in enumerate(years)]
@@ -530,15 +530,15 @@ def store_rule_to_db(rule_states):
     variant = rule_states[4]
     indexes = rule_states[5]
     base_percent = rule_states[6]
-
+    print(indexes[0])
     with sqlite3.connect('data/database.db') as conn:
         cursor = conn.cursor()
         cursor.execute('''
-                            INSERT INTO rules (id, name, variant, index_2025, index_2026, index_2027, index_2028, index_2029, index_2030, base_percent)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            INSERT INTO rules (id, name, variant, index_2025, index_2026, index_2027, index_2028, index_2029, index_2030, base_percent, index_2031, index_2032, index_2033, index_2034, index_2035)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ''', (
         rule_id, name, variant, indexes[0], indexes[1], indexes[2], indexes[3],
-        indexes[4], indexes[5], base_percent))
+        indexes[4], indexes[5], base_percent, indexes[6], indexes[7], indexes[8],indexes[9], indexes[10] ))
         for index in range(len(parameters)):
             cursor.execute('''
                             INSERT INTO conditions (rule_id, parameter, include, values_list)
@@ -554,7 +554,7 @@ def base_percent_row(percent):
                         id='base_percent',
                         max=200,
                         min=0,
-                        step=0.01,
+                        step=0.0001,
                         marks=None,
                         value=percent
                     )
@@ -563,7 +563,7 @@ def base_percent_row(percent):
                     dbc.Input(
                         id='base_percent_input',
                         type='number',
-                        step=0.01,
+                        step=0.0001,
                         value=percent,
                         size='md'
                     )

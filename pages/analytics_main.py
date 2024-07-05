@@ -571,6 +571,8 @@ def recount_graph(costs,bases, rules,
         ep_perc = round(main_row[f'{year} ЦЭКР груззоборот, тыс ткм'] * 100 / all_rows[f'{year} ЦЭКР груззоборот, тыс ткм'],2)
         ep_val = round(main_row['2023 Объем перевозок, т.'] / 1000 * coef,2)
 
+        elestic_coeff = get_elastic_coefficient(current_route, marginality_real_percent[index])
+        lost_tonns =  elestic_coeff * ep_val - ep_val
         cards.append(
             html.Div(className="my-card__item", style={"background-color":"#F4F7FE"}, children=[
                 html.Div(className="my-card__caption",
@@ -641,12 +643,12 @@ def recount_graph(costs,bases, rules,
                         html.Div(className="custom-card__item", children=[
                             html.Div(className="custom-card__row", children=[
                                 html.P(className="custom-card__procent",
-                                       children=f"{get_elastic_coefficient(current_route, marginality_real_percent[index])}",
+                                       children=f"{elestic_coeff}",
                                        style={'display': 'inline-block'}),
-                                # html.P(
-                                #     className="custom-card__text custom-card__text-count",
-                                #     children=f" {round(marginality_real[index])} руб.",
-                                # ),
+                                html.P(
+                                    className="custom-card__text custom-card__text-count",
+                                    children=f" {round(lost_tonns,2)} тыс. т.",
+                                ) if elestic_coeff < 1 else None,
                             ]),
                             html.P(
                                 className="custom-card__text",

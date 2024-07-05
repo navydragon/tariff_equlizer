@@ -57,6 +57,16 @@ def results():
                     ),
                 ], width=3),
                 dbc.Col([
+                    html.Label('Фильтрация для группировки верхнего уровня'),
+                    dcc.Dropdown(
+                        id='filter',
+                        options=['Уголь каменный','Кокс каменноугольный','Нефть и нефтепродукты','Руды металлические',
+                                 'Черные металлы','Лесные грузы','Минерально-строит.','Удобрения','Хлебные грузы','Остальные грузы'],
+                        searchable=True,
+                        value=None
+                    ),
+                ], style={'display':'none'}),
+                dbc.Col([
                     html.Label('Группировка внутри'),
                     dcc.Dropdown(
                         id='group_parameter2',
@@ -68,24 +78,14 @@ def results():
                     ),
                 ], width=3),
                 dbc.Col([
-                    html.Label('Фильтрация для группировки верхнего уровня'),
-                    dcc.Dropdown(
-                        id='filter',
-                        options=['Уголь каменный','Кокс каменноугольный','Нефть и нефтепродукты','Руды металлические',
-                                 'Черные металлы','Лесные грузы','Минерально-строит.','Удобрения','Хлебные грузы','Остальные грузы'],
-                        searchable=True,
-                        value=None
-                    ),
-                ]),
-                dbc.Col([
-                    html.Label('Фильтрация для группировки внутренней'),
+                    html.Label('Фильтрация для группировки внутри'),
                     dcc.Dropdown(
                         id='filter2',
                         options=[],
                         searchable=True,
                         value=None
                     ),
-                ], width=3),
+                ], width=3, style={'display':'none'}),
 
 
             ], className='mb-3'),
@@ -188,11 +188,16 @@ def group_and_combine(group1,group2,filter,filter2):
     base_tb = 1
     base_invest = 1
     if group1 == 'Тарифные решения':
-        df_gr = df.sum(numeric_only=True).to_frame().T
+        if group2 is not None:
+            df_gr = calc.group_data(df, group2, 'Нет')
+        else:
+            df_gr = df.sum(numeric_only=True).to_frame().T
     else:
         df_gr = calc.group_data(df, group1, group2 if group2 is not None else 'Нет' )
         if filter is not None: df_gr = df_gr[df_gr[group1]==filter]
-        if filter2 is not None and group2 is not None: df_gr = df_gr[df_gr[group2]==filter2]
+
+    if filter2 is not None and group2 is not None: df_gr = df_gr[df_gr[group2]==filter2]
+    if group2 is not None and group1 != 'Тарифные решения': df_gr = df_gr[df_gr[group2] != 'ИТОГО']
 
     res = []
     indexation = rp.get('indexation')
@@ -235,7 +240,8 @@ def group_and_combine(group1,group2,filter,filter2):
 
             if group1 != 'Тарифные решения':
                 res_row['parameter'] = row[group1]
-                if group2 is not None: res_row['parameter2'] = row[group2]
+
+            if group2 is not None: res_row['parameter2'] = row[group2]
 
 
             rules_sum = 0
@@ -255,7 +261,8 @@ def group_and_combine(group1,group2,filter,filter2):
 
     res_df = pd.DataFrame(res)
     res_df = res_df.drop_duplicates()
-    if group2 is not None: res_df = res_df[res_df[group2] != 'ИТОГО']
+
+
     return res_df
 
 @callback(
@@ -283,16 +290,33 @@ def update_filter2(param):
 
 def draw_grid(res_df):
     sum_row = {col: round(res_df[col].sum(),2) if pd.api.types.is_numeric_dtype(res_df[col]) else 'ИТОГО' for col in res_df.columns}
-
+    column_defs = [
+        {
+            "headerName": col, "field": col, "aggFunc": "sum", "enableValue": True,
+            "valueFormatter": {"function": "params.value == 0 ? 0 : d3.format('(.3f')(params.value)"},
+        } if res_df[col].dtype != 'object' else {"headerName": col, "field": col}
+        for col in res_df.columns
+    ]
     grid = dag.AgGrid(
         id="main_grid",
         rowData=res_df.to_dict("records"),
-        columnDefs=[{"headerName": col, "field": col} for col in res_df.columns],
+        columnDefs=column_defs,
         defaultColDef={"sortable": True, "filter": True, "resizable": True},
         enableEnterpriseModules=True,
         dashGridOptions={
-            'pinnedTopRowData': [sum_row],
+            'groupIncludeFooter': True,
+            'groupIncludeTotalFooter': True,
+            'statusBar': {
+                'statusPanels': [
+                    {'statusPanel': 'agAggregationComponent', 'statusPanelParams': {'aggFuncs': ['sum']}}
+                ]
+            }
         },
+        # dashGridOptions={
+        #     'pinnedTopRowData': [sum_row],
+        #     'groupIncludeFooter': True,
+        #     'groupIncludeTotalFooter': True,
+        # },
     )
     return grid
 
@@ -317,8 +341,8 @@ def make_result_table(df, group1,group2):
             res_row = {}
             if group1 != 'Тарифные решения':
                 res_row[group1] = row['parameter']
-
             if group2 is not None: res_row[group2] = row['parameter2']
+
             res_row['Тарифное решение'] = key
             for year_index, year in enumerate([2024]+CON.YEARS):
                 res_row[str(year)] = round(row[f'{value}_{year}'] / 1000000,3)

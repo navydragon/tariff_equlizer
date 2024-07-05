@@ -733,7 +733,7 @@ def bar_graph(df,parameter,parameter2,year):
         textfont=dict(size=14),
         outsidetextfont=dict(size=14),
         orientation='h',
-        name='Базовык решения'
+        name='Базовые решения'
     ))
     fig.add_trace(go.Bar(
         y=df[parameter], x=df['rules'] / 1000000,
