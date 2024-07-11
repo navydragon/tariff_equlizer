@@ -309,8 +309,8 @@ def get_previous_change(route,index,rzd,year,suffix, bases):
 
 
 def route_map(route):
-    stations = pd.read_excel('data/stations.xlsx')
-    route_maps = pd.read_excel('data/route_maps.xlsx')
+    stations = pd.read_excel('data/map/stations.xlsx')
+    route_maps = pd.read_excel('data/map/route_maps.xlsx')
 
     # route_key = str(route['КЛЮЧ_КОД_МАРШРУТА'].values[0]).strip()
     # print(route_key)

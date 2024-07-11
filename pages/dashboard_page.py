@@ -3,7 +3,7 @@ import pandas as pd
 
 from dash import html, dcc, callback, Output, Input, State, ALL
 from pages.constants import Constants as CON
-from pages.data import get_revenue_parameters, calculate_total_index
+from pages.data import get_revenue_parameters, calculate_total_index, get_plan_df
 import numpy as np
 import pages.dashboard.absolute_revenues as absolute_revenues
 absolute_revenues.get_callbacks()
@@ -31,7 +31,7 @@ dash.register_page(__name__, name="Финансовый план / Отдель�
 CARGOS = CON.CARGOS
 
 
-HOLDINGS = pd.read_feather('data/holdings.feather')
+HOLDINGS = pd.read_feather('data/fp/holdings.feather')
 HOLDINGS = HOLDINGS[(HOLDINGS['Холдинг'] != 'Прочие') & (HOLDINGS['Холдинг'] != 'неопределен')]
 HOLDINGS = np.append(HOLDINGS['Холдинг'].unique(), 'Все')
 
@@ -1096,7 +1096,7 @@ def update_holding_options_routes(cargo, holding):
 
 
 def make_main_table(df, params):
-    plan_df = pd.read_excel('data/plan.xlsx',index_col='index')
+    plan_df = get_plan_df()
     df_part1 = plan_df.loc[:23].copy()
     df_part2 = plan_df.loc[24:].copy()
     #индексы

@@ -2,7 +2,7 @@ import pandas as pd
 import logging
 
 from pages.constants import Constants
-from pages.data import get_main_data, get_small_data, get_ipem_data
+from pages.data import get_main_data, get_small_data, get_ipem_data, get_ipem_related_routes
 import numpy as np
 import pages.scenario_parameters.tarif_rules as tr
 import pages.scenario_parameters.tarif_rules_prev as tr_prev
@@ -18,6 +18,8 @@ def calculate_data(data_type='main', params={}):
         df = get_main_data()
     else:
         df = get_small_data()
+
+
 
     diff = pd.read_excel('data/diff.xlsx')
     df = pd.merge(df,diff,how='inner',left_on=CON.CARGO,right_on=CON.CARGO)
@@ -246,7 +248,6 @@ def  calculate_base_revenues(df, YEARS, INDEXES, EPL_CHANGE):
                 filters.append(df[parameter].isin(values))
             else:
                 filters.append(~df[parameter].isin(values))
-
         if rule_obj['variant'] == 'млрд': # миллиарды
             total = df.loc[np.logical_and.reduce(filters), base_revenue_col].sum()
             df.loc[np.logical_and.reduce(filters), 'part'] = df.loc[np.logical_and.reduce(filters), base_revenue_col] / total
@@ -289,6 +290,7 @@ def  calculate_base_revenues(df, YEARS, INDEXES, EPL_CHANGE):
         df[revenue] = df[revenue_noindex] + df[revenue_base]
         rule_index = 0
         for rule_obj in rules:
+            print(rule_obj['name'])
             rule_index += 1
             revenue_rule = f'Доходы {year}_{rule_index}, тыс.руб'
             revenue_rule_prev = f'Доходы {int(year)-1}_{rule_index}, тыс.руб'
@@ -303,7 +305,7 @@ def  calculate_base_revenues(df, YEARS, INDEXES, EPL_CHANGE):
                     filters.append(df[parameter].isin(values))
                 else:
                     filters.append(~df[parameter].isin(values))
-
+            print(df.loc[np.logical_and.reduce(filters),"Группа груза"].unique())
             rule_coef = float(rule_obj['index_'+str(year)]) - 1
             df.loc[np.logical_and.reduce(filters), revenue_rule] = df[revenue_noindex] * rule_coef * df['rules_diff'] * int(rule_obj['base_percent'])/100
             df.loc[np.logical_and.reduce(filters), f'rules%_{year}'] *=  float(rule_obj['index_'+str(year)]) * df['rules_diff']
@@ -332,7 +334,7 @@ def create_new_columns (df, years, base_revenue_col, rules):
     return df
 def calculate_data_ipem(df, index_df, params):
 
-    related_df = pd.read_feather('data/ipem_related_routes.feather')
+    related_df = get_ipem_related_routes()
     related_df = calculate_related(related_df, params)
 
     prev_rules = tr_prev.load_rules(active_only=True)

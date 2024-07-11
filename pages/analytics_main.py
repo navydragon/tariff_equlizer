@@ -1,10 +1,11 @@
 import dash
 
-from dash import html, dcc, callback, ALL, MATCH
+from dash import html, dcc, callback, ALL, MATCH, ctx
 from dash.dependencies import Input, Output, State
-from pages.data import get_ipem_data, get_main_data, make_ipem_related_routes, calculate_total_index
+from pages.data import get_ipem_data, get_main_data, get_te_variants, set_te_variants, calculate_total_index, get_dollar_rate
 import dash_bootstrap_components as dbc
-
+import json
+import os
 
 
 import plotly.graph_objects as go
@@ -32,7 +33,6 @@ def layout():
     return html.Div([
         sp.scenario_parameters(),
         sp.toggle_button(),
-
         html.Div(
             equlizer()
         ),
@@ -65,7 +65,6 @@ def equlizer():
             html.Div(
                 className='my-separate my-separate_width_600 my-separate_vector_left'),
             html.Div([
-
             ]),
 
             dbc.Row([
@@ -172,8 +171,11 @@ def equlizer():
                                 color="#e21a1a",
                                 fullscreen=False,
                                 children=[html.Div([
-                                    html.Div(html.Em(
-                                        'Последовательно выберите груз, холдинг, вид сообщения и маршрут'))
+                                    html.Div([
+                                        html.Em('Последовательно выберите груз, холдинг, вид сообщения и маршрут'),
+                                        html.Div(dcc.Dropdown(value=None, id="variant_select"), style={'display': 'none'} )
+                                    ]),
+
                                 ], id='equlizer_trends')],
                             ),
                         ], id='pill-tab-trends', className='tab-pane fade show active', role='tabpanel'),
@@ -242,7 +244,7 @@ def equlizer():
                                 fullscreen=False,
                                 children=[html.Div([
                                     html.Div(html.Em(
-                                        'Последовательно выберите груз, холдинг, вид сообщения и маршрут'))
+                                        'Последовательно выберите груз, холдинг, вид сообщения и маршрут')),
                                 ], id='equlizer_effects')],
                             ),
                         ], id='pill-tab-effects', className='tab-pane fade show', role='tabpanel')
@@ -252,7 +254,9 @@ def equlizer():
             ]),
 
             html.Div(
-                children=[html.Div([], id='eqilizer_tabs')]
+                children=[html.Div([
+
+                ], id='eqilizer_tabs')]
             ),
         ]),
 
@@ -338,6 +342,7 @@ def fake_gdf_tr(df):
     Input('message_group_select','value'),
     Input('trip_group_select','value'),
     Input('period_select', 'value'),
+    Input('variant_select', 'value'),
     State('type_select','value'),
     State('message_select','value'),
     State('index_sell_prices','value'),
@@ -345,10 +350,13 @@ def fake_gdf_tr(df):
     State('cif_fob','value'),
 )
 def update_equlizer(route,trip,cargo_group,mesage_group, trip_group,
-                    period,type,message, prices_change, prices_variant, cif_fob):
+                    period, variant, type, message, prices_change, prices_variant, cif_fob):
     period = sorted(period)
 
-    no = html.Div(html.Em('Последовательно выберите груз, холдинг, вид сообщения и маршрут'))
+    no = html.Div([
+        html.Em('Последовательно выберите груз, холдинг, вид сообщения и маршрут'),
+        #html.Div(dcc.Dropdown(value=None, id="variant_select", style={'display': 'none'}),)
+    ])
 
 
     if type == 'Маршрут':
@@ -356,7 +364,9 @@ def update_equlizer(route,trip,cargo_group,mesage_group, trip_group,
         current_route = ipem_calculated[ipem_calculated['route'] == route]
 
     else:
-        if mesage_group is None: return ([],no)
+        if mesage_group is None:
+            print("KEK")
+            return ([],no)
 
         conditions = (ipem_calculated['Группа груза'] == cargo_group) & (ipem_calculated['Вид сообщения'] == mesage_group)
         current_route = ipem_calculated[conditions].iloc[0]
@@ -365,7 +375,24 @@ def update_equlizer(route,trip,cargo_group,mesage_group, trip_group,
         message = mesage_group
 
     prices_message = get_prices_message(prices_change, prices_variant)
-    tabs = html.Div(make_tabs(current_route,trip, message, prices_message, period, cif_fob))
+
+
+    variants = get_te_variants()
+    triggered_id = ctx.triggered_id
+    if triggered_id == 'variant_select':
+        variants.loc[variants['index'] == current_route['index'].values[0], 'status'] = variant
+        set_te_variants(variants)
+
+    route_variant = variants[variants['index'] == current_route['index'].values[0]]
+    current_status = route_variant['status'].values[0]
+    user_file = os.path.isfile('data/te/variants/' + str(current_route['index'].values[0]) + '.json')
+
+
+    params_variant = {"status": current_status, "user_file": user_file, "route_index": str(current_route['index'].values[0])}
+
+
+
+    tabs = html.Div(make_tabs(current_route,trip, message, prices_message, period, cif_fob, params_variant))
     return (tabs,[])
 
 
@@ -404,7 +431,10 @@ def recount_graph(costs,bases, rules,
                   period, route,message):
     period = sorted(period)
 
-    no = html.Div(html.Em('Последовательно выберите груз, холдинг, вид сообщения и маршрут'))
+    no = html.Div([
+        html.Em('Последовательно выберите груз, холдинг, вид сообщения и маршрут'),
+        html.Div(dcc.Dropdown(value=None, id="variant_select", style={'display': 'none'}), )
+    ])
     if type == 'Маршрут':
         if route is None:
             return (no,no,no,no,no,no, no)
@@ -669,16 +699,31 @@ def recount_graph(costs,bases, rules,
 
 
 
-def make_tabs(route,trip, message, price_message,period,cif_fob):
+def make_tabs(route,trip, message, price_message,period,cif_fob, params_variant):
 
-    PRICES_DOLLAR = pd.read_excel('data/prices$.xlsx')
+    PRICES_DOLLAR = get_dollar_rate()
     is_export = 'block' if message != 'внутренние' else 'none'
     is_fraht = 'block' if (cif_fob == 'CIF')and(message != 'внутренние') else 'none'
     is_internal = 'block' if message == 'внутренние' else 'none'
     cost = round(route.iloc[0]['Себестоимость добычи/производства, руб. т.'],3)
     rules_suffix = '_gr' if trip == 'Груженый рейс' else ''
 
-    res = dcc.Tabs(
+    if params_variant['status'] == 'user':
+        with open('data/te/variants/'+params_variant['route_index']+'.json', 'r', encoding='utf-8') as f:
+           data = json.load(f)
+    else:
+        data = {'base':{},'oper':{},'per':{},'fraht':{},'dollar_price':{},'price':{},'price_rub':{},'cost':{}}
+        for index,year in enumerate(FULL_YEARS):
+            data['base'][str(year)] = round(route.iloc[0][f"base%_{year}"],3)
+            data['oper'][str(year)] = round(route.iloc[0][f"Расходы по оплате услуг операторов_{year}, руб. за тонну"],3)
+            data['per'][str(year)] = round(route.iloc[0][f"Расходы на перевалку_{year}, руб. за тонну"],3)
+            data['fraht'][str(year)] = route.iloc[0][f"fraht_{year}"]
+            data['dollar_price'][str(year)] = PRICES_DOLLAR.loc[index, 'prices']
+            data['price'][str(year)] = round(route.iloc[0][f'Стоимость 1 тонны на рынке_{year}_$, руб./т.'],3)
+            data['price_rub'][str(year)] = round(route.iloc[0][f'Стоимость 1 тонны на рынке_{year}, руб./т.'],1)
+            data['cost'][str(year)] = round(route.iloc[0]['Себестоимость добычи/производства, руб. т.'],3)
+    print (data)
+    tabs = dcc.Tabs(
         id="tabs-with-classes",
         value='tab-2',
         parent_className='custom-tabs',
@@ -701,12 +746,12 @@ def make_tabs(route,trip, message, price_message,period,cif_fob):
                     dbc.Row([ *[dbc.Col(year, className='my-slider__text', style={'display':'block'} if year in period else {'display':'none'}) for year in FULL_YEARS]], className='my-row_type_full'),
                     dbc.Row([
                         *[dbc.Col([
-                            eq.draw_input(type='base',year=year,value=round(route.iloc[0][f"base%_{year}"],3))
+                            eq.draw_input(type='base',year=year,value=data['base'][str(year)])
                         ], className='text-center', style={'display':'block'} if year in period else {'display':'none'}) for index,year in enumerate(FULL_YEARS)]
                     ], className='my-row_type_full'),
                     dbc.Row([
                         *[dbc.Col([
-                            eq.draw_slider(type='base',year=year,value=round(route.iloc[0][f"base%_{year}"],3), step=0.001)
+                            eq.draw_slider(type='base',year=year,value=data['base'][str(year)], step=0.001)
                         ], id={'type': 'base_container', 'index': year}, className='text-center', style={'display':'block'} if year in period else {'display':'none'}) for index,year in enumerate(FULL_YEARS)]
                     ], className='my-row_type_full'),
                 ], className='mx-5')]
@@ -752,12 +797,12 @@ def make_tabs(route,trip, message, price_message,period,cif_fob):
                     dbc.Row([ *[dbc.Col(year, className='my-slider__text', style={'display':'block'} if year in period else {'display':'none'}) for year in FULL_YEARS]]),
                     dbc.Row([
                         *[dbc.Col([
-                            eq.draw_input(type='oper',year=year,value=round(route.iloc[0][f"Расходы по оплате услуг операторов_{year}, руб. за тонну"],3))
+                            eq.draw_input(type='oper',year=year,value=data['oper'][str(year)])
                         ], className='text-center', style={'display':'block'} if year in period else {'display':'none'}) for index,year in enumerate(FULL_YEARS)]
                     ]),
                     dbc.Row([
                         *[dbc.Col([
-                            eq.draw_slider(type='oper',year=year,value=round(route.iloc[0][f"Расходы по оплате услуг операторов_{year}, руб. за тонну"],3))
+                            eq.draw_slider(type='oper',year=year,value=data['oper'][str(year)])
                         ], id={'type': 'oper_container', 'index': year}, className='text-center', style={'display':'block'} if year in period else {'display':'none'}) for index,year in enumerate(FULL_YEARS)]
                     ]),
                 ], className='mx-5')]
@@ -781,15 +826,13 @@ def make_tabs(route,trip, message, price_message,period,cif_fob):
                                year in FULL_YEARS]]),
                     dbc.Row([
                         *[dbc.Col([
-                            eq.draw_input(type='per', year=year, value=round(route.iloc[0][f"Расходы на перевалку_{year}, руб. за тонну"],3))
+                            eq.draw_input(type='per', year=year, value=data['per'][str(year)])
                         ], className='text-center', style={'display':'block'} if year in period else {'display':'none'}) for index, year in
                             enumerate(FULL_YEARS)]
                     ]),
                     dbc.Row([
                         *[dbc.Col([
-                            eq.draw_slider(type='per', year=year, value=round(
-                                route.iloc[0][
-                                    f"Расходы на перевалку_{year}, руб. за тонну"],3))
+                            eq.draw_slider(type='per', year=year, value=data['per'][str(year)])
                         ], id={'type': 'per_container', 'index': year},
                             className='text-center', style={'display':'block'} if year in period else {'display':'none'}) for index, year in
                             enumerate(FULL_YEARS)]
@@ -812,12 +855,12 @@ def make_tabs(route,trip, message, price_message,period,cif_fob):
                     dbc.Row([ *[dbc.Col(year, className='my-slider__text', style={'display':'block'} if year in period else {'display':'none'}) for year in FULL_YEARS]]),
                     dbc.Row([
                         *[dbc.Col([
-                            eq.draw_input(type='fraht',year=year,value=route.iloc[0][f"fraht_{year}"])
+                            eq.draw_input(type='fraht',year=year,value=data['fraht'][str(year)])
                         ], className='text-center', style={'display':'block'} if year in period else {'display':'none'}) for index,year in enumerate(FULL_YEARS)]
                     ]),
                     dbc.Row([
                         *[dbc.Col([
-                            eq.draw_slider(type='fraht',year=year,value=route.iloc[0][f"fraht_{year}"], step=1, max=round(route.iloc[0][f"Расходы на перевалку_{year}, руб. за тонну"])*2)
+                            eq.draw_slider(type='fraht',year=year,value=data['fraht'][str(year)], step=1, max=round(route.iloc[0][f"Расходы на перевалку_{year}, руб. за тонну"])*2)
                         ], id={'type': 'rules_container', 'index': year}, className='text-center', style={'display':'block'} if year in period else {'display':'none'}) for index,year in enumerate(FULL_YEARS)]
                     ]),
                 ], className='mx-5')]
@@ -845,13 +888,13 @@ def make_tabs(route,trip, message, price_message,period,cif_fob):
                             className='my-row_type_full'),
                     dbc.Row([
                         *[dbc.Col([
-                            eq.draw_input(type='dollar_price', year=year, value=PRICES_DOLLAR.loc[index, 'prices'])
+                            eq.draw_input(type='dollar_price', year=year, value=data['dollar_price'][str(year)])
                         ], className='text-center', style={'display':'block'} if year in period else {'display':'none'}
                         ) for index, year in enumerate(FULL_YEARS)]
                     ], className='my-row_type_full'),
                     dbc.Row([
                         *[dbc.Col([
-                            eq.draw_slider(type='dollar_price', year=year,value=PRICES_DOLLAR.loc[index, 'prices'], max=200, step=0.1)
+                            eq.draw_slider(type='dollar_price', year=year,value=data['dollar_price'][str(year)], max=200, step=0.1)
                         ], id={'type': 'dollar_price_container', 'index': year},
                             className='text-center', style={'display':'block'} if year in period else {'display':'none'}
                         ) for index, year in enumerate(FULL_YEARS)]
@@ -877,12 +920,12 @@ def make_tabs(route,trip, message, price_message,period,cif_fob):
                     dbc.Row([ *[dbc.Col(year, className='my-slider__text', style={'display':'block'} if year in period else {'display':'none'}) for year in FULL_YEARS]]),
                     dbc.Row([
                         *[dbc.Col([
-                            eq.draw_input(type='price',year=year,value=round(route.iloc[0][f'Стоимость 1 тонны на рынке_{year}_$, руб./т.'],3))
+                            eq.draw_input(type='price',year=year,value=data['price'][str(year)])
                         ], className='text-center', style={'display':'block'} if year in period else {'display':'none'}) for index,year in enumerate(FULL_YEARS)]
                     ]),
                     dbc.Row([
                         *[dbc.Col([
-                            eq.draw_slider(type='price',year=year,value=round(route.iloc[0][f'Стоимость 1 тонны на рынке_{year}_$, руб./т.'],3))
+                            eq.draw_slider(type='price',year=year,value=data['price'][str(year)])
                         ], id={'type': 'price_container', 'index': year}, className='text-center', style={'display':'block'} if year in period else {'display':'none'}) for index,year in enumerate(FULL_YEARS)]
                     ]),
                 ], className='mx-5')]
@@ -907,19 +950,13 @@ def make_tabs(route,trip, message, price_message,period,cif_fob):
                     dbc.Row([*[dbc.Col(year, className='my-slider__text', style={'display':'block'} if year in period else {'display':'none'}) for year in FULL_YEARS]]),
                     dbc.Row([
                         *[dbc.Col([
-                            eq.draw_input(type='price_rub', year=year, value=round(
-                                route.iloc[0][
-                                    f'Стоимость 1 тонны на рынке_{year}, руб./т.'],
-                                1))
+                            eq.draw_input(type='price_rub', year=year, value=data['price_rub'][str(year)])
                         ], className='text-center', style={'display':'block'} if year in period else {'display':'none'}) for index, year in
                             enumerate(FULL_YEARS)]
                     ]),
                     dbc.Row([
                         *[dbc.Col([
-                            eq.draw_slider(type='price_rub', year=year, value=round(
-                                route.iloc[0][
-                                    f'Стоимость 1 тонны на рынке_{year}, руб./т.'],
-                                1))
+                            eq.draw_slider(type='price_rub', year=year, value=data['price_rub'][str(year)])
                         ], id={'type': 'price_rub_container', 'index': year},
                             className='text-center', style={'display':'block'} if year in period else {'display':'none'}) for index, year in
                             enumerate(FULL_YEARS)]
@@ -944,19 +981,93 @@ def make_tabs(route,trip, message, price_message,period,cif_fob):
                     dbc.Row([ *[dbc.Col(year, className='my-slider__text', style={'display':'block'} if year in period else {'display':'none'}) for year in FULL_YEARS]]),
                     dbc.Row([
                         *[dbc.Col([
-                            eq.draw_input(type='cost',year=year,value=cost)
+                            eq.draw_input(type='cost',year=year,value=data['cost'][str(year)])
                         ], className='text-center', style={'display':'block'} if year in period else {'display':'none'}) for index,year in enumerate(FULL_YEARS)]
                     ]),
                     dbc.Row([
                         *[dbc.Col([
-                            eq.draw_slider(type='cost',year=year,value=cost)
+                            eq.draw_slider(type='cost',year=year,value=data['cost'][str(year)])
                         ], id={'type': 'cost_container', 'index': year}, className='text-center', style={'display':'block'} if year in period else {'display':'none'}) for index,year in enumerate(FULL_YEARS)]
                     ]),
                 ], className='mx-5')]
             ),
         ])
 
+    options = [
+        {'label': 'Базовый', 'value': 'base'},
+        {'label': 'Пользовательский', 'value': 'user'} if params_variant["user_file"] == True else None
+    ]
+    options = [option for option in options if option is not None]
+
+    veriant = html.Div([
+        html.Label('Вариант'),
+        html.Div([
+            dcc.Dropdown(
+                id='variant_select',
+                options=options,
+                value=params_variant["status"],
+                style={'width': '200px'},
+                clearable=False
+            ),
+            dbc.Button(
+                "Сохранить", id={'type': 'save_button', 'route_index': params_variant["route_index"]},
+                className='btn-primary offcanvas__btn mx-2',
+            )
+        ], style={'display': 'flex', 'alignItems': 'center'})
+    ], id="variant_div", className="mt-2")
+    res = html.Div([
+        tabs,
+        veriant
+    ])
     return res
+
+
+@callback(
+    Output('variant_select','value'),
+    Input({'type':'save_button', 'route_index': ALL}, 'n_clicks'),
+    State({'type':'save_button', 'route_index': ALL}, 'id'),
+    [State({'type': f'base_input', 'index': year}, 'value') for year in FULL_YEARS] +
+    [State({'type': f'oper_input', 'index': year}, 'value') for year in FULL_YEARS] +
+    [State({'type': f'per_input', 'index': year}, 'value') for year in FULL_YEARS] +
+    [State({'type': f'fraht_input', 'index': year}, 'value') for year in FULL_YEARS] +
+    [State({'type': f'dollar_price_input', 'index': year}, 'value') for year in FULL_YEARS] +
+    [State({'type': f'price_input', 'index': year}, 'value') for year in FULL_YEARS] +
+    [State({'type': f'price_rub_input', 'index': year}, 'value') for year in FULL_YEARS] +
+    [State({'type': f'cost_input', 'index': year}, 'value') for year in FULL_YEARS],
+    prevent_initial_call=True
+)
+
+def save_variant(n_clicks,id,*args):
+    print (id[0]["route_index"])
+    print(type(id))
+    route_index = id[0]["route_index"]
+    # Разделяем аргументы по соответствующим массивам
+    num_years = len(FULL_YEARS)
+    base_values = args[:num_years]
+    oper_values = args[num_years:2 * num_years]
+    per_values = args[2 * num_years:3 * num_years]
+    fraht_values = args[3 * num_years:4 * num_years]
+    dollar_price_values = args[4 * num_years:5 * num_years]
+    price_values = args[5 * num_years:6 * num_years]
+    price_rub_values = args[6 * num_years:7 * num_years]
+    cost_values = args[7 * num_years:8 * num_years]
+    data = {
+        'base': {year: base_values[i] for i, year in enumerate(FULL_YEARS)},
+        'oper': {year: oper_values[i] for i, year in enumerate(FULL_YEARS)},
+        'per': {year: per_values[i] for i, year in enumerate(FULL_YEARS)},
+        'fraht': {year: fraht_values[i] for i, year in enumerate(FULL_YEARS)},
+        'dollar_price': {year: dollar_price_values[i] for i, year in enumerate(FULL_YEARS)},
+        'price': {year: price_values[i] for i, year in enumerate(FULL_YEARS)},
+        'price_rub': {year: price_rub_values[i] for i, year in enumerate(FULL_YEARS)},
+        'cost': {year: cost_values[i] for i, year in enumerate(FULL_YEARS)}
+    }
+
+    # Сохранение объекта в JSON файл
+    with open('data/te/variants/'+route_index+'.json', 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=4)
+
+    return "user"
+
 
 
 def get_elastic_coefficient(route, marginality_percent):

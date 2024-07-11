@@ -52,7 +52,7 @@ def get_main_data():
     # Проверка, были ли данные уже загружены
     if main_data is None:
         # df = pd.read_hdf('data/tariff_data_grouped.h5', key='tariff_data')
-        df = pd.read_feather('data/tariff_data_grouped.feather')
+        df = pd.read_feather('data/fp/tariff_data_grouped.feather')
 
 
 
@@ -74,7 +74,7 @@ def get_small_data():
     global small_data
 
     if small_data is None:
-        df = pd.read_feather('data/tariff_data_grouped_small.feather')
+        df = pd.read_feather('data/fp/tariff_data_grouped_small.feather')
         small_data = df
 
     return small_data
@@ -85,10 +85,7 @@ def get_ipem_data():
     global ipem_data
 
     if ipem_data is None:
-        df = pd.read_excel('data/total_ipem2.xlsx')
-        # df = pd.read_csv('data/total_ipem.csv',delimiter=';')
-        # df.to_excel('data/total_ipem.xlsx')
-        # df['long_route'] = df['Станция отправления']+ "-"+df['Станция назначения']+", "+df['Груз']+", "+df['Холдинг грузоотправителя']
+        df = pd.read_excel('data/te/total_ipem.xlsx')
         df = df.loc[df['ipem_gr'] != 'не участвует']
         df['route'] = df['Станция отправления']+ "-"+df['Станция назначения']
         ipem_data = df
@@ -100,7 +97,7 @@ def get_ipem_csr_data():
     global ipem_csr_data
 
     if ipem_csr_data is None:
-        df = pd.read_excel('data/total_ipem_csr.xlsx')
+        df = pd.read_excel('data/te/total_ipem_csr.xlsx')
         df['route'] = df['Станция отправления']+ "-"+df['Станция назначения']
         ipem_data = df
 
@@ -118,7 +115,10 @@ def make_ipem_related_routes(ipem_calculated):
        'Вид перевозки', 'Категория отпр.', 'Тип парка', 'Вид спец. контейнера',
        'Холдинг', 'Направления','Код груза(изпод)']
     res = res.groupby(columns).sum().reset_index()
-    res.to_feather('data/ipem_related_routes.feather')
+    res.to_feather('data/te/ipem_related_routes.feather')
+
+def get_ipem_related_routes():
+    return pd.read_feather('data/te/ipem_related_routes.feather')
 
 def calculate_total_index(indexation_variant:str='Индексация по расп.N2991-р'):
     result = []
@@ -145,3 +145,22 @@ def calculate_total_index(indexation_variant:str='Индексация по ра
             total_index *= params_values.get('invest')[index + 1] / params_values.get('invest')[index]
         result.append(total_index)
     return result
+
+def get_te_variants ():
+    # df = pd.read_excel('data/te/variants/te_variants.xlsx')
+    # df.to_json('data/te/variants/te_variants.json', index=False)
+    return pd.read_json('data/te/variants/te_variants.json')
+
+
+def set_te_variants (df):
+    df.to_json('data/te/variants/te_variants.json', index=False)
+    pass
+
+def get_plan_df ():
+    return pd.read_excel('data/fp/plan.xlsx', index_col='index')
+
+def get_ipem_csr_related_routes():
+    return pd.read_excel('data/te/ipem_csr_related_routes.xlsx')
+
+def get_dollar_rate():
+    return pd.read_excel('data/prices$.xlsx')

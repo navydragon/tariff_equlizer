@@ -5,7 +5,7 @@ import geopandas as gpd
 import plotly.graph_objects as go
 from shapely.geometry import Point
 
-REGIONS = pd.read_parquet("data/russia_regions.parquet")
+REGIONS = pd.read_parquet("data/map/russia_regions.parquet")
 
 
 def convert_crs(x_arr, y_arr, to_crs='EPSG:32646', from_crs="EPSG:4326"):

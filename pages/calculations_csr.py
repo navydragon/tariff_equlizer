@@ -2,7 +2,7 @@ import pandas as pd
 import logging
 
 from pages.constants import Constants
-from pages.data import get_main_data, get_ipem_data, get_ipem_csr_data
+from pages.data import get_main_data, get_ipem_data, get_ipem_csr_data, get_ipem_csr_related_routes
 import numpy as np
 import pages.scenario_parameters.tarif_rules as tr
 import pages.scenario_parameters.tarif_rules_prev as tr_prev
@@ -12,7 +12,7 @@ CON = Constants(2025)
 
 def calculate_data_ipem(df, index_df, params):
 
-    related_df = pd.read_excel('data/ipem_csr_related_routes.xlsx')
+    related_df = get_ipem_csr_related_routes()
     related_df = calculate_related (related_df,params)
 
     prev_rules = tr_prev.load_rules(active_only=True)

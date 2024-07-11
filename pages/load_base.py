@@ -63,7 +63,7 @@ def load_data():
              ], axis=1, inplace=True)
 
     holdings_df = pd.DataFrame({'Холдинг': df['Холдинг'].unique()})
-    holdings_df.to_feather('data/holdings.feather')
+    holdings_df.to_feather('data/fp/holdings.feather')
 
 
 
@@ -104,6 +104,6 @@ def load_data():
     df_grouped = df.groupby(group_parameters).agg(agg_params).reset_index()
     df_grouped['Доходы 2023, тыс.руб'] = df_grouped['Доходы 2023, тыс.руб'] / 1000
     print(df_grouped.columns)
-    # df_grouped.to_hdf('data/tariff_data_grouped.h5', key='tariff_data')
-    df_grouped.to_feather('data/tariff_data_grouped.feather')
+
+    df_grouped.to_feather('data/fp/tariff_data_grouped.feather')
     print (len(df_grouped))
