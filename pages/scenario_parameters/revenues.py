@@ -28,12 +28,11 @@ def revenues_layout(last_params):
     return html.Div([
         html.Div([
             html.Div([
-                html.H2('Грузооборот', className='my-section__title'),
+                html.H2('Изменения', className='my-section__title'),
             ], className="my-section__header"),
             html.Div('',className='my-separate my-separate_width_300 my-separate_vector_left'),
             html.Div([
                 html.Div([
-                   # html.H4('Учитывать изменение грузооборота', className='my-section__subtitle'),
                     dbc.Checklist(
                         id='epl_change',
                         options=[
@@ -45,7 +44,20 @@ def revenues_layout(last_params):
                         switch=True,
                         label_class_name='form-check-label'
                     )
-                ], className='my-section__item')
+                ], className='my-section__item'),
+                html.Div([
+                    dbc.Checklist(
+                        id='market_loss',
+                        options=[
+                            {'label': 'Учитывать выпадение объемов',
+                             'value': True}
+                        ],
+                        value=last_params.get("market_loss", []),
+                        inline=True,
+                        switch=True,
+                        label_class_name='form-check-label'
+                    )
+                ], className='my-section__item'),
             ],className='my-section__item'),
 
         ], className="my-section my-section_margin_top"),

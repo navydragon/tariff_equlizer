@@ -119,7 +119,7 @@ args = outputs + inputs_states
 def recount_base(
         group1, group2, filter, filter2,
         calculate_button,
-        epl_change,
+        epl_change, market_loss,
         cif_fob,
         index_sell_prices, price_variant, index_sell_coal, index_oper, index_per,
         *revenue_index_values,
@@ -130,6 +130,7 @@ def recount_base(
         "label": 'Признак',
         "revenue_index_values": revenue_index_values,
         "epl_change": epl_change,
+        "market_loss": market_loss,
         "ipem": {
             "index_sell_prices": index_sell_prices,
             "price_variant": price_variant,

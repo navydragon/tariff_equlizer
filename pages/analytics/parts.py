@@ -188,7 +188,7 @@ def effects_table(route,rzd,bases,rules, trip_type):
                         children=[
                             round(rzd[index - 1] * (route[f'rules%_{year}{suffix}'].values[0] - 1), 2),
                             html.Br(),
-                            '(', '+', round( rzd[index - 1] * (route[f'rules%_{year}{suffix}'].values[0] - 1) * 100 / rzd[index - 1], 2),
+                            '(', '+' if route[f'rules%_{year}{suffix}'].values[0] > 0 else '' , round( rzd[index - 1] * (route[f'rules%_{year}{suffix}'].values[0] - 1) * 100 / rzd[index - 1], 2),
                             '%)'
                         ]
                     )
@@ -209,7 +209,7 @@ def effects_table(route,rzd,bases,rules, trip_type):
                     children=[
                         round(rzd[index - 1] * route[f'rules%_{year}_{rule_index}{suffix}'].values[0], 2),
                         html.Br(),
-                        '(', round(route[f'rules%_{year}_{rule_index}{suffix}'].values[0] * 100, 2), '%)'
+                        '(', '+' if route[f'rules%_{year}_{rule_index}{suffix}'].values[0] > 0 else '', round(route[f'rules%_{year}_{rule_index}{suffix}'].values[0] * 100, 2), '%)'
                     ]) for index, year in enumerate(CON.YEARS, start=1)]
             ]) if rule_sum > 0 else None
         )

@@ -28,6 +28,7 @@ def calculate_data(data_type='main', params={}):
 
     df = calculate_base_revenues(df, CON.YEARS, params['revenue_index_values'],params['epl_change'])
 
+
     print('calc ok')
 
     return df
@@ -131,100 +132,6 @@ def group_data_cube(df):
     df_grouped = df_grouped.reset_index()
     return df_grouped
 
-# def calculate_base_revenues(df, YEARS, INDEXES, EPL_CHANGE):
-#     prev_rules = tr_prev.load_rules(active_only=True)
-#     base_revenue_col = 'Доходы 2024, тыс.руб'
-#
-#     # Обрабатываем правила из prev_rules
-#     for rule_obj in prev_rules:
-#         filters = [df[condition["parameter"]].isin(
-#             condition["values"].split(';') if condition["values"] else df[
-#                 condition["parameter"]].unique())
-#                    if condition["include"] == 'включает'
-#                    else ~df[condition["parameter"]].isin(
-#             condition["values"].split(';') if condition["values"] else df[
-#                 condition["parameter"]].unique())
-#                    for condition in rule_obj["conditions"]]
-#
-#         combined_filters = np.logical_and.reduce(filters)
-#         if rule_obj['variant'] == 'млрд':  # миллиарды
-#             total = df.loc[combined_filters, base_revenue_col].sum()
-#             part = df.loc[combined_filters, base_revenue_col] / total
-#             df.loc[combined_filters, base_revenue_col] += (
-#                         float(rule_obj['index_2024']) * 1000000 * part)
-#         else:  # индексы
-#             if rule_obj['variant'] == '*':
-#                 df.loc[combined_filters, base_revenue_col] *= float(
-#                     rule_obj['index_2024'])
-#
-#     year_index = 1
-#     rules = tr.load_rules(active_only=True)
-#     rule_indexation = {rule_obj["id"]: [] for rule_obj in rules}
-#
-#     revenue_base = CON.PR_P
-#     epl_base = '2024 ЦЭКР груззоборот, тыс ткм'
-#     df['epl_tarif_base'] = df[revenue_base] / df[epl_base]
-#     df['rules_total'] = 0
-#
-#     for i, year in enumerate(YEARS):
-#         year_index *= INDEXES[i]
-#         revenue = f'Доходы {year}, тыс.руб'
-#         revenue_prev = f'Доходы {year - 1}, тыс.руб'
-#         revenue_base = f'Доходы {year}_0, тыс.руб'
-#         revenue_noindex = f'Доходы {year}_без учета индексации, тыс.руб'
-#
-#         epl = f'{year} ЦЭКР груззоборот, тыс ткм'
-#         epl_prev = f'{year - 1} ЦЭКР груззоборот, тыс ткм'
-#
-#         if EPL_CHANGE == [True]:
-#             df[revenue_noindex] = df.apply(
-#                 lambda row: row[revenue_prev] * (row[epl] / row[epl_prev])
-#                 if pd.notna(row['epl_tarif_base']) and row[epl_prev] != 0
-#                 else row[revenue_prev], axis=1)
-#         else:
-#             df[revenue_noindex] = df[revenue_prev]
-#
-#         # базовая индексация
-#         df[revenue_base] = df[revenue_noindex] * (INDEXES[i] - 1) * df[
-#             'base_diff']
-#
-#         rule_index = 0
-#         df[f'rules%_{year}'] = 1.0
-#
-#         for rule_obj in rules:
-#             rule_index += 1
-#             df[f'rules%_{year}_{rule_index}'] = 1.0
-#             revenue_rule = f'Доходы {year}_{rule_index}, тыс.руб'
-#             revenue_rule_prev = f'Доходы {int(year) - 1}_{rule_index}, тыс.руб'
-#
-#             filters = [df[condition["parameter"]].isin(
-#                 condition["values"].split(';') if condition["values"] else df[
-#                     condition["parameter"]].unique())
-#                        if condition["include"] == 'включает'
-#                        else ~df[condition["parameter"]].isin(
-#                 condition["values"].split(';') if condition["values"] else df[
-#                     condition["parameter"]].unique())
-#                        for condition in rule_obj["conditions"]]
-#
-#             combined_filters = np.logical_and.reduce(filters)
-#             rule_coef = float(rule_obj['index_' + str(year)]) - 1
-#             df[revenue_rule] = 0.0
-#             df.loc[combined_filters, revenue_rule] = df[
-#                                                          revenue_noindex] * rule_coef * \
-#                                                      df['rules_diff'] * int(
-#                 rule_obj['base_percent']) / 100
-#             df.loc[combined_filters, f'rules%_{year}'] *= float(
-#                 rule_obj['index_' + str(year)]) * df['rules_diff']
-#             df.loc[combined_filters, f'rules%_{year}_{rule_index}'] = float(
-#                 rule_obj['index_' + str(year)])
-#
-#         df[revenue] = df[revenue_noindex] + df[revenue_base]
-#         for rule_obj in rules:
-#             rule_index += 1
-#             df[revenue] += df[revenue_rule]
-#
-#     return df
-
 
 def  calculate_base_revenues(df, YEARS, INDEXES, EPL_CHANGE):
     base_revenue_col = 'Доходы 2024, тыс.руб'
@@ -263,9 +170,11 @@ def  calculate_base_revenues(df, YEARS, INDEXES, EPL_CHANGE):
     for rule_obj in rules:
         rule_indexation[rule_obj["id"]] = []
 
-
+    # объем перевозок 2024
+    df['2024 Объем перевозок, т.'] = df['2023 Объем перевозок, т.'] * df['2024 ЦЭКР груззоборот, тыс ткм'] * 1000 / df['2023 Грузооборот, т_км']
 
     df['epl_tarif_base'] = df[revenue_base] / df[epl_base]
+
     df['rules_total'] = 0
     for i, year in enumerate(YEARS):
         year_index *= INDEXES[i]
@@ -281,16 +190,20 @@ def  calculate_base_revenues(df, YEARS, INDEXES, EPL_CHANGE):
         # учитываем рост грузооборота
             df.loc[df['epl_tarif_base'].notna(), revenue_noindex] = df[revenue_prev]  * (df[epl] / df[epl_prev])
             df.loc[df['epl_tarif_base'].isna(), revenue_noindex] = df[revenue_prev]
+            df.loc[df[epl_prev].notna(), f'{year} Объем перевозок, т.'] = df[f'{year - 1} Объем перевозок, т.'] * (df[epl] / df[epl_prev])
+            df.loc[df[epl_prev].isna(), f'{year} Объем перевозок, т.'] = df[f'{year - 1} Объем перевозок, т.']
+
         else:
             df[revenue_noindex] = df[revenue_prev]
-
+            df[epl] = df[epl_prev]
+            df[f'{year} Объем перевозок, т.'] = df[f'{year-1} Объем перевозок, т.']
         # базовая индексация
         df[revenue_base] = df[revenue_noindex] * (INDEXES[i]-1) * df['base_diff']
 
         df[revenue] = df[revenue_noindex] + df[revenue_base]
         rule_index = 0
+
         for rule_obj in rules:
-            print(rule_obj['name'])
             rule_index += 1
             revenue_rule = f'Доходы {year}_{rule_index}, тыс.руб'
             revenue_rule_prev = f'Доходы {int(year)-1}_{rule_index}, тыс.руб'
@@ -305,7 +218,7 @@ def  calculate_base_revenues(df, YEARS, INDEXES, EPL_CHANGE):
                     filters.append(df[parameter].isin(values))
                 else:
                     filters.append(~df[parameter].isin(values))
-            print(df.loc[np.logical_and.reduce(filters),"Группа груза"].unique())
+
             rule_coef = float(rule_obj['index_'+str(year)]) - 1
             df.loc[np.logical_and.reduce(filters), revenue_rule] = df[revenue_noindex] * rule_coef * df['rules_diff'] * int(rule_obj['base_percent'])/100
             df.loc[np.logical_and.reduce(filters), f'rules%_{year}'] *=  float(rule_obj['index_'+str(year)]) * df['rules_diff']
@@ -549,3 +462,76 @@ def get_filters(df,rule_obj):
         else:
             filters.append(~df[parameter].isin(values))
     return filters
+
+
+def market_coef (df):
+    print('start market coef')
+    agg_params = {}
+    agg_params[f'Доходы 2024, тыс.руб'] = 'sum'
+    agg_params[f'2024 Объем перевозок, т.'] = 'sum'
+    for year in CON.YEARS:
+        agg_params[f'Доходы {year}, тыс.руб'] = 'sum'
+        agg_params[f'{year} Объем перевозок, т.'] = 'sum'
+
+    df = df.groupby(['Группа груза','Вид перевозки','Направления','Холдинг']).agg(agg_params).reset_index()
+
+
+    # Определите границы интервалов для growth_rate
+    df[f'ds_2024'] = df[f'Доходы 2024, тыс.руб'] / df[f'2024 Объем перевозок, т.']
+    df[f'money_loss_total'] = 0
+    df[f'cargo_loss_total'] = 0
+    bins_growth = [-float('inf'),0.01,0.02,0.03,0.04,0.05,0.06,0.07,0.08,0.09, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1, float('inf')]
+    for year in CON.YEARS:
+        df[f'market_coefficient_{year}'] = 1.0
+        df[f'ds_{year}'] = df[f'Доходы {year}, тыс.руб'] / df[f'{year} Объем перевозок, т.']
+        df[f'growth_rate_{year}'] = df[f'ds_{year}'] / df[f'ds_{year-1}'] - 1
+        # Маска для growth_rate
+        mask_growth = pd.cut(df[f'growth_rate_{year}'], bins=bins_growth, labels=False)
+
+        interval_to_coefficient = {
+            1: 'Увеличение на 1%',
+            2: 'Увеличение на 2%',
+            3: 'Увеличение на 3%',
+            4: 'Увеличение на 4%',
+            5: 'Увеличение на 5%',
+            6: 'Увеличение на 6%',
+            7: 'Увеличение на 7%',
+            8: 'Увеличение на 8%',
+            9: 'Увеличение на 9%',
+            10: 'Увеличение на 10%',
+            11: 'Увеличение на 20%',
+            12: 'Увеличение на 30%',
+            13: 'Увеличение на 40%',
+            14: 'Увеличение на 50%',
+            15: 'Увеличение на 60%',
+            16: 'Увеличение на 70%',
+            17: 'Увеличение на 80%',
+            18: 'Увеличение на 90%',
+            19: 'Увеличение на 100%'
+        }
+
+        market_df = pd.read_excel('data/market_total.xlsx')
+
+        for index, row in market_df.iterrows():
+            mask_cargo = df['Группа груза'] == row['Группа груза']
+            mask_type = df['Вид перевозки'] == row['Вид перевозки']
+            maek_direction = df['Направления'] == row['Направления']
+            if row['Вид перевозки'] == 'все виды сообщения':
+                mask_equal = mask_cargo
+            elif row['Направления'] == 'Все направления':
+                mask_equal = mask_cargo & mask_type
+            else:
+                mask_equal = mask_cargo & mask_type & maek_direction
+
+            for interval, coefficient_column in interval_to_coefficient.items():
+                mask = (mask_growth == interval) & mask_equal
+                df.loc[mask, f'market_coefficient_{year}'] = float(row[coefficient_column])
+
+        df[f'money_loss_{year}'] = df[f'Доходы {year}, тыс.руб'] * (1 - df[f'market_coefficient_{year}'])
+        df[f'cargo_loss_{year}'] = df[f'{year} Объем перевозок, т.'] * (1 - df[f'market_coefficient_{year}'])
+        df[f'money_loss_total'] += df[f'money_loss_{year}']
+        df[f'cargo_loss_total'] += df[f'cargo_loss_{year}']
+
+    # df.to_excel('data/market_kek.xlsx', index=False)
+    print('end market coef')
+    return df

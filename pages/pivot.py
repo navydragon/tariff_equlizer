@@ -48,7 +48,7 @@ args = outputs + input_states
 
 def update_dashboard(
         calculate_button,
-        epl_change,
+        epl_change, market_loss,
         cif_fob,
         index_sell_prices, price_variant, index_sell_coal, index_oper, index_per,
         *revenue_index_values
@@ -59,6 +59,7 @@ def update_dashboard(
         "label": 'Признак',
         "revenue_index_values": revenue_index_values,
         "epl_change": epl_change,
+        "market_loss": market_loss,
         "ipem": {
             "index_sell_prices": index_sell_prices,
             "price_variant": price_variant,
@@ -133,7 +134,7 @@ def melt_pivot_df(df,index_columns):
         cols_to_change[f'Доходы {year}_0, тыс.руб'] = f'{year} Базовая индексация, тыс.руб'
 
     df = df.rename(columns=cols_to_change)
-    print(df.columns)
+
     # Преобразование DataFrame
     df_melt = df.melt(
         id_vars=index_columns,

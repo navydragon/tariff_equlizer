@@ -36,6 +36,7 @@ HOLDINGS = HOLDINGS[(HOLDINGS['Холдинг'] != 'Прочие') & (HOLDINGS['
 HOLDINGS = np.append(HOLDINGS['Холдинг'].unique(), 'Все')
 
 df = []
+loss_df = []
 ipem_df = []
 
 
@@ -263,6 +264,7 @@ outputs = [
 input_states = [
     Input('calculate-button','n_clicks'),
     State('epl_change','value'),
+    State('market_loss','value'),
     State('cif_fob','value'),
     State('index_sell_prices','value'),
     State('price_variant','value'),
@@ -292,7 +294,7 @@ args = outputs + input_states
 
 def update_dashboard(
         calculate_button,
-        epl_change,
+        epl_change, market_loss,
         cif_fob,
         index_sell_prices, price_variant, index_sell_coal, index_oper, index_per,
         second_slice,second_slice2, second_year,
@@ -312,6 +314,7 @@ def update_dashboard(
         "label": 'Признак',
         "revenue_index_values": revenue_index_values,
         "epl_change": epl_change,
+        "market_loss": market_loss,
         "ipem": {
             "index_sell_prices": index_sell_prices,
             "price_variant": price_variant,
@@ -325,10 +328,17 @@ def update_dashboard(
     helpers.save_last_params(params)
 
 
-
     # Расчет на уровне маршрутов
     global df
     df = calc.calculate_data('small',params)
+
+    # if 'Yes' in params['market']['use_market']:
+    global loss_df
+    loss_df = calc.market_coef(df)
+
+    # else:
+    #    df['market_coefficient'] = 1.0
+    #    df['market_coefficient_r'] = 1.0
 
     if cargo_filter != []:
         df = df[df['Группа груза'].isin(cargo_filter)]
@@ -343,7 +353,7 @@ def update_dashboard(
     # main_table = []
     cargo = bar_graph(df_gr,second_slice,second_slice2, second_year)
     # cargo = []
-    table = make_res_table(df_gr, second_slice,second_slice2, second_year)
+    table = make_res_table(df_gr,loss_df, second_slice,second_slice2, second_year,params['market_loss'])
 
     return (
         html.Div([main_table]),
@@ -466,33 +476,9 @@ def make_kpis(df):
                 ]),
             ]),
         )
-    # cards.append(
-    #     html.Div(className="my-indicators__item", children=[
-    #         html.Div(className="my-indicators__info", children=[
-    #             html.H3(className="my-indicators__title",
-    #                     children=f"2025-2030 гг."),
-    #             html.P(className="my-indicators__text",
-    #                    children=f"Инвестиционная программа: {round(df['invest'].sum(),2)}",
-    #                    style={'display': 'inline-block'}),
-    #             html.P(className="my-indicators__text",
-    #                    children=f"Дефицит: {df['deficit'].sum()}",
-    #                    style={'display': 'inline-block'}),
-    #             html.P(className="my-indicators__text",
-    #                    children=f"Меры покрытия дефицита: {round(df['base'].sum() + df['rules'].sum(), 2)}",
-    #                    style={'display': 'inline-block'}),
-    #             html.P(className="my-indicators__text",
-    #                    children=f"- индексация: {round(df['base'].sum(), 1)} (+{indexation_percent}%)",
-    #                    style={'display': 'inline-block'}),
-    #             html.P(className="my-indicators__text",
-    #                    children=f"- решения: {round(df['rules'].sum(), 1)} (+{rules_percent}%)",
-    #                    style={'display': 'inline-block'}),
-    #         ]),
-    #
-    #     ]),
-    # )
     return html.Div(className="my-cards", children=cards)
 
-def make_res_table (df,parameter,parameter2,year):
+def make_res_table (df,loss_df,parameter,parameter2,year, market_loss):
 
     head = html.Div(className="my-table__header my-table__header_type_scroll",
                     children=[
@@ -503,22 +489,28 @@ def make_res_table (df,parameter,parameter2,year):
                                     children=parameter)
                             ]),
                             html.Li(
-                                className="my-table__column my-table__column_align_center my-table__column_width_160 text-center",
+                                className="my-table__column my-table__column_align_center my-table__column_width_120 text-center",
                                 children=[
                                     html.P(className="my-table__text my-table__badge", children='Базовые решения',
                                         style={'min-height': '44px','display':'flex','align-items': 'center', 'justify-content': 'center'}
                                     ),
                             ]),
                             html.Li(
-                                className="my-table__column my-table__column_align_center my-table__column_width_160 text-center",
+                                className="my-table__column my-table__column_align_center my-table__column_width_120 text-center",
                                 children=[
                                     html.P(className="my-table__text my-table__badge", children='Отдельные решения'),
                             ]),
                             html.Li(
-                                className="my-table__column my-table__column_align_center my-table__column_width_160 text-center",
+                                className="my-table__column my-table__column_align_center my-table__column_width_120 text-center",
                                 children=[
-                                    html.P(className="my-table__text my-table__badge", children='Всего увеличение нагрузки'),
+                                    html.P(className="my-table__text my-table__badge", children='Увеличение нагрузки'),
                             ]),
+                            html.Li(
+                                className="my-table__column my-table__column_align_center my-table__column_width_120 text-center",
+                                children=[
+                                    html.P(className="my-table__text my-table__badge",
+                                           children='Выпадающие объемы'),
+                            ]) if market_loss == [True] else '',
                         ])
                     ])
     table_rows = []
@@ -530,10 +522,12 @@ def make_res_table (df,parameter,parameter2,year):
         for index, row in df.iterrows():
             if parameter2 == 'Нет' or row[parameter2] == 'ИТОГО':
                 label = row[parameter]
+                loss_df_row = loss_df[loss_df[parameter] == row[parameter]]
                 add_class = 'my-table__text_weight_bold'
                 row_class = 'background-gray' if parameter2 != 'Нет' and row[parameter2] == 'ИТОГО' else ''
             else:
                 label = row[parameter2]
+                loss_df_row = loss_df[loss_df[parameter2] == row[parameter2]]
                 add_class = ''
                 row_class = ''
 
@@ -553,7 +547,7 @@ def make_res_table (df,parameter,parameter2,year):
                             className=f"my-table__text {add_class}",
                             children=label)
                     ]),
-                    html.Li(className="my-table__column my-table__column_width_160 text-center", children=[
+                    html.Li(className="my-table__column my-table__column_width_120 text-center", children=[
                         html.P(
                             className=f"my-table__text my-table__text_weight_bold",
                             children=[helpers.billions(indexation_sum),
@@ -561,26 +555,34 @@ def make_res_table (df,parameter,parameter2,year):
                                       round(indexation_sum * 100 / prev,1),
                                       "%)"])
                     ]),
-                    html.Li(className="my-table__column my-table__column_width_160 text-center", children=[
+                    html.Li(className="my-table__column my-table__column_width_120 text-center", children=[
                         html.P(
                             className=f"my-table__text my-table__text_weight_bold",
                             children=[helpers.billions(rules_sum),html.Br(),"(",
                                       round(rules_sum * 100 / prev,1),
                                       "%)"])
                     ]),
-                    html.Li(className="my-table__column my-table__column_width_160 text-center", children=[
+                    html.Li(className="my-table__column my-table__column_width_120 text-center", children=[
                         html.P(
                             className=f"my-table__text my-table__text_weight_bold ",
                             children=[helpers.billions(row_sum),html.Br(),"(",
                                       round(round(rules_sum * 100 / prev,1) + round(indexation_sum * 100 / prev,1),1),
                                       "%)"])
                     ]),
+                    html.Li(className="my-table__column my-table__column_width_120 text-center", children=[
+                        html.P(
+                            className=f"my-table__text my-table__text_weight_bold ",
+                            children=[helpers.billions(loss_df_row[f'money_loss_{year}'].sum()), html.Br(), "(",
+                                      helpers.billions(loss_df_row[f'cargo_loss_{year}'].sum())," млн т)"]
+                        )
+                    ]) if market_loss == [True] else '',
                 ])
             )
 
     if parameter2 != 'Нет':
         total_rows = df[df[parameter2]=='ИТОГО']
         for main_index, main_row in total_rows.iterrows():
+            loss_df_row = loss_df[loss_df[parameter]==main_row[parameter]]
             label = main_row[parameter]
             add_class = 'my-table__text_weight_bold'
             row_class = 'background-gray'
@@ -598,7 +600,7 @@ def make_res_table (df,parameter,parameter2,year):
                             className=f"my-table__text {add_class}",
                             children=label)
                     ]),
-                    html.Li(className="my-table__column my-table__column_width_160 text-center", children=[
+                    html.Li(className="my-table__column my-table__column_width_120 text-center", children=[
                         html.P(
                             className=f"my-table__text my-table__text_weight_bold",
                             children=[helpers.billions(indexation_sum),
@@ -606,25 +608,33 @@ def make_res_table (df,parameter,parameter2,year):
                                       round(indexation_sum * 100 / prev,1),
                                       "%)"])
                     ]),
-                    html.Li(className="my-table__column my-table__column_width_160 text-center", children=[
+                    html.Li(className="my-table__column my-table__column_width_120 text-center", children=[
                         html.P(
                             className=f"my-table__text my-table__text_weight_bold",
                             children=[helpers.billions(rules_sum),html.Br(),"(",
                                       round(rules_sum * 100 / prev,1),
                                       "%)"])
                     ]),
-                    html.Li(className="my-table__column my-table__column_width_160 text-center", children=[
+                    html.Li(className="my-table__column my-table__column_width_120 text-center", children=[
                         html.P(
                             className=f"my-table__text my-table__text_weight_bold ",
                             children=[helpers.billions(row_sum),html.Br(),"(",
                                       round(round(rules_sum * 100 / prev,1) + round(indexation_sum * 100 / prev,1),1),
                                       "%)"])
                     ]),
+                    html.Li(className="my-table__column my-table__column_width_120 text-center", children=[
+                        html.P(
+                            className=f"my-table__text my-table__text_weight_bold ",
+                            children=[helpers.billions(loss_df_row[f'money_loss_{year}'].sum()), html.Br(), "(",
+                                      helpers.billions(loss_df_row[f'cargo_loss_{year}'].sum())," млн т)"]
+                        )
+                    ]) if market_loss == [True] else '',
                 ])
             )
             current_rows = df[(df[parameter2]!='ИТОГО') & (df[parameter]==main_row[parameter])]
             for index, row in current_rows.iterrows():
                 label = row[parameter2]
+                loss_df_row  = loss_df[(loss_df[parameter2]==row[parameter2]) & (loss_df[parameter]==row[parameter])]
                 add_class = ''
                 row_class = ''
                 indexation_sum = row[f'Доходы {year}_0, тыс.руб']
@@ -638,7 +648,7 @@ def make_res_table (df,parameter,parameter2,year):
                                 className=f"my-table__text {add_class}",
                                 children=label)
                         ]),
-                        html.Li(className="my-table__column my-table__column_width_160 text-center", children=[
+                        html.Li(className="my-table__column my-table__column_width_120 text-center", children=[
                             html.P(
                                 className=f"my-table__text my-table__text_weight_bold",
                                 children=[helpers.billions(indexation_sum),
@@ -646,20 +656,27 @@ def make_res_table (df,parameter,parameter2,year):
                                           round(indexation_sum * 100 / prev,1),
                                           "%)"])
                         ]),
-                        html.Li(className="my-table__column my-table__column_width_160 text-center", children=[
+                        html.Li(className="my-table__column my-table__column_width_120 text-center", children=[
                             html.P(
                                 className=f"my-table__text my-table__text_weight_bold",
                                 children=[helpers.billions(rules_sum),html.Br(),"(",
                                           round(rules_sum * 100 / prev,1),
                                           "%)"])
                         ]),
-                        html.Li(className="my-table__column my-table__column_width_160 text-center", children=[
+                        html.Li(className="my-table__column my-table__column_width_120 text-center", children=[
                             html.P(
                                 className=f"my-table__text my-table__text_weight_bold ",
                                 children=[helpers.billions(row_sum),html.Br(),"(",
                                           round(round(rules_sum * 100 / prev,1) + round(indexation_sum * 100 / prev,1),1),
                                           "%)"])
                         ]),
+                        html.Li(className="my-table__column my-table__column_width_120 text-center", children=[
+                            html.P(
+                                className=f"my-table__text my-table__text_weight_bold ",
+                                children=[helpers.billions(loss_df_row[f'money_loss_{year}'].sum()), html.Br(), "(",
+                                          helpers.billions(loss_df_row[f'cargo_loss_{year}'].sum())," млн т)"]
+                            )
+                        ]) if market_loss == [True] else '',
                     ])
                 )
     table_rows.insert(0,
@@ -670,7 +687,7 @@ def make_res_table (df,parameter,parameter2,year):
                     children='ИТОГО')
             ]),
             html.Li(
-                className="my-table__column my-table__column_width_160 text-center",
+                className="my-table__column my-table__column_width_120 text-center",
                 children=[
                     html.P(
                         className=f"my-table__text my-table__text_weight_bold",
@@ -679,7 +696,7 @@ def make_res_table (df,parameter,parameter2,year):
                                   "%)"])
                 ]),
             html.Li(
-                className="my-table__column my-table__column_width_160 text-center",
+                className="my-table__column my-table__column_width_120 text-center",
                 children=[
                     html.P(
                         className=f"my-table__text my-table__text_weight_bold",
@@ -688,14 +705,22 @@ def make_res_table (df,parameter,parameter2,year):
                                   "%)"])
                 ]),
             html.Li(
-                className="my-table__column my-table__column_width_160 text-center",
+                className="my-table__column my-table__column_width_120 text-center",
                 children=[
                     html.P(
                         className=f"my-table__text my-table__text_weight_bold",
                         children=[helpers.billions(totals[2]), html.Br(), "(",
                                   round(round(totals[0] * 100 / prev_sum, 1) + round(totals[1] * 100 / prev_sum, 1),1),
                                   "%)"])
-                ]),
+            ]),
+            html.Li(
+                className="my-table__column my-table__column_width_120 text-center",
+                children=[
+                    html.P(
+                        className=f"my-table__text my-table__text_weight_bold",
+                        children=[helpers.billions(loss_df[f'money_loss_{year}'].sum()), html.Br(), "(",
+                                  helpers.billions(loss_df[f'cargo_loss_{year}'].sum())," млн т)"])
+            ]) if market_loss == [True] else '',
         ])
     )
 
@@ -771,11 +796,13 @@ def bar_graph(df,parameter,parameter2,year):
 )
 def cargo_graph1_callback(slice,slice2, year,cargo_filter,holding_filter):
     df2 = df
-
+    loss_df2 = loss_df
     if cargo_filter != []:
-        df2 = df2[df['Группа груза'].isin(cargo_filter)]
+        df2 = df2[df2['Группа груза'].isin(cargo_filter)]
+        loss_df2 = loss_df2[loss_df2['Группа груза'].isin(cargo_filter)]
     if holding_filter != []:
-        df2 = df2[df['Холдинг'].isin(holding_filter)]
+        df2 = df2[df2['Холдинг'].isin(holding_filter)]
+        loss_df2 = loss_df2[loss_df2['Холдинг'].isin(holding_filter)]
 
 
     df_gr = calc.group_data(df2, slice,slice2)
@@ -784,7 +811,7 @@ def cargo_graph1_callback(slice,slice2, year,cargo_filter,holding_filter):
         df_gr = df_gr[df_gr['Холдинг']!='Прочие']
         df_gr = df_gr[df_gr['Холдинг']!='неопределен']
 
-    res_table = make_res_table(df_gr,slice,slice2,year)
+    res_table = make_res_table(df_gr,loss_df2,slice,slice2,year)
     res_graph = bar_graph(df_gr,slice,slice2,year)
     return [res_table,res_graph]
 

@@ -470,6 +470,7 @@ def effects_table(route,rzd,bases,rules, trip_type):
     Output('direction_select_mgn','value'),
     Input('calculate-button','n_clicks'),
     State('epl_change','value'),
+    State('market_loss','value'),
     State('cif_fob','value'),
     State('index_sell_prices','value'),
     State('price_variant','value'),
@@ -480,7 +481,7 @@ def effects_table(route,rzd,bases,rules, trip_type):
 )
 def update_transport(
         calculate_button,
-        epl_change,
+        epl_change, market_loss,
         cif_fob,
         index_sell_prices, price_variant, index_sell_coal, index_oper, index_per,
         *revenue_index_values
@@ -491,6 +492,7 @@ def update_transport(
         "label": 'Признак',
         "revenue_index_values": revenue_index_values,
         "epl_change": epl_change,
+        "market_loss": market_loss,
         "ipem": {
             "index_sell_prices": index_sell_prices,
             "price_variant": price_variant,

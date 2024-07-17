@@ -84,6 +84,7 @@ class Constants:
     INPUTS = [
         Input('calculate-button', 'n_clicks'),
         State('epl_change', 'value'),
+        State('market_loss', 'value'),
         State('cif_fob', 'value'),
         State('index_sell_prices', 'value'),
         State('price_variant', 'value'),
