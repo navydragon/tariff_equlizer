@@ -40,7 +40,7 @@ app.layout = html.Div([
 ])
 
 
-debug = True
+debug = False
 
 
 if not debug:
