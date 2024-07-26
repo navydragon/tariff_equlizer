@@ -1,6 +1,13 @@
 from dash import callback, MATCH, ALL, Input, Output, State, dcc
 from dash import callback_context
+import dash_bootstrap_components as dbc
+from pages.constants import Constants as CON
+from dash import html, dcc, callback, ALL, ctx
 import pandas as pd
+
+ipc_df = pd.read_excel('data/te/ipc.xlsx', header=None)
+ipc_dict = pd.Series(ipc_df.iloc[1].values, index=ipc_df.iloc[0].values).to_dict()
+FULL_YEARS = [2024] + CON.YEARS
 
 
 def draw_slider (type,year,value, max=None, step=1,is_vertical=True, placement="right", classname='my-slider'):
@@ -234,20 +241,20 @@ def handle_use_indexes_oper(value, states):
     return ([False] * count, [False] * count, {'display':'none'})
 
 @callback(
-    Output({'type': 'oper_input', 'index': ALL}, 'value', allow_duplicate=True),
+    Output('oper_equlizer_body','children'),
     Input('use_indexes_oper', 'value'),
     Input({'type': 'oper_input', 'index': 2024},'value'),
     [Input({'type': 'oper_index_input', 'index': ALL}, 'value')],
     [State({'type': 'oper_input', 'index': ALL}, 'value')],
+    State('period_select', 'value'),
     prevent_initial_call=True
 )
-def recount_oper_values(value,base_value,indexes,states):
+def recount_oper_values(value,base_value,indexes,states,period):
     count = len(states)
-    # indexes.insert(0, 1)
     if value == [True]:
         for index,state in enumerate(indexes, start=1):
             states[index] = states[index-1] * indexes[index-1]
-    return (states)
+    return draw_equilizer('oper',period,states)
 
 
 @callback(
@@ -265,20 +272,20 @@ def handle_use_indexes_per(value, states):
     return ([False] * count, [False] * count, {'display':'none'})
 
 @callback(
-    Output({'type': 'per_input', 'index': ALL}, 'value', allow_duplicate=True),
+    Output('per_equlizer_body','children'),
     Input('use_indexes_per', 'value'),
     Input({'type': 'per_input', 'index': 2024},'value'),
     [Input({'type': 'per_index_input', 'index': ALL}, 'value')],
     [State({'type': 'per_input', 'index': ALL}, 'value')],
+    State('period_select', 'value'),
     prevent_initial_call=True
 )
-def recount_per_values(value,base_value,indexes,states):
+def recount_per_values(value,base_value,indexes,states,period):
     count = len(states)
-    # indexes.insert(0, 1)
     if value == [True]:
         for index,state in enumerate(indexes, start=1):
             states[index] = states[index-1] * indexes[index-1]
-    return (states)
+    return draw_equilizer('per',period,states)
 
 
 @callback(
@@ -296,17 +303,74 @@ def handle_use_indexes_cost(value, states):
     return ([False] * count, [False] * count, {'display':'none'})
 
 @callback(
-    Output({'type': 'cost_input', 'index': ALL}, 'value', allow_duplicate=True),
+    Output('cost_equlizer_body','children'),
     Input('use_indexes_cost', 'value'),
     Input({'type': 'cost_input', 'index': 2024},'value'),
     [Input({'type': 'cost_index_input', 'index': ALL}, 'value')],
     [State({'type': 'cost_input', 'index': ALL}, 'value')],
+    State('period_select', 'value'),
     prevent_initial_call=True
 )
-def recount_oper_values(value,base_value,indexes,states):
+def recount_oper_values(value,base_value,indexes,states,period):
     count = len(states)
-    # indexes.insert(0, 1)
     if value == [True]:
         for index,state in enumerate(indexes, start=1):
             states[index] = states[index-1] * indexes[index-1]
-    return (states)
+    return draw_equilizer('cost',period,states)
+
+
+def draw_equilizer(type, period, values):
+    if period is None:
+        period=FULL_YEARS
+
+    return [
+        dbc.Row([*[dbc.Col(year, className='my-slider__text',
+                           style={'display': 'block'} if year in period else {'display': 'none'}) for year in
+                   FULL_YEARS]]),
+        dbc.Row([
+            *[dbc.Col([
+                draw_input(type=type, year=year, value=values[index])
+            ], className='text-center', style={'display': 'block'} if year in period else {'display': 'none'}) for
+                index, year in enumerate(FULL_YEARS)]
+        ]),
+        dbc.Row([
+            *[dbc.Col([
+                draw_slider(type=type, year=year, value=values[index])
+            ], id={'type': f'{type}_container', 'index': year}, className='text-center',
+                style={'display': 'block'} if year in period else {'display': 'none'}) for index, year in
+                enumerate(FULL_YEARS)]
+        ]),
+    ]
+
+
+def draw_index_controller(type, period):
+    if period is None:
+        period= FULL_YEARS
+    return [
+        dbc.Row([
+            html.Div([
+                dbc.Checklist(
+                    id=f'use_indexes_{type}',
+                    options=[
+                        {'label': 'Использовать индексы', 'value': True}
+                    ],
+                    value=[],
+                    inline=True,
+                    switch=True,
+                    label_class_name='form-check-label'
+                )
+            ], className='form-check form-switch'),
+        ]),
+        html.Div([
+            dbc.Row([*[dbc.Col(year, className='my-slider__text',
+                               style={'display': 'block'} if year in period else {'display': 'none'}) for year in
+                       FULL_YEARS]]),
+            dbc.Row([
+                *[dbc.Col([
+                    draw_input(type=f'{type}_index', year=year, value=ipc_dict.get(year, 1)) if year != 2024 else '-'
+                ], className='text-center',
+                    style={'display': 'block'} if year in period else {'display': 'none'}) for index, year in
+                    enumerate(FULL_YEARS)]
+            ]),
+        ], id=f'{type}_index_div', style={'display': 'none'})
+    ]

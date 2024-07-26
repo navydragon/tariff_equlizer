@@ -431,7 +431,7 @@ def recount_graph(costs,bases, rules,
                   type, trip, cargo_group, mesage_group, trip_group,
                   period, route,message):
     period = sorted(period)
-
+    print("called recount_graph")
     no = html.Div([
         html.Em('Последовательно выберите груз, холдинг, вид сообщения и маршрут'),
         html.Div(dcc.Dropdown(value=None, id="variant_select", style={'display': 'none'}), )
@@ -723,7 +723,7 @@ def make_tabs(route,trip, message, price_message,period,cif_fob, params_variant)
             data['price'][str(year)] = round(route.iloc[0][f'Стоимость 1 тонны на рынке_{year}_$, руб./т.'],3)
             data['price_rub'][str(year)] = round(route.iloc[0][f'Стоимость 1 тонны на рынке_{year}, руб./т.'],1)
             data['cost'][str(year)] = round(route.iloc[0]['Себестоимость добычи/производства, руб. т.'],3)
-    print (data)
+    print (list(data['oper'].values()))
     tabs = dcc.Tabs(
         id="tabs-with-classes",
         value='tab-2',
@@ -744,17 +744,7 @@ def make_tabs(route,trip, message, price_message,period,cif_fob, params_variant)
                             html.Span(className='my-section__badge', children='Индекс')
                         ]
                     ),
-                    dbc.Row([ *[dbc.Col(year, className='my-slider__text', style={'display':'block'} if year in period else {'display':'none'}) for year in FULL_YEARS]], className='my-row_type_full'),
-                    dbc.Row([
-                        *[dbc.Col([
-                            eq.draw_input(type='base',year=year,value=data['base'][str(year)])
-                        ], className='text-center', style={'display':'block'} if year in period else {'display':'none'}) for index,year in enumerate(FULL_YEARS)]
-                    ], className='my-row_type_full'),
-                    dbc.Row([
-                        *[dbc.Col([
-                            eq.draw_slider(type='base',year=year,value=data['base'][str(year)], step=0.001)
-                        ], id={'type': 'base_container', 'index': year}, className='text-center', style={'display':'block'} if year in period else {'display':'none'}) for index,year in enumerate(FULL_YEARS)]
-                    ], className='my-row_type_full'),
+                    html.Div(eq.draw_equilizer('base', period, list(data['base'].values())), id='base_equlizer_body'),
                 ], className='mx-5')]
             ),
             dcc.Tab(
@@ -795,40 +785,8 @@ def make_tabs(route,trip, message, price_message,period,cif_fob, params_variant)
                             html.Span(className='my-section__badge', children='руб. за 1 т.')
                         ]
                     ),
-                    dbc.Row([ *[dbc.Col(year, className='my-slider__text', style={'display':'block'} if year in period else {'display':'none'}) for year in FULL_YEARS]]),
-                    dbc.Row([
-                        *[dbc.Col([
-                            eq.draw_input(type='oper',year=year,value=data['oper'][str(year)])
-                        ], className='text-center', style={'display':'block'} if year in period else {'display':'none'}) for index,year in enumerate(FULL_YEARS)]
-                    ]),
-                    dbc.Row([
-                        *[dbc.Col([
-                            eq.draw_slider(type='oper',year=year,value=data['oper'][str(year)])
-                        ], id={'type': 'oper_container', 'index': year}, className='text-center', style={'display':'block'} if year in period else {'display':'none'}) for index,year in enumerate(FULL_YEARS)]
-                    ]),
-                    dbc.Row([
-                        html.Div([
-                            dbc.Checklist(
-                                id='use_indexes_oper',
-                                options=[
-                                    {'label': 'Использовать индексы','value': True}
-                                ],
-                                value=[],
-                                inline=True,
-                                switch=True,
-                                label_class_name='form-check-label'
-                            )
-                        ], className='form-check form-switch'),
-                    ]),
-                    html.Div([
-                        dbc.Row([ *[dbc.Col(year, className='my-slider__text', style={'display':'block'} if year in period else {'display':'none'}) for year in FULL_YEARS]]),
-                    dbc.Row([
-                        *[dbc.Col([
-                            eq.draw_input(type='oper_index', year=year, value=ipc_dict.get(year,1)) if year != 2024 else '-'
-                        ], className='text-center',
-                            style={'display': 'block'} if year in period else {'display': 'none'}) for index, year in enumerate(FULL_YEARS)]
-                    ]),
-                    ], id='oper_index_div', style={'display':'none'})
+                    html.Div(eq.draw_equilizer('oper',period,list(data['oper'].values())), id='oper_equlizer_body'),
+                    html.Div(eq.draw_index_controller('oper',period), id='oper_index_body'),
                 ], className='mx-5')]
             ),
             dcc.Tab(
@@ -840,53 +798,12 @@ def make_tabs(route,trip, message, price_message,period,cif_fob, params_variant)
                     html.Div(
                         className='my-section__header',
                         children=[
-                            html.H2(className='my-section__title',
-                                    children='Расходы по по перевалке грузов'),
-                            html.Span(className='my-section__badge',
-                                      children='руб. за 1 т.')
+                            html.H2(className='my-section__title', children='Расходы по по перевалке грузов'),
+                            html.Span(className='my-section__badge', children='руб. за 1 т.')
                         ]
                     ),
-                    dbc.Row([*[dbc.Col(year, className='my-slider__text', style={'display':'block'} if year in period else {'display':'none'}) for
-                               year in FULL_YEARS]]),
-                    dbc.Row([
-                        *[dbc.Col([
-                            eq.draw_input(type='per', year=year, value=data['per'][str(year)])
-                        ], className='text-center', style={'display':'block'} if year in period else {'display':'none'}) for index, year in
-                            enumerate(FULL_YEARS)]
-                    ]),
-                    dbc.Row([
-                        *[dbc.Col([
-                            eq.draw_slider(type='per', year=year, value=data['per'][str(year)])
-                        ], id={'type': 'per_container', 'index': year},
-                            className='text-center', style={'display':'block'} if year in period else {'display':'none'}) for index, year in
-                            enumerate(FULL_YEARS)]
-                    ]),
-                    dbc.Row([
-                        html.Div([
-                            dbc.Checklist(
-                                id='use_indexes_per',
-                                options=[
-                                    {'label': 'Использовать индексы', 'value': True}
-                                ],
-                                value=[],
-                                inline=True,
-                                switch=True,
-                                label_class_name='form-check-label'
-                            )
-                        ], className='form-check form-switch'),
-                    ]),
-                    html.Div([
-                        dbc.Row([*[dbc.Col(year, className='my-slider__text',
-                                           style={'display': 'block'} if year in period else {'display': 'none'}) for
-                                   year in FULL_YEARS]]),
-                        dbc.Row([
-                            *[dbc.Col([
-                                eq.draw_input(type='per_index', year=year, value=ipc_dict.get(year, 1)) if year != 2024 else '-'
-                            ], className='text-center',
-                                style={'display': 'block'} if year in period else {'display': 'none'}) for index, year
-                                in enumerate(FULL_YEARS)]
-                        ]),
-                    ], id='per_index_div', style={'display': 'none'})
+                    html.Div(eq.draw_equilizer('per', period, list(data['per'].values())), id='per_equlizer_body'),
+                    html.Div(eq.draw_index_controller('per', period), id='per_index_body'),
                 ], className='mx-5')]
             ),
             dcc.Tab(
@@ -902,17 +819,7 @@ def make_tabs(route,trip, message, price_message,period,cif_fob, params_variant)
                             html.Span(className='my-section__badge', children='руб. за 1 т.')
                         ]
                     ),
-                    dbc.Row([ *[dbc.Col(year, className='my-slider__text', style={'display':'block'} if year in period else {'display':'none'}) for year in FULL_YEARS]]),
-                    dbc.Row([
-                        *[dbc.Col([
-                            eq.draw_input(type='fraht',year=year,value=data['fraht'][str(year)])
-                        ], className='text-center', style={'display':'block'} if year in period else {'display':'none'}) for index,year in enumerate(FULL_YEARS)]
-                    ]),
-                    dbc.Row([
-                        *[dbc.Col([
-                            eq.draw_slider(type='fraht',year=year,value=data['fraht'][str(year)], step=1, max=round(route.iloc[0][f"Расходы на перевалку_{year}, руб. за тонну"])*2)
-                        ], id={'type': 'rules_container', 'index': year}, className='text-center', style={'display':'block'} if year in period else {'display':'none'}) for index,year in enumerate(FULL_YEARS)]
-                    ]),
+                    html.Div(eq.draw_equilizer('fraht', period, list(data['fraht'].values())),id='fraht_equlizer_body'),
                 ], className='mx-5')]
             ),
             dcc.Tab(
@@ -931,25 +838,9 @@ def make_tabs(route,trip, message, price_message,period,cif_fob, params_variant)
                                       children='руб. за 1 $')
                         ]
                     ),
-                    dbc.Row([*[dbc.Col(
-                        year, className='my-slider__text',
-                        style={'display':'block'} if year in period else {'display':'none'}
-                    ) for year in FULL_YEARS]],
-                            className='my-row_type_full'),
-                    dbc.Row([
-                        *[dbc.Col([
-                            eq.draw_input(type='dollar_price', year=year, value=data['dollar_price'][str(year)])
-                        ], className='text-center', style={'display':'block'} if year in period else {'display':'none'}
-                        ) for index, year in enumerate(FULL_YEARS)]
-                    ], className='my-row_type_full'),
-                    dbc.Row([
-                        *[dbc.Col([
-                            eq.draw_slider(type='dollar_price', year=year,value=data['dollar_price'][str(year)], max=200, step=0.1)
-                        ], id={'type': 'dollar_price_container', 'index': year},
-                            className='text-center', style={'display':'block'} if year in period else {'display':'none'}
-                        ) for index, year in enumerate(FULL_YEARS)]
-                    ]),
-                ])]
+                    html.Div(eq.draw_equilizer('dollar_price', period, list(data['dollar_price'].values())),
+                             id='dollar_price_equlizer_body'),
+                ], className='mx-5')]
             ),
             dcc.Tab(
                 label='Цена $',
@@ -967,17 +858,7 @@ def make_tabs(route,trip, message, price_message,period,cif_fob, params_variant)
                             html.Span(className='my-section__badge', children='$ за 1 т.')
                         ]
                     ),
-                    dbc.Row([ *[dbc.Col(year, className='my-slider__text', style={'display':'block'} if year in period else {'display':'none'}) for year in FULL_YEARS]]),
-                    dbc.Row([
-                        *[dbc.Col([
-                            eq.draw_input(type='price',year=year,value=data['price'][str(year)])
-                        ], className='text-center', style={'display':'block'} if year in period else {'display':'none'}) for index,year in enumerate(FULL_YEARS)]
-                    ]),
-                    dbc.Row([
-                        *[dbc.Col([
-                            eq.draw_slider(type='price',year=year,value=data['price'][str(year)])
-                        ], id={'type': 'price_container', 'index': year}, className='text-center', style={'display':'block'} if year in period else {'display':'none'}) for index,year in enumerate(FULL_YEARS)]
-                    ]),
+                    html.Div(eq.draw_equilizer('price', period, list(data['price'].values())), id='price_equlizer_body'),
                 ], className='mx-5')]
             ),
             dcc.Tab(
@@ -993,24 +874,10 @@ def make_tabs(route,trip, message, price_message,period,cif_fob, params_variant)
                             html.H2(className='my-section__title',children=['Стоимость 1 тонны на рынке',' (',
                                 html.Em(price_message),')'
                             ]),
-                            html.Span(className='my-section__badge',
-                                      children='руб. за 1 т.')
+                            html.Span(className='my-section__badge', children='руб. за 1 т.')
                         ]
                     ),
-                    dbc.Row([*[dbc.Col(year, className='my-slider__text', style={'display':'block'} if year in period else {'display':'none'}) for year in FULL_YEARS]]),
-                    dbc.Row([
-                        *[dbc.Col([
-                            eq.draw_input(type='price_rub', year=year, value=data['price_rub'][str(year)])
-                        ], className='text-center', style={'display':'block'} if year in period else {'display':'none'}) for index, year in
-                            enumerate(FULL_YEARS)]
-                    ]),
-                    dbc.Row([
-                        *[dbc.Col([
-                            eq.draw_slider(type='price_rub', year=year, value=data['price_rub'][str(year)])
-                        ], id={'type': 'price_rub_container', 'index': year},
-                            className='text-center', style={'display':'block'} if year in period else {'display':'none'}) for index, year in
-                            enumerate(FULL_YEARS)]
-                    ]),
+                    html.Div(eq.draw_equilizer('price_rub', period, list(data['price_rub'].values())), id='price_rub_equlizer_body'),
                 ], className='mx-5')]
             ),
 
@@ -1028,44 +895,8 @@ def make_tabs(route,trip, message, price_message,period,cif_fob, params_variant)
                             html.Span(className='my-section__badge', children='руб. за 1 т.')
                         ]
                     ),
-                    dbc.Row([ *[dbc.Col(year, className='my-slider__text', style={'display':'block'} if year in period else {'display':'none'}) for year in FULL_YEARS]]),
-                    dbc.Row([
-                        *[dbc.Col([
-                            eq.draw_input(type='cost',year=year,value=data['cost'][str(year)])
-                        ], className='text-center', style={'display':'block'} if year in period else {'display':'none'}) for index,year in enumerate(FULL_YEARS)]
-                    ]),
-                    dbc.Row([
-                        *[dbc.Col([
-                            eq.draw_slider(type='cost',year=year,value=data['cost'][str(year)])
-                        ], id={'type': 'cost_container', 'index': year}, className='text-center', style={'display':'block'} if year in period else {'display':'none'}) for index,year in enumerate(FULL_YEARS)]
-                    ]),
-                    dbc.Row([
-                        html.Div([
-                            dbc.Checklist(
-                                id='use_indexes_cost',
-                                options=[
-                                    {'label': 'Использовать индексы', 'value': True}
-                                ],
-                                value=[],
-                                inline=True,
-                                switch=True,
-                                label_class_name='form-check-label'
-                            )
-                        ], className='form-check form-switch'),
-                    ]),
-                    html.Div([
-                        dbc.Row([*[dbc.Col(year, className='my-slider__text',
-                                           style={'display': 'block'} if year in period else {'display': 'none'}) for
-                                   year in FULL_YEARS]]),
-                        dbc.Row([
-                            *[dbc.Col([
-                                eq.draw_input(type='cost_index', year=year,
-                                              value=ipc_dict.get(year, 1)) if year != 2024 else '-'
-                            ], className='text-center',
-                                style={'display': 'block'} if year in period else {'display': 'none'}) for index, year
-                                in enumerate(FULL_YEARS)]
-                        ]),
-                    ], id='cost_index_div', style={'display': 'none'})
+                    html.Div(eq.draw_equilizer('cost', period, list(data['cost'].values())), id='cost_equlizer_body'),
+                    html.Div(eq.draw_index_controller('cost', period), id='cost_index_body'),
                 ], className='mx-5')]
             ),
         ])
