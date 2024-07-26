@@ -1,7 +1,8 @@
-import pandas as pd
-from dash import html, dcc, callback, MATCH, ALL
 import dash_bootstrap_components as dbc
+import pandas as pd
+from dash import html, dcc, callback, ALL
 from dash.dependencies import Input, Output
+
 from pages.constants import Constants as CON
 
 cargos = CON.IPEM_CARGOS
@@ -21,7 +22,7 @@ def ipem_layout(params):
     return html.Div([
         html.Div([
             html.Div([
-                html.H2('Параметры транспортной составляющей', className='my-section__title'),
+                html.H2('Параметры', className='my-section__title'),
                 # html.Span('Варьируемые параметры', className='my-section__badge')
             ], className="my-section__header"),
             html.Div('',className='my-separate my-separate_width_300 my-separate_vector_left'),
@@ -166,14 +167,14 @@ def ipem_layout(params):
                     dbc.Checklist(
                         id='index_oper',
                         options=[
-                            {'label': 'Учитывать рост операторской составляющей', 'value': True}
+                            {'label': 'Учитывать рост операторской составляющей и расходов на перевалку', 'value': True}
                         ],
                         inline=True,
                         switch=True,
                         value=params.get("ipem",[]).get("index_oper",[]),
                         label_class_name='form-check-label'
                     )
-                ], className='form-check form-switch'),
+                ], className='form-check form-switch d-none'),
                 html.Div([
                     html.Table([
                         html.Thead([
@@ -206,7 +207,7 @@ def ipem_layout(params):
                         switch=True,
                         label_class_name='form-check-label'
                     )
-                ], className='form-check form-switch'),
+                ], className='form-check form-switch d-none'),
                 html.Div([
                     html.Table([
                         html.Thead([

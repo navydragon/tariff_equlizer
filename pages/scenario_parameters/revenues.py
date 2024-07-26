@@ -1,15 +1,14 @@
-from dash import html, dcc, callback, MATCH, ALL
 import dash_bootstrap_components as dbc
-from dash.dependencies import Input, Output
-from pages.constants import Constants as CON
 import pandas as pd
-import numpy as np
-from pages.data import get_revenue_parameters, process_revenue_parameters
+from dash import html, callback, ALL
+from dash.dependencies import Input, Output
+
 import pages.scenario_parameters.tarif_rules as tr
 import pages.scenario_parameters.tarif_rules_prev as tr_prev
+from pages.constants import Constants as CON
+from pages.data import get_revenue_parameters, process_revenue_parameters
 
 revenue_parameters = get_revenue_parameters()
-#revenue_parameters = pd.read_excel('data/revenues_parameters.xlsx')
 
 indexation_variant = revenue_parameters[revenue_parameters['year'] == 0]['param'].values[0]
 

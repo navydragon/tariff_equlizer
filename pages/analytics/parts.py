@@ -1,15 +1,14 @@
 
-from dash import html, dcc, callback, ALL, MATCH
-from dash.dependencies import Input, Output, State
-from pages.data import get_ipem_data, get_main_data, make_ipem_related_routes
 import dash_bootstrap_components as dbc
+import pandas as pd
+import plotly.graph_objects as go
+from dash import html, callback, MATCH
+from dash.dependencies import Input, Output, State
+
 import pages.scenario_parameters.tarif_rules as tr
 from pages.constants import Constants as CON
-
 from pages.map_figure import mapFigure, convert_crs
-import plotly.graph_objects as go
-import plotly.express as px
-import pandas as pd
+
 
 @callback(
     Output({'type': 'trip_details', 'index': MATCH},'children'),
@@ -372,3 +371,4 @@ def route_map(route):
     )
 
     return russia_map
+

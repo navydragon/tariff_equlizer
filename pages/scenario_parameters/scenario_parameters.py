@@ -1,19 +1,17 @@
 import dash
-from dash import html, dcc, callback
+import dash_bootstrap_components as dbc
+from dash import html, callback
 from dash.dependencies import Input, Output
 
-# import pages.scenario_parameters.prices as prices
 import pages.scenario_parameters.diff as diff
 import pages.scenario_parameters.ipem as ipem
 import pages.scenario_parameters.revenues as revenues
-import dash_bootstrap_components as dbc
 from pages.helpers import get_last_params
-
 
 tab_labels = html.Ul([
 html.Li(html.A('Тарифы', href='#pill-tab-revenues', id='pill-contact-tab',role="tab", className='nav-link nav-pills-link active', **{'data-bs-toggle': 'tab'}), style={'margin-right':'12px'}),
         html.Li(html.A('Дифференциация', href='#pill-tab-diff', id='pill-profile-tab',role="tab", className='nav-link nav-pills-link', **{'data-bs-toggle': 'tab'}), style={'margin-right':'12px'}),
-        html.Li(html.A('Транспортная составляющая', href='#pill-tab-transport', id='pill-transport-tab',role="tab", className='nav-link nav-pills-link', **{'data-bs-toggle': 'tab'}), style={'margin-right':'12px'}),
+        html.Li(html.A('Экономика перевозки грузов', href='#pill-tab-transport', id='pill-transport-tab',role="tab", className='nav-link nav-pills-link', **{'data-bs-toggle': 'tab'}), style={'margin-right':'12px'}),
     ], className='nav nav-pills', id='pill-myTab', role='tablist')
 
 

@@ -1,13 +1,14 @@
-import dash
-from dash import html, dcc,callback, Input, Output, State, ALL, MATCH
-from pages.data import get_main_data, get_small_data
-import dash_bootstrap_components as dbc
-from pages.constants import Constants as CON
-import pandas as pd
-import random
-import string
 import json
+import random
 import sqlite3
+import string
+
+import dash
+import dash_bootstrap_components as dbc
+from dash import html, dcc, callback, Input, Output, State, ALL, MATCH
+
+from pages.constants import Constants as CON
+from pages.data import get_small_data
 
 
 def generate_random_string(length):

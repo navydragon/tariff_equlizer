@@ -1,23 +1,23 @@
-import dash
-
-from dash import html, dcc, callback, ALL, MATCH, ctx
-from dash.dependencies import Input, Output, State
-from pages.data import get_ipem_data, get_main_data, get_te_variants, set_te_variants, calculate_total_index, get_dollar_rate
-import dash_bootstrap_components as dbc
 import json
 import os
 
-
-import plotly.graph_objects as go
-
+import dash
+import dash_bootstrap_components as dbc
 import pandas as pd
-import pages.helpers as helpers
-import pages.calculations as calc
-from pages.constants import Constants as CON
+import plotly.graph_objects as go
+from dash import html, dcc, callback, ALL, ctx
+from dash.dependencies import Input, Output, State
 
-import pages.scenario_parameters.scenario_parameters as sp
 import pages.analytics.equlizer as eq
 import pages.analytics.parts as parts
+import pages.calculations as calc
+import pages.helpers as helpers
+import pages.scenario_parameters.scenario_parameters as sp
+from pages.constants import Constants as CON
+from pages.data import get_ipem_data, get_main_data, get_te_variants, set_te_variants, get_dollar_rate
+
+from pages.scenario_parameters.misc import input_states, check_and_prepare_params
+
 dash.register_page(__name__, name="Тарифный эквалайзер", path='/equlizer', order=2, my_class='my-navbar__icon-2')
 
 
@@ -26,6 +26,8 @@ df = []
 df = get_ipem_data()
 
 ipem_calculated = []
+ipc_df = pd.read_excel('data/te/ipc.xlsx', header=None)
+ipc_dict = pd.Series(ipc_df.iloc[1].values, index=ipc_df.iloc[0].values).to_dict()
 FULL_YEARS = [2024] + CON.YEARS
 
 
@@ -365,7 +367,6 @@ def update_equlizer(route,trip,cargo_group,mesage_group, trip_group,
 
     else:
         if mesage_group is None:
-            print("KEK")
             return ([],no)
 
         conditions = (ipem_calculated['Группа груза'] == cargo_group) & (ipem_calculated['Вид сообщения'] == mesage_group)
@@ -559,7 +560,7 @@ def recount_graph(costs,bases, rules,
 
     width=0.9
 
-    fig = graph_bar_h(test_df, gdf, fgdf, marginality, period, colors, width,names)
+    fig = graph_bar_h(test_df, gdf, fgdf, marginality_real_percent, period, colors, width,names)
     fig2 = graph_bar_trend(test_df, gdf, marginality, period, colors, width,names)
 
     fig3 = graph_bar_v(test_df_tr, gdf_tr, fgdf_tr, marginality, period, colors, width,names)
@@ -805,6 +806,29 @@ def make_tabs(route,trip, message, price_message,period,cif_fob, params_variant)
                             eq.draw_slider(type='oper',year=year,value=data['oper'][str(year)])
                         ], id={'type': 'oper_container', 'index': year}, className='text-center', style={'display':'block'} if year in period else {'display':'none'}) for index,year in enumerate(FULL_YEARS)]
                     ]),
+                    dbc.Row([
+                        html.Div([
+                            dbc.Checklist(
+                                id='use_indexes_oper',
+                                options=[
+                                    {'label': 'Использовать индексы','value': True}
+                                ],
+                                value=[],
+                                inline=True,
+                                switch=True,
+                                label_class_name='form-check-label'
+                            )
+                        ], className='form-check form-switch'),
+                    ]),
+                    html.Div([
+                        dbc.Row([ *[dbc.Col(year, className='my-slider__text', style={'display':'block'} if year in period else {'display':'none'}) for year in FULL_YEARS]]),
+                    dbc.Row([
+                        *[dbc.Col([
+                            eq.draw_input(type='oper_index', year=year, value=ipc_dict.get(year,1)) if year != 2024 else '-'
+                        ], className='text-center',
+                            style={'display': 'block'} if year in period else {'display': 'none'}) for index, year in enumerate(FULL_YEARS)]
+                    ]),
+                    ], id='oper_index_div', style={'display':'none'})
                 ], className='mx-5')]
             ),
             dcc.Tab(
@@ -837,6 +861,32 @@ def make_tabs(route,trip, message, price_message,period,cif_fob, params_variant)
                             className='text-center', style={'display':'block'} if year in period else {'display':'none'}) for index, year in
                             enumerate(FULL_YEARS)]
                     ]),
+                    dbc.Row([
+                        html.Div([
+                            dbc.Checklist(
+                                id='use_indexes_per',
+                                options=[
+                                    {'label': 'Использовать индексы', 'value': True}
+                                ],
+                                value=[],
+                                inline=True,
+                                switch=True,
+                                label_class_name='form-check-label'
+                            )
+                        ], className='form-check form-switch'),
+                    ]),
+                    html.Div([
+                        dbc.Row([*[dbc.Col(year, className='my-slider__text',
+                                           style={'display': 'block'} if year in period else {'display': 'none'}) for
+                                   year in FULL_YEARS]]),
+                        dbc.Row([
+                            *[dbc.Col([
+                                eq.draw_input(type='per_index', year=year, value=ipc_dict.get(year, 1)) if year != 2024 else '-'
+                            ], className='text-center',
+                                style={'display': 'block'} if year in period else {'display': 'none'}) for index, year
+                                in enumerate(FULL_YEARS)]
+                        ]),
+                    ], id='per_index_div', style={'display': 'none'})
                 ], className='mx-5')]
             ),
             dcc.Tab(
@@ -989,6 +1039,33 @@ def make_tabs(route,trip, message, price_message,period,cif_fob, params_variant)
                             eq.draw_slider(type='cost',year=year,value=data['cost'][str(year)])
                         ], id={'type': 'cost_container', 'index': year}, className='text-center', style={'display':'block'} if year in period else {'display':'none'}) for index,year in enumerate(FULL_YEARS)]
                     ]),
+                    dbc.Row([
+                        html.Div([
+                            dbc.Checklist(
+                                id='use_indexes_cost',
+                                options=[
+                                    {'label': 'Использовать индексы', 'value': True}
+                                ],
+                                value=[],
+                                inline=True,
+                                switch=True,
+                                label_class_name='form-check-label'
+                            )
+                        ], className='form-check form-switch'),
+                    ]),
+                    html.Div([
+                        dbc.Row([*[dbc.Col(year, className='my-slider__text',
+                                           style={'display': 'block'} if year in period else {'display': 'none'}) for
+                                   year in FULL_YEARS]]),
+                        dbc.Row([
+                            *[dbc.Col([
+                                eq.draw_input(type='cost_index', year=year,
+                                              value=ipc_dict.get(year, 1)) if year != 2024 else '-'
+                            ], className='text-center',
+                                style={'display': 'block'} if year in period else {'display': 'none'}) for index, year
+                                in enumerate(FULL_YEARS)]
+                        ]),
+                    ], id='cost_index_div', style={'display': 'none'})
                 ], className='mx-5')]
             ),
         ])
@@ -1038,8 +1115,6 @@ def make_tabs(route,trip, message, price_message,period,cif_fob, params_variant)
 )
 
 def save_variant(n_clicks,id,*args):
-    print (id[0]["route_index"])
-    print(type(id))
     route_index = id[0]["route_index"]
     # Разделяем аргументы по соответствующим массивам
     num_years = len(FULL_YEARS)
@@ -1084,18 +1159,16 @@ def get_elastic_coefficient(route, marginality_percent):
         return coeff
 
 
+page_inputs = []
+inputs = page_inputs + input_states
+outputs = [
+    Output('route_select','value')
+]
+
+args = outputs + inputs
+
 @callback(
-    Output('route_select','value'),
-    Input('calculate-button','n_clicks'),
-    State('epl_change','value'),
-    State('market_loss','value'),
-    State('cif_fob','value'),
-    State('index_sell_prices','value'),
-    State('price_variant','value'),
-    State('index_sell_coal','value'),
-    State('index_oper','value'),
-    State('index_per','value'),
-    [State(str(year) + '_year_total_index', 'children') for year in CON.YEARS],
+    *args,
 )
 def update_transport(
         calculate_button,
@@ -1104,23 +1177,10 @@ def update_transport(
         index_sell_prices, price_variant, index_sell_coal, index_oper, index_per,
         *revenue_index_values
 ):
-
-    if all(value == 0 for value in revenue_index_values):
-        revenue_index_values = calculate_total_index()
-    params = {
-        "label": 'Признак',
-        "revenue_index_values": revenue_index_values,
-        "epl_change": epl_change,
-        "market_loss": market_loss,
-        "ipem": {
-            "index_sell_prices": index_sell_prices,
-            "price_variant": price_variant,
-            "index_sell_coal": index_sell_coal,
-            "index_oper": index_oper,
-            "index_per": index_per,
-            "cif_fob": cif_fob,
-        }
-    }
+    params = check_and_prepare_params(
+        epl_change, market_loss, cif_fob, index_sell_prices, price_variant, index_sell_coal,
+        index_oper, index_per, revenue_index_values
+    )
 
     helpers.save_last_params(params)
     global ipem_calculated
@@ -1198,90 +1258,59 @@ def cargo_group_select(cargo):
     return (options,disabled,None,placeholder)
 
 
-def graph_bar_h(test_df,gdf,fake_gdf,marginality,years,colors,width,names):
+def graph_bar_h(test_df, gdf, fake_gdf, marginality_real_percent, years, colors, width, names):
     test_df = test_df.loc[test_df['years'].isin(years)]
     gdf = gdf.loc[gdf['years'].isin(years)]
 
     fig = go.Figure()
 
-    fig.add_trace(go.Bar(
-        name=names[1], y=years, x=fake_gdf['costs'], text=gdf['costs'],
-        texttemplate='%{text:.1f}%', marker=dict(color=colors[0]),
-        insidetextanchor='middle',
-        width=width, orientation='h',
-        customdata=test_df['costs'],
-        hovertemplate="%{y} г. <br>%{customdata:.1f} руб."
-    )) if sum(test_df['costs']) > 0 else ''
-    fig.add_trace(go.Bar(name=names[2], y=years, x=fake_gdf['rzd'],
-        text=gdf['rzd'], texttemplate='%{text:.1f}%',
-        marker=dict(color=colors[1]), insidetextanchor='middle',
-        width=width, orientation='h',
-        customdata=test_df['rzd'],
-        hovertemplate="%{y} г. <br>%{customdata:.1f} руб."
-    )) if sum(test_df['rzd']) > 0 else ''
-    fig.add_trace(go.Bar(
-        name=names[3], y=years, x=fake_gdf['oper'], text=gdf['oper'],
-        texttemplate='%{text:.1f}%', marker=dict(color=colors[2]),
-        insidetextanchor='middle',
-        width=width, orientation='h',
-        customdata=test_df['oper'],
-        hovertemplate="%{y} г. <br>%{customdata:.1f} руб."
-    )) if sum(test_df['oper']) > 0 else ''
-    fig.add_trace(go.Bar(
-        name=names[4], y=years, x=fake_gdf['per'], text=gdf['per'],
-        texttemplate='%{text:.1f}%', marker=dict(color=colors[3]),
-        insidetextanchor='middle',
-        width=width, orientation='h',
-        customdata=test_df['per'],
-        hovertemplate="%{y} г. <br>%{customdata:.1f} руб."
-    )) if sum(test_df['per']) > 0 else ''
+    data_columns = ['costs', 'rzd', 'oper', 'per', 'fraht', 'marginality']
+    data_colors ={
+        'marginality': colors[5],
+        'costs': colors[0],
+        'rzd': colors[1],
+        'fraht': colors[4],
+        'oper': colors[2],
+        'per': colors[3],
+    }
+    data_names = {
+        'marginality': 'Маржинальность холдинга',
+        'costs': 'Себестоимость производства',
+        'rzd':'Расходы на оплату услуг ОАО "РЖД"',
+        'oper': 'Расходы по оплате услуг операторов',
+        'per': 'Расходы на перевалку',
+        'fraht': 'Расходы на фрахт'
+    }
+    for i, col in enumerate(data_columns):
+        if sum(test_df[col]) > 0:
+            fig.add_trace(go.Bar(
+                name=data_names[col], y=years, x=fake_gdf[col], text=gdf[col],
+                texttemplate='%{text:.1f}%',
+                marker=dict(color=data_colors[col]),
+                insidetextanchor='middle',
+                width=width,
+                orientation='h',
+                customdata=test_df[col],
+                hovertemplate="%{y} г. <br>%{customdata:.1f} руб."
+            ))
 
-    fig.add_trace(go.Bar(
-        name=names[5], y=years, x=fake_gdf['fraht'], text=gdf['fraht'],
-        texttemplate='%{text:.1f}%', marker=dict(color=colors[4]),
-        insidetextanchor='middle',
-        width=width, orientation='h',
-        customdata=test_df['fraht'],
-        hovertemplate="%{y} г. <br>%{customdata:.1f} руб."
-    )) if sum(test_df['fraht']) > 0 else ''
-    fig.add_trace(go.Bar(
-        name=names[0], y=years, x=fake_gdf['marginality'],
-        text=gdf['marginality'], texttemplate='%{text:.1f}%',
-        marker=dict(color=colors[5]), insidetextanchor='middle',
-        orientation='h', width=width, textposition='auto',
-        customdata=test_df['marginality'],
-        hovertemplate="%{y} г. <br>%{customdata:.1f} руб."
-    )) if sum(test_df['marginality']) > 0 else ''
-
-    fig.update_layout(uniformtext_minsize=12)
-    fig.update_layout(uniformtext_mode='show')
-
-    fig.update_layout(barmode='stack')
-    fig.update_layout(yaxis_title=None, xaxis_title=None)
-    fig.update_layout(margin=dict(t=0))
-    fig.update_layout(yaxis=dict(autorange="reversed"))
+    for index, row in gdf.iterrows():
+        if marginality_real_percent[index] <= 0:
+            fig.add_annotation(x=99, y=row['years'],text=f'{round(marginality_real_percent[index],2)}%', xshift=35, showarrow=False, bgcolor="red", font=dict(color="#ffffff"))
     fig.update_layout(
-        legend=dict(orientation="h", yanchor="top", xanchor="left",
-                    title=None, x=0.0, traceorder="normal"))
-    fig.update_layout(plot_bgcolor='white', )
-    fig.update_layout(
+        barmode='stack',
+        yaxis_title=None,
+        xaxis_title=None,
+        margin=dict(t=0, l=0, r=0, pad=0),
+        legend=dict(orientation="h", yanchor="top", xanchor="left", x=0.0, title=None, traceorder="normal"),
+        plot_bgcolor='white',
         legend_tracegroupgap=0,
-        legend_traceorder='normal'
-    )
-    fig.update_layout(
+        legend_traceorder='normal',
         height=400,
-        margin=dict(l=0, r=0, t=0, pad=0),
+        yaxis=dict(autorange="reversed",tickmode='array', tickvals=years, ticktext=years),
+        xaxis=dict(showticklabels=False)
     )
-    fig.update_layout(
-        yaxis=dict(
-            tickmode='array',
-            tickvals=years,
-            ticktext=years
-        ),
-        xaxis = dict(
-            showticklabels=False
-        )
-    )
+
     return fig
 
 def graph_bar_v(test_df,gdf,fake_gdf, marginality,years,colors,width,names):

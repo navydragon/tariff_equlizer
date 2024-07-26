@@ -81,19 +81,6 @@ class Constants:
     # YEARS = LITTLE_YEARS
 
 
-    INPUTS = [
-        Input('calculate-button', 'n_clicks'),
-        State('epl_change', 'value'),
-        State('market_loss', 'value'),
-        State('cif_fob', 'value'),
-        State('index_sell_prices', 'value'),
-        State('price_variant', 'value'),
-        State('index_sell_coal', 'value'),
-        State('index_oper', 'value'),
-        State('index_per', 'value'),
-        [State(str(year) + '_year_total_index', 'children') for year in YEARS],
-    ]
-
     TURNOVER_VARIANTS = [
         {'label': 'Не учитывать','value': 'option1'},
         {'label': 'ЦЭКР', 'value': 'cekr'},

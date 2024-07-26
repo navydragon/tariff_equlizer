@@ -1,5 +1,6 @@
-from dash import callback, MATCH, Input, Output, State, dcc
+from dash import callback, MATCH, ALL, Input, Output, State, dcc
 from dash import callback_context
+import pandas as pd
 
 
 def draw_slider (type,year,value, max=None, step=1,is_vertical=True, placement="right", classname='my-slider'):
@@ -12,7 +13,7 @@ def draw_slider (type,year,value, max=None, step=1,is_vertical=True, placement="
         tooltip={
             "placement": "right" if is_vertical==True else "bottom",
             "always_visible": True,
-        }
+        },
     )
     return res
 
@@ -215,3 +216,97 @@ def update_fraht_input(value):
 def update_fraht_slider(value, max):
    index = callback_context.triggered_id['index']
    return draw_slider(type='fraht', value=value, year=index, max=max, step=1)
+
+
+@callback(
+    Output({'type': 'oper', 'index': ALL}, 'disabled'),
+    Output({'type': 'oper_input', 'index': ALL}, 'disabled'),
+    Output('oper_index_div', 'style'),
+    Input('use_indexes_oper', 'value'),
+    [State({'type': 'oper_input', 'index': ALL}, 'value')]
+)
+def handle_use_indexes_oper(value, states):
+    count = len(states)
+
+    if value == [True]:
+        trues = [True] * (count - 1)
+        return ([False]+trues, [False]+trues, {'display':'block'})
+    return ([False] * count, [False] * count, {'display':'none'})
+
+@callback(
+    Output({'type': 'oper_input', 'index': ALL}, 'value', allow_duplicate=True),
+    Input('use_indexes_oper', 'value'),
+    Input({'type': 'oper_input', 'index': 2024},'value'),
+    [Input({'type': 'oper_index_input', 'index': ALL}, 'value')],
+    [State({'type': 'oper_input', 'index': ALL}, 'value')],
+    prevent_initial_call=True
+)
+def recount_oper_values(value,base_value,indexes,states):
+    count = len(states)
+    # indexes.insert(0, 1)
+    if value == [True]:
+        for index,state in enumerate(indexes, start=1):
+            states[index] = states[index-1] * indexes[index-1]
+    return (states)
+
+
+@callback(
+    Output({'type': 'per', 'index': ALL}, 'disabled'),
+    Output({'type': 'per_input', 'index': ALL}, 'disabled'),
+    Output('per_index_div', 'style'),
+    Input('use_indexes_per', 'value'),
+    [State({'type': 'per_input', 'index': ALL}, 'value')]
+)
+def handle_use_indexes_per(value, states):
+    count = len(states)
+    if value == [True]:
+        trues = [True] * (count - 1)
+        return ([False]+trues, [False]+trues, {'display':'block'})
+    return ([False] * count, [False] * count, {'display':'none'})
+
+@callback(
+    Output({'type': 'per_input', 'index': ALL}, 'value', allow_duplicate=True),
+    Input('use_indexes_per', 'value'),
+    Input({'type': 'per_input', 'index': 2024},'value'),
+    [Input({'type': 'per_index_input', 'index': ALL}, 'value')],
+    [State({'type': 'per_input', 'index': ALL}, 'value')],
+    prevent_initial_call=True
+)
+def recount_per_values(value,base_value,indexes,states):
+    count = len(states)
+    # indexes.insert(0, 1)
+    if value == [True]:
+        for index,state in enumerate(indexes, start=1):
+            states[index] = states[index-1] * indexes[index-1]
+    return (states)
+
+
+@callback(
+    Output({'type': 'cost', 'index': ALL}, 'disabled'),
+    Output({'type': 'cost_input', 'index': ALL}, 'disabled'),
+    Output('cost_index_div', 'style'),
+    Input('use_indexes_cost', 'value'),
+    [State({'type': 'cost_input', 'index': ALL}, 'value')]
+)
+def handle_use_indexes_cost(value, states):
+    count = len(states)
+    if value == [True]:
+        trues = [True] * (count - 1)
+        return ([False]+trues, [False]+trues, {'display':'block'})
+    return ([False] * count, [False] * count, {'display':'none'})
+
+@callback(
+    Output({'type': 'cost_input', 'index': ALL}, 'value', allow_duplicate=True),
+    Input('use_indexes_cost', 'value'),
+    Input({'type': 'cost_input', 'index': 2024},'value'),
+    [Input({'type': 'cost_index_input', 'index': ALL}, 'value')],
+    [State({'type': 'cost_input', 'index': ALL}, 'value')],
+    prevent_initial_call=True
+)
+def recount_oper_values(value,base_value,indexes,states):
+    count = len(states)
+    # indexes.insert(0, 1)
+    if value == [True]:
+        for index,state in enumerate(indexes, start=1):
+            states[index] = states[index-1] * indexes[index-1]
+    return (states)

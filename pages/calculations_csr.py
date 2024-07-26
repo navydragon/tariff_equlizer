@@ -1,11 +1,10 @@
-import pandas as pd
-import logging
-
-from pages.constants import Constants
-from pages.data import get_main_data, get_ipem_data, get_ipem_csr_data, get_ipem_csr_related_routes
 import numpy as np
+import pandas as pd
+
 import pages.scenario_parameters.tarif_rules as tr
 import pages.scenario_parameters.tarif_rules_prev as tr_prev
+from pages.constants import Constants
+from pages.data import get_main_data, get_ipem_csr_data, get_ipem_csr_related_routes
 
 CON = Constants(2025)
 

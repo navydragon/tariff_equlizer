@@ -1,17 +1,17 @@
-
-from pages.data import get_revenue_parameters, calculate_total_index
-import dash_pivottable
-import pages.scenario_parameters.tarif_rules as tr
 import dash
+import dash_pivottable
+from dash import html, dcc, callback, Output, Input, State
 
-from dash import html, dcc, callback, Output, Input, State, ALL
-from pages.constants import Constants as CON
-import pages.scenario_parameters.scenario_parameters as sp
 import pages.calculations as calc
+import pages.scenario_parameters.scenario_parameters as sp
+import pages.scenario_parameters.tarif_rules as tr
+from pages.scenario_parameters.misc import input_states, check_and_prepare_params
+from pages.constants import Constants as CON
 
 dash.register_page(__name__, name="Сводные", path='/pivot', order=7, my_class='my-navbar__icon-2')
 
-def layout ():
+
+def layout():
     global df
 
     res = html.Div([
@@ -23,29 +23,18 @@ def layout ():
     ])
     return res
 
+
 outputs = [
     Output('pivot_output', 'children'),
 ]
 
-input_states = [
-    Input('calculate-button','n_clicks'),
-    State('epl_change','value'),
-    State('cif_fob','value'),
-    State('index_sell_prices','value'),
-    State('price_variant','value'),
-    State('index_sell_coal','value'),
-    State('index_oper','value'),
-    State('index_per','value'),
-    [State(str(year) + '_year_total_index', 'children') for year in CON.YEARS],
-
-]
 args = outputs + input_states
+
 
 @callback(
     *args
     # prevent_initial_call=True
 )
-
 def update_dashboard(
         calculate_button,
         epl_change, market_loss,
@@ -53,38 +42,28 @@ def update_dashboard(
         index_sell_prices, price_variant, index_sell_coal, index_oper, index_per,
         *revenue_index_values
 ):
-    if all(value == 0 for value in revenue_index_values):
-        revenue_index_values = calculate_total_index()
-    params = {
-        "label": 'Признак',
-        "revenue_index_values": revenue_index_values,
-        "epl_change": epl_change,
-        "market_loss": market_loss,
-        "ipem": {
-            "index_sell_prices": index_sell_prices,
-            "price_variant": price_variant,
-            "index_sell_coal": index_sell_coal,
-            "index_oper": index_oper,
-            "index_per": index_per,
-            "cif_fob": cif_fob,
-        }
-    }
+    params = check_and_prepare_params(
+        epl_change, market_loss, cif_fob,index_sell_prices, price_variant, index_sell_coal,
+        index_oper, index_per, revenue_index_values
+    )
+
     df = calc.calculate_data('small', params)
-    select_columns = ["Группа груза", "Направления", "Дор отпр", "Дор наз", "Вид перевозки","Холдинг"]
+    select_columns = ["Группа груза", "Направления", "Дор отпр", "Дор наз", "Вид перевозки", "Холдинг", 'Род вагона',
+                      'Категория отпр.', 'Тип парка', 'Вид спец. контейнера']
     columns_for_del = list(set(list(df.select_dtypes(exclude=['floating']))) - set(select_columns))
     df = df.drop(columns=columns_for_del)
 
     df = df.groupby(list(df.select_dtypes(exclude=['floating']))).sum()
     df = df.reset_index()
 
-    df = melt_pivot_df(df,select_columns)
+    df = melt_pivot_df(df, select_columns)
     head_data_values = list(df.select_dtypes(include=['floating']))
     head_data_filters = list(df.select_dtypes(exclude=['floating']))
     data_data = [df.columns.values.tolist()] + df.values.tolist()
     res = html.Div([
         dash_pivottable.PivotTable(
             id='table',
-            data = data_data,
+            data=data_data,
             rows=['Группа груза'],
             cols=['Направления'],
             colOrder="key_a_to_z",
@@ -98,14 +77,15 @@ def update_dashboard(
     ])
     return res
 
+
 @callback(
     Output('output', 'children'),
     [Input('table', 'cols'),
-    Input('table', 'rows'),
-    Input('table', 'rowOrder'),
-    Input('table', 'colOrder'),
-    Input('table', 'aggregatorName'),
-    Input('table', 'rendererName')],
+     Input('table', 'rows'),
+     Input('table', 'rowOrder'),
+     Input('table', 'colOrder'),
+     Input('table', 'aggregatorName'),
+     Input('table', 'rendererName')],
     prevent_initial_call=True
 )
 def display_props(cols, rows, row_order, col_order, aggregator, renderer):
@@ -118,7 +98,8 @@ def display_props(cols, rows, row_order, col_order, aggregator, renderer):
         html.P(str(renderer), id='renderer'),
     ]
 
-def melt_pivot_df(df,index_columns):
+
+def melt_pivot_df(df, index_columns):
     df = df.loc[:, ~df.columns.str.contains('rules')]
     df = df.loc[:, ~df.columns.str.contains('_без')]
     cols_to_change = {}
@@ -141,22 +122,21 @@ def melt_pivot_df(df,index_columns):
         var_name='Year_Metric', value_name='Value'
     )
 
-
     # Извлечение года и метрики из объединённой колонки
     df_melt[['Год', 'Metric']] = df_melt['Year_Metric'].str.extract(r'(\d{4}) (.+)')
-    #print(df_melt['Year_Metric'].unique())
-    #print(df_melt['Metric'].unique())
+    # print(df_melt['Year_Metric'].unique())
+    # print(df_melt['Metric'].unique())
     # Заполнение пропущенных значений в столбце 'Metric'
     # df_melt['Metric'] = df_melt['Metric'].fillna(0)
     # print(df_melt[df_melt['Year_Metric']=='2029 Доходы, тыс.руб'].tail())
     # print(df_melt.info())
-    #income_mask = df_melt['Metric'].str.contains('Доходы')
-    #print(df_melt.loc[income_mask, 'Metric']).info()
-    #df_melt.loc[income_mask, 'Metric'] = 'Доходы, тыс.руб'
+    # income_mask = df_melt['Metric'].str.contains('Доходы')
+    # print(df_melt.loc[income_mask, 'Metric']).info()
+    # df_melt.loc[income_mask, 'Metric'] = 'Доходы, тыс.руб'
     # print(df_melt.columns)
     # print(df_melt['Metric'].unique())
     # Поворот таблицы для получения нужного формата
-    df_pivot = df_melt.pivot_table(index=index_columns+['Год'], columns='Metric',
+    df_pivot = df_melt.pivot_table(index=index_columns + ['Год'], columns='Metric',
                                    values='Value', aggfunc='sum').reset_index()
 
     # Переименование колонок

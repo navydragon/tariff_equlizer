@@ -1,20 +1,19 @@
 import dash
-
-from dash import html, dcc, callback, ALL, MATCH
-from dash.dependencies import Input, Output, State
-from pages.data import get_ipem_data, get_main_data, calculate_total_index, get_ipem_csr_data
 import dash_bootstrap_components as dbc
-
-import plotly.graph_objects as go
-
 import pandas as pd
-import pages.helpers as helpers
-import pages.calculations_csr as calc
-from pages.constants import Constants as CON
-import pages.scenario_parameters.tarif_rules as tr
-import pages.scenario_parameters.scenario_parameters as sp
+import plotly.graph_objects as go
+from dash import html, dcc, callback, ALL
+from dash.dependencies import Input, Output, State
+
 import pages.analytics.equlizer as eq
 import pages.analytics.parts as parts
+import pages.calculations_csr as calc
+import pages.helpers as helpers
+import pages.scenario_parameters.scenario_parameters as sp
+import pages.scenario_parameters.tarif_rules as tr
+from pages.constants import Constants as CON
+from pages.data import get_main_data, get_ipem_csr_data
+from pages.scenario_parameters.misc import input_states, check_and_prepare_params
 
 dash.register_page(__name__, name="Тарифный эквалайзер ЦСР", path='/equlizer_csr', order=3, my_class='my-navbar__icon-2')
 
@@ -980,19 +979,16 @@ def effects_table(route,rzd,bases,rules, trip_type):
             children=table_rows),
     ])
     return table
-@callback(
-    Output('route_select_csr','value'),
-    Input('calculate-button','n_clicks'),
-    State('epl_change','value'),
-    State('market_loss','value'),
-    State('cif_fob','value'),
-    State('index_sell_prices','value'),
-    State('price_variant','value'),
-    State('index_sell_coal','value'),
-    State('index_oper','value'),
-    State('index_per','value'),
-    [State(str(year) + '_year_total_index', 'children') for year in CON.YEARS],
-)
+
+page_inputs = []
+inputs = page_inputs + input_states
+outputs = [
+    Output('route_select_csr','value')
+]
+
+args = outputs + inputs
+
+@callback(*args,)
 def update_transport(
     calculate_button,
     epl_change, market_loss,
@@ -1000,22 +996,10 @@ def update_transport(
     index_sell_prices, price_variant, index_sell_coal, index_oper, index_per,
     *revenue_index_values
 ):
-    if all(value == 0 for value in revenue_index_values):
-        revenue_index_values = calculate_total_index()
-    params = {
-        "label": 'Признак',
-        "revenue_index_values": revenue_index_values,
-        "epl_change": epl_change,
-        "market_loss": market_loss,
-        "ipem": {
-            "index_sell_prices": index_sell_prices,
-            "price_variant": price_variant,
-            "index_sell_coal": index_sell_coal,
-            "index_oper": index_oper,
-            "index_per": index_per,
-            "cif_fob": cif_fob,
-        }
-    }
+    params = check_and_prepare_params(
+        epl_change, market_loss, cif_fob, index_sell_prices, price_variant, index_sell_coal,
+        index_oper, index_per, revenue_index_values
+    )
 
     helpers.save_last_params(params)
     global ipem_calculated
