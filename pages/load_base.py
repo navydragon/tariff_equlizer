@@ -15,34 +15,6 @@ def layout():
 
     return html.Div([])
 
-
-def read_data():
-    start_time = time.time()
-    df = pd.read_hdf('data/tariff_data.h5', key='tariff_data')
-    execution_time = time.time() - start_time
-
-    print(time.time() - start_time)
-
-
-def load_old_data():
-    conn = sqlite3.connect('db_drafts/db9.db')
-    query = '''
-                    SELECT * 
-                    FROM ЦПС_отформат
-            '''
-    df = pd.read_sql_query(query, conn)
-    conn.close()
-    columns_to_drop = ['Наим отправителя', 'Наим получателя', 'Класс негабаритности_идентификатор',
-                       'Класс негабаритности_наименование','Перевозка СПФ','Опасный груз','Код ЕТСНГ',
-                       'Перевозка с отдельным локомотивом',
-                       ]
-    df.drop(columns=columns_to_drop, inplace=True)
-    cargo_names = df['Наименование груза ЦО-12'].unique()
-    for name in cargo_names:
-        car_df = df[df['Наименование груза ЦО-12']==name]
-        car_df.to_excel(f'data/old/{name}.xlsx')
-
-
 def load_data():
     conn = sqlite3.connect('db_7.db')
 
@@ -56,7 +28,6 @@ def load_data():
     conn.close()
 
 
-
     df.drop([
              'Субъект федерации отп',
              'Субъект федерации наз'
@@ -64,7 +35,6 @@ def load_data():
 
     holdings_df = pd.DataFrame({'Холдинг': df['Холдинг'].unique()})
     holdings_df.to_feather('data/fp/holdings.feather')
-
 
 
     group_parameters = ['Группа груза',
@@ -97,8 +67,7 @@ def load_data():
         agg_params[epl] = 'sum'
         column_mapping[old_epl] = epl
     # Переименование колонок
-    print(column_mapping)
-    print(df.columns)
+
     df.rename(columns=column_mapping, inplace=True)
 
     df_grouped = df.groupby(group_parameters).agg(agg_params).reset_index()
