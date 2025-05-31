@@ -8,7 +8,7 @@ from pages.constants import Constants as CON
 def layout():
     return html.Div([
         dbc.Button(
-            "+", id="fade-button", className="mb-3", n_clicks=0
+            "+", id="fade-button_turnover", className="mb-3", n_clicks=0
         ),
         dbc.Fade(
             dbc.Card(
@@ -16,7 +16,7 @@ def layout():
                     filters()
                 )
             ),
-            id="fade",
+            id="fade_turnover",
             is_in=False,
             appear=False,
         ),
@@ -25,12 +25,12 @@ def layout():
 def filters():
     return (
         html.Div([
-            html.H2('Доходы всего', className='my-section__title'),
+            html.H2('Грузооборот', className='my-section__title'),
             dbc.Row([
                 dbc.Col([
-                    html.Label('млрд руб.'),
+                    html.Label('млрд ткм'),
                     dcc.Dropdown(
-                        id='group_parameter',
+                        id='group_parameter_turnover',
                         options=['Группа груза','Код груза','Направления','Род вагона','Вид перевозки','Категория отправки','Тип парка','Холдинг'],
                         searchable=True,
                         clearable=False,
@@ -40,7 +40,7 @@ def filters():
                 dbc.Col([
                     html.Label('Группировка внутри'),
                     dcc.Dropdown(
-                        id='group_parameter2',
+                        id='group_parameter2_turnover',
                         options=['Группа груза', 'Код груза', 'Направления',
                                  'Род вагона', 'Вид перевозки',
                                  'Категория отправки', 'Тип парка', 'Холдинг'],
@@ -49,7 +49,7 @@ def filters():
                     ),
                 ], width=3),
                 dbc.Col(
-                    html.Button(className='my-section__badge', id='btn-excel-export-ar', style={'margin-left': 'auto', 'margin-right':'10px'}, children='Экспорт'),
+                    html.Button(className='my-section__badge', id='btn-excel-export-turnover-ar', style={'margin-left': 'auto', 'margin-right':'10px'}, children='Экспорт'),
                 width=2)
             ], className='mb-3'),
             dcc.Loading(
@@ -57,7 +57,7 @@ def filters():
                 type="default",
                 color="#e21a1a",
                 fullscreen=False,
-                children=[html.Div([], id='absolute_revenues_table_div')]
+                children=[html.Div([], id='absolute_turnover_table_div')]
             ),
         ])
     )
@@ -109,9 +109,9 @@ def group_and_combine(df, loss_df, group1,group2, market_loss):
 
         for year_index, year in enumerate([2024] + years):
             if market_loss:
-                year_value = loss_row[f'money_after_loss_{year}'] / 1000000
+                year_value = loss_row[f'turnover_after_loss_{year}'] / 1000000
             else:
-                year_value = row[f'Доходы {year}, тыс.руб'] / 1000000
+                year_value = row[f'{year} ЦЭКР груззоборот, тыс ткм'] / 1000000
 
             res_row[str(year)] = round(year_value, 2)
             total_sum += year_value
@@ -125,10 +125,10 @@ def group_and_combine(df, loss_df, group1,group2, market_loss):
     return res_df
 def get_callbacks():
     @callback(
-        Output("fade", "is_in"),
-        Output("fade-button", "children"),
-        [Input("fade-button", "n_clicks")],
-        [State("fade", "is_in")],
+        Output("fade_turnover", "is_in"),
+        Output("fade-button_turnover", "children"),
+        [Input("fade-button_turnover", "n_clicks")],
+        [State("fade_turnover", "is_in")],
     )
     def toggle_fade(n, is_in):
 
@@ -137,10 +137,10 @@ def get_callbacks():
         return (not is_in, "+" if is_in == True else "-")
 
     @callback(
-        Output("absolute_revenues_table_div", "children"),
+        Output("absolute_turnover_table_div", "children"),
         # Input('calculate-button', 'n_clicks'),
-        Input("group_parameter", "value"),
-        Input("group_parameter2", "value"),
+        Input("group_parameter_turnover", "value"),
+        Input("group_parameter2_turnover", "value"),
         prevent_initial_call=True
     )
     def update_table(group_parameter, group_parameter2):
@@ -158,7 +158,7 @@ def get_callbacks():
             }
             return dash_clientside.no_update
         }""",
-        Output("btn-excel-export-ar", "n_clicks"),
-        Input("btn-excel-export-ar", "n_clicks"),
+        Output("btn-excel-export-turnover-ar", "n_clicks"),
+        Input("btn-excel-export-turnover-ar", "n_clicks"),
         prevent_initial_call=True
     )

@@ -9,7 +9,7 @@
       <excludeFolder url="file://$MODULE_DIR$/dist" />
       <excludeFolder url="file://$MODULE_DIR$/test/data" />
     </content>
-    <orderEntry type="jdk" jdkName="Python 3.11 (tariff_equlizer)" jdkType="Python SDK" />
+    <orderEntry type="jdk" jdkName="Python 3.11 virtualenv at C:\Users\User\PycharmProjects\tariff_equlizer\.venv" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />
   </component>
 </module>

@@ -14,7 +14,7 @@ from pages.constants import Constants as CON
 from pages.data import get_ipem_data
 from pages.scenario_parameters.misc import input_states, check_and_prepare_params
 
-dash.register_page(__name__, name="Оценка маржинальности экспортных грузов", path='/export_marginality', order=6,
+dash.register_page(__name__, name="Экономика экспортных грузов", path='/export_marginality', order=6,
                    my_class='my-navbar__icon-2')
 
 df = []
@@ -39,12 +39,16 @@ def layout():
 
 def equlizer():
     PRICES_DOLLAR = pd.read_excel('data/prices$.xlsx')
+
+    export_directions = df.loc[(df['vid']=='Экспорт') & (df['typical_index'] != 0), 'Вид сообщения'].unique()
+
+
     return html.Div([
         html.Section(className='my-section', style={'margin-top': '0px'}, children=[
             dbc.Row([
                 dbc.Col(html.Div(className='my-section__header', children=[
                     html.H2(className='my-section__title',
-                            children='Оценка маржинальности экспортных грузов', ),
+                            children='Экономика экспортных грузов', ),
                     # html.Span(className='my-section__badge', children='руб./т')
                 ]), width=3),
                 dbc.Col([
@@ -66,7 +70,7 @@ def equlizer():
                         html.Label('Направление'),
                         dcc.Dropdown(
                             id='direction_select_mgn',
-                            options=[value for value in df['Вид сообщения'].unique() if value != 'внутренние'],
+                            options=export_directions,
                             searchable=True,
                             value=None,
                             placeholder=''
@@ -133,12 +137,12 @@ def equlizer():
                                            className='nav-link nav-pills-link active',
                                            **{'data-bs-toggle': 'tab'}),
                                     style={'margin-right': '12px'}),
-                            html.Li(html.A('Таблица+карта',
-                                           href='#pill-tab-structure-map',
-                                           id='pill-structure-tab2', role="tab",
-                                           className='nav-link nav-pills-link',
-                                           **{'data-bs-toggle': 'tab'}),
-                                    style={'margin-right': '12px'}),
+                            #html.Li(html.A('Таблица+карта',
+                            #               href='#pill-tab-structure-map',
+                            #               id='pill-structure-tab2', role="tab",
+                            #               className='nav-link nav-pills-link',
+                            #               **{'data-bs-toggle': 'tab'}),
+                            #        style={'margin-right': '12px'}),
                         ], className='nav nav-pills ml-2', id='pill-myTab',
                             role='tablist'),
                         html.Hr(),
@@ -285,32 +289,6 @@ def make_tabs(route, trip, message, price_message, period, cif_fob):
         className='custom-tabs-container',
         vertical=True,
         children=[
-            # dcc.Tab(
-            #     label='Индексация',
-            #     value='tab-2',
-            #     className='custom-tab',
-            #     selected_className='custom-tab--selected',
-            #     children=[html.Div([
-            #         html.Div(
-            #             className='my-section__header',
-            #             children=[
-            #                 html.H2(className='my-section__title',children='Базовая индексация'),
-            #                 html.Span(className='my-section__badge', children='Индекс')
-            #             ]
-            #         ),
-            #         dbc.Row([ *[dbc.Col(year, className='my-slider__text', style={'display':'block'} if year in period else {'display':'none'}) for year in FULL_YEARS]], className='my-row_type_full'),
-            #         dbc.Row([
-            #             *[dbc.Col([
-            #                 eq.draw_input(type='base',year=year,value=round(route.iloc[0][f"base%_{year}"],3))
-            #             ], className='text-center', style={'display':'block'} if year in period else {'display':'none'}) for index,year in enumerate(FULL_YEARS)]
-            #         ], className='my-row_type_full'),
-            #         dbc.Row([
-            #             *[dbc.Col([
-            #                 eq.draw_slider(type='base',year=year,value=round(route.iloc[0][f"base%_{year}"],3), step=0.001)
-            #             ], id={'type': 'base_container', 'index': year}, className='text-center', style={'display':'block'} if year in period else {'display':'none'}) for index,year in enumerate(FULL_YEARS)]
-            #         ], className='my-row_type_full'),
-            #     ], className='mx-5')]
-            # ),
             dcc.Tab(
                 label='Курс_$',
                 value='tab-7',
@@ -616,7 +594,6 @@ def count_mgn_table(current_route, rules_suffix, direction, dollar_prices, trip,
     gdf = test_df.set_index('years').div(test_df.set_index('years').sum(axis=1), axis=0) * 100
     gdf = gdf.round(2).reset_index()
 
-    fgdf = fake_gdf(gdf)
 
     test_df_tr = pd.DataFrame({
         'years': years, 'costs': costs, 'transport': transport, 'marginality': marginality

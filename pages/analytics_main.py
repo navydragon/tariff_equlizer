@@ -18,7 +18,7 @@ from pages.data import get_ipem_data, get_main_data, get_te_variants, set_te_var
 
 from pages.scenario_parameters.misc import input_states, check_and_prepare_params
 
-dash.register_page(__name__, name="Тарифный эквалайзер", path='/equlizer', order=2, my_class='my-navbar__icon-2')
+dash.register_page(__name__, name="Экономика грузов", path='/economics', order=2, my_class='my-navbar__icon-2')
 
 
 df = []
@@ -30,6 +30,15 @@ ipc_df = pd.read_excel('data/te/ipc.xlsx', header=None)
 ipc_dict = pd.Series(ipc_df.iloc[1].values, index=ipc_df.iloc[0].values).to_dict()
 FULL_YEARS = [2024] + CON.YEARS
 
+
+cargo_mapping = {
+    'Уголь каменный': 'Уголь каменный',
+    'Черные металлы': 'Черные металлы',
+    'Хлебные грузы': 'Хлебные грузы',
+    'Остальные грузы': 'Остальные грузы (алюминий)',
+    'Руды  всякие': 'Руды  всякие',
+
+}
 
 def layout():
     return html.Div([
@@ -48,7 +57,7 @@ def equlizer():
             dbc.Row([
                 dbc.Col(html.Div(className='my-section__header', children=[
                     html.H2(className='my-section__title',
-                            children='Тарифный эквалайзер', ),
+                            children='Экономика грузов', ),
                     # html.Span(className='my-section__badge', children='руб./т')
                 ]),width=3),
                 dbc.Col([
@@ -74,7 +83,7 @@ def equlizer():
                     html.Label('Тип расчета'),
                     dcc.Dropdown(
                         id='type_select',
-                        options=['Маршрут', 'В среднем по направлению'],
+                        options=['Маршрут'], #'В среднем по направлению'
                         searchable=True,
                         value='Маршрут',
                         clearable=False
@@ -83,7 +92,10 @@ def equlizer():
                         html.Label('Группа груза'),
                         dcc.Dropdown(
                             id='cargo_select',
-                            options=df['Группа груза'].unique(),
+                            options=[
+                                {'label': cargo_mapping.get(cargo, cargo), 'value': cargo}
+                                for cargo in df['Группа груза'].unique()
+                            ],
                             searchable=True,
                             value=None,
                             placeholder='Выберите груз'
@@ -360,6 +372,8 @@ def update_equlizer(route,trip,cargo_group,mesage_group, trip_group,
         #html.Div(dcc.Dropdown(value=None, id="variant_select", style={'display': 'none'}),)
     ])
 
+    #print(route)
+    #print(ipem_calculated['route'].unique())
 
     if type == 'Маршрут':
         if route is None: return ([],no)
@@ -386,6 +400,7 @@ def update_equlizer(route,trip,cargo_group,mesage_group, trip_group,
 
     route_variant = variants[variants['index'] == current_route['index'].values[0]]
     current_status = route_variant['status'].values[0]
+    current_status = 'base'
     user_file = os.path.isfile('data/te/variants/' + str(current_route['index'].values[0]) + '.json')
 
 
@@ -486,7 +501,6 @@ def recount_graph(costs,bases, rules,
 
         if year == 2024:
             rzd.append(current_route.iloc[0][f'{trip_col}_{year}'].round(2))
-
             rzd_gr.append(current_route.iloc[0][f'{CON.RZD_GR}_{year}'].round(2))
             if trip=='Кругорейс':
                 rzd_por.append(current_route.iloc[0][f'{CON.RZD_POR}_{year}'].round(2))
@@ -576,11 +590,12 @@ def recount_graph(costs,bases, rules,
     main_df = get_main_data()
     key = current_route['ipem_gr'].values[0]
     main_row = main_df.loc[main_df['Ключ ИПЕМ']==key]
-    main_row = main_row.groupby(['Группа груза','Холдинг']).sum().reset_index()
+
+    main_row = main_row.groupby(['Группа груза','Холдинг']).sum(numeric_only=True).reset_index()
     main_row = main_row.iloc[0]
 
     conditions = (main_df['Группа груза'] == main_row['Группа груза']) & (main_df['Холдинг'] == main_row['Холдинг'])
-    all_rows = main_df.loc[conditions].sum()
+    all_rows = main_df.loc[conditions].sum(numeric_only=True)
 
     for index,row in test_df.loc[1:].iterrows():
         gdf_row = gdf.loc[index]
@@ -600,7 +615,7 @@ def recount_graph(costs,bases, rules,
         year = int(year)
         coef = main_row[f'{year} ЦЭКР груззоборот, тыс ткм'] / main_row['2024 ЦЭКР груззоборот, тыс ткм']
         ep_perc = round(main_row[f'{year} ЦЭКР груззоборот, тыс ткм'] * 100 / all_rows[f'{year} ЦЭКР груззоборот, тыс ткм'],2)
-        ep_val = round(main_row['2023 Объем перевозок, т.'] / 1000 * coef,2)
+        ep_val = round(main_row['2024 Объем перевозок, т.'] / 1000 * coef,2)
 
         elestic_coeff = get_elastic_coefficient(current_route, marginality_real_percent[index])
         lost_tonns =  elestic_coeff * ep_val - ep_val
@@ -723,7 +738,9 @@ def make_tabs(route,trip, message, price_message,period,cif_fob, params_variant)
             data['price'][str(year)] = round(route.iloc[0][f'Стоимость 1 тонны на рынке_{year}_$, руб./т.'],3)
             data['price_rub'][str(year)] = round(route.iloc[0][f'Стоимость 1 тонны на рынке_{year}, руб./т.'],1)
             data['cost'][str(year)] = round(route.iloc[0]['Себестоимость добычи/производства, руб. т.'],3)
-    print (list(data['oper'].values()))
+
+
+
     tabs = dcc.Tabs(
         id="tabs-with-classes",
         value='tab-2',
@@ -981,7 +998,7 @@ def get_elastic_coefficient(route, marginality_percent):
     if route['vid'] == 'Внутр. перевозки' or marginality_percent > 0:
         return 1
     else:
-        elastic_df = pd.read_excel('data/elastic.xlsx')
+        elastic_df = pd.read_excel('data/fp/elastic_2025.xlsx')
         elastic_actual = elastic_df[elastic_df['Категория']==route['elastic_category']]
         if len(elastic_actual) == 0:
             return 'неиз.'
@@ -1015,6 +1032,7 @@ def update_transport(
 
     helpers.save_last_params(params)
     global ipem_calculated
+
     ipem_calculated = calc.calculate_data_ipem([], [], params)
 
 

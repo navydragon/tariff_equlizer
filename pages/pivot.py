@@ -103,7 +103,7 @@ def melt_pivot_df(df, index_columns):
     df = df.loc[:, ~df.columns.str.contains('rules')]
     df = df.loc[:, ~df.columns.str.contains('_без')]
     cols_to_change = {}
-    cols_to_change[f'Доходы 2023, тыс.руб'] = f'Доходы 2023, тыс.руб'
+    # cols_to_change[f'Доходы 2023, тыс.руб'] = f'Доходы 2023, тыс.руб'
     cols_to_change[f'Доходы 2024, тыс.руб'] = f'Доходы 2024, тыс.руб'
     rules = tr.load_rules(active_only=True)
 

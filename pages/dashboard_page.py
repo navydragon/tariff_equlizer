@@ -4,10 +4,15 @@ import pandas as pd
 from dash import html, dcc, callback, Output, Input, State
 
 import pages.dashboard.absolute_revenues as absolute_revenues
+import pages.dashboard.absolute_tonns as absolute_tonns
+import pages.dashboard.absolute_turnover as absolute_turnover
+
 from pages.constants import Constants as CON
 from pages.data import get_revenue_parameters, get_plan_df
 
 absolute_revenues.get_callbacks()
+absolute_tonns.get_callbacks()
+absolute_turnover.get_callbacks()
 
 import pages.calculations as calc
 import pages.scenario_parameters.scenario_parameters as sp
@@ -22,7 +27,7 @@ GR_DF = None
 PARAMS = None
 CL_DF = None
 
-dash.register_page(__name__, name="Финансовый план / Отдельные решения", path='/fp', order=1,
+dash.register_page(__name__, name="Эффекты решений / Эластичность спроса", path='/effects', order=1,
                    my_class='my-navbar__icon-1')
 
 CARGOS = CON.CARGOS
@@ -40,10 +45,9 @@ def layout():
     return html.Div([
         sp.scenario_parameters(),
         sp.toggle_button(),
-        dcc.Loading(id="table-div", type="default", fullscreen=False, children=[]),
         html.Div(className='my-separate my-separate_width_600 my-separate_vector_left mt-4'),
         html.H2(className='my-header__nav-title mb-3', children='Оценка мер покрытия дефицита', id='kpis_header'),
-        dcc.Loading(id="kpis-div", type="default", fullscreen=False, children=[]),
+        dcc.Loading(id="kpis-div", type="default", fullscreen=False, color='#063971', children=[]),
         html.Section(className='my-section', children=[
             html.Div(className='my-section__header', children=[
                 html.H2(className='my-section__title',
@@ -116,7 +120,7 @@ def layout():
                     dcc.Loading(
                         id="loading",
                         type="default",
-                        color="#e21a1a",
+                        color="#063971",
                         fullscreen=False,
                         children=[html.Div([], id='second-div', className='mt-4')]
                     ),
@@ -124,7 +128,7 @@ def layout():
                 dbc.Col([
                     dcc.Loading(
                         id="loading",
-                        color="#e21a1a",
+                        color="#063971",
                         type="default",
                         fullscreen=False,
                         children=[html.Div([], id='second-div2')]
@@ -132,12 +136,38 @@ def layout():
                 ]),
             ], className='mt-2', id='second-row', style={'flex-wrap': 'nowrap'}),
         ]),
-        dcc.Loading(id='absolute_revenues_loading', type="default", fullscreen=False, children=[
-            html.Div(
-                children=[absolute_revenues.layout()],
-                id='absoulte_revenues_div'
-            )
+        dcc.Loading(id='absolute_revenues_loading', type="default", fullscreen=False, color='#063971',
+            children=[
+                html.Div(
+                    children=[absolute_revenues.layout()],
+                    id='absoulte_revenues_div'
+                )
         ]),
+        dcc.Loading(id='absolute_tonns_loading', type="default", fullscreen=False, color='#063971',
+            children=[
+                html.Div(
+                    children=[absolute_tonns.layout()],
+                    id='absoulte_tonns_div'
+                )
+            ]),
+        dcc.Loading(id='absolute_turnover_loading', type="default", fullscreen=False, color='#063971',
+            children=[
+                html.Div(
+                    children=[absolute_turnover.layout()],
+                    id='absoulte_turnover_div'
+                )
+            ]),
+        dbc.Button(
+            "+", id="fade-table-button", className="mb-3", n_clicks=0
+        ),
+        dbc.Fade(
+            dcc.Loading(id="table-div", type="default", fullscreen=False, color="#063971",
+            children=[]),
+            id="fade-table",
+            is_in=False,
+            appear=False,
+        ),
+
     ])
 
 
@@ -186,10 +216,13 @@ def update_dashboard(
 
     # Расчет на уровне маршрутов
     global df
+    global loss_df
     df = calc.calculate_data('small', PARAMS)
     # if 'Yes' in PARAMS['market']['use_market']:
     if PARAMS['market_loss'] == [True]:
-        loss_df = calc.market_coef(df)
+        key_routes_df = calc.calculate_data('key_routes', PARAMS)
+        ket_loss = calc.market_coef_key(key_routes_df)
+        loss_df = calc.market_coef(df,ket_loss)
     else:
         loss_df = df
 
@@ -373,7 +406,6 @@ def make_res_table(df, loss_df, parameter, parameter2, year):
     table_rows = []
     rules = tr.load_rules(active_only=True)
     totals = [0, 0, 0]
-
     prev_sum = df[f'Доходы {year - 1}, тыс.руб'].sum()
     if parameter2 == 'Нет':
         for index, row in df.iterrows():
@@ -988,6 +1020,18 @@ def update_holding_options_routes(cargo, holding):
 
     return (holdings, selected)
 
+
+@callback(
+        Output("fade-table", "is_in"),
+        Output("fade-table-button", "children"),
+        [Input("fade-table-button", "n_clicks")],
+        [State("fade-table", "is_in")],
+    )
+def toggle_fade_table(n, is_in):
+
+    if not n:
+        return (False, "+")
+    return (not is_in, "+" if is_in == True else "-")
 
 def make_main_table(df, params):
     plan_df = get_plan_df()

@@ -1,8 +1,10 @@
+import time
+
 import pandas as pd
 import logging
 
 from pages.constants import Constants
-from pages.data import get_main_data, get_small_data, get_ipem_data, get_ipem_related_routes
+from pages.data import get_main_data, get_small_data, get_ipem_data, get_ipem_related_routes, get_key_routes_data
 import numpy as np
 import pages.scenario_parameters.tarif_rules as tr
 import pages.scenario_parameters.tarif_rules_prev as tr_prev
@@ -14,8 +16,11 @@ CON = Constants(2025)
 
 # функция, рассчитывающая параметры на уровне маршрутов
 def calculate_data(data_type='main', params={}):
+    print(f"Начало расчетов на строках БД {data_type}: {time.strftime('%Y-%m-%d %H:%M:%S')}")
     if data_type == 'main':
         df = get_main_data()
+    elif data_type == 'key_routes':
+        df = get_key_routes_data()
     else:
         df = get_small_data()
 
@@ -29,7 +34,7 @@ def calculate_data(data_type='main', params={}):
     df = calculate_base_revenues(df, CON.YEARS, params['revenue_index_values'],params['epl_change'])
 
 
-    print('calc ok')
+    print(f"Конец расчетов на строках БД {data_type}: {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
     return df
 
@@ -46,7 +51,7 @@ def group_data(df, param1, param2):
         CON.P: 'sum',
         CON.EPL: 'sum',
         CON.PR_P: 'sum',
-        'Доходы 2023, тыс.руб': 'sum',
+        'Доходы 2024, тыс.руб': 'sum',
         '2024_lost': 'sum',
         'rules_total': 'sum',
     }
@@ -106,7 +111,7 @@ def group_data_cube(df):
         CON.P: 'sum',
         CON.EPL: 'sum',
         CON.PR_P: 'sum',
-        'Доходы 2023, тыс.руб': 'sum',
+        'Доходы 2024, тыс.руб': 'sum',
         '2024_lost': 'sum',
         'rules_total': 'sum',
     }
@@ -171,7 +176,7 @@ def  calculate_base_revenues(df, YEARS, INDEXES, EPL_CHANGE):
         rule_indexation[rule_obj["id"]] = []
 
     # объем перевозок 2024
-    df['2024 Объем перевозок, т.'] = df['2023 Объем перевозок, т.'] * df['2024 ЦЭКР груззоборот, тыс ткм'] * 1000 / df['2023 Грузооборот, т_км']
+    # df['2024 Объем перевозок, т.'] = df['2023 Объем перевозок, т.'] * df['2024 ЦЭКР груззоборот, тыс ткм'] * 1000 / df['2023 Грузооборот, т_км']
 
     df['epl_tarif_base'] = df[revenue_base] / df[epl_base]
 
@@ -245,11 +250,15 @@ def create_new_columns (df, years, base_revenue_col, rules):
     new_df = pd.DataFrame(new_columns)
     df = pd.concat([df, new_df], axis=1)
     return df
+
+
 def calculate_data_ipem(df, index_df, params):
 
     related_df = get_ipem_related_routes()
     related_df = calculate_related(related_df, params)
 
+    if 'lost_2024' in related_df.columns:
+        related_df = related_df.drop(columns=['lost_2024'])
     prev_rules = tr_prev.load_rules(active_only=True)
     related_df['2024_coeff'] = 1.0
     main_df = get_main_data()
@@ -272,7 +281,6 @@ def calculate_data_ipem(df, index_df, params):
 
     related_df = related_df.merge(main_df[['Ключ ИПЕМ', 'lost_2024','part']], on='Ключ ИПЕМ', how='left')
 
-
     related_df['money_lost_coeff'] = 1 - abs(related_df['lost_2024'] / related_df['Доходы 2024, тыс.руб'])
 
     related_df['money_lost_coeff'] = related_df['money_lost_coeff'].fillna(1)
@@ -287,7 +295,7 @@ def calculate_data_ipem(df, index_df, params):
             columns.append(f'rules%_{year}_{index}')
 
     related_df = related_df[columns]
-
+    print(f'rel {len(related_df)}')
     df = get_ipem_data()
 
     print('Старт обработки данных МПЕМ')
@@ -297,9 +305,8 @@ def calculate_data_ipem(df, index_df, params):
 
     df = calculate_base_revenues_ipem(df, related_df, CON.YEARS, params['revenue_index_values'],params['ipem'])
 
-
     print('calc ipem ok')
-
+    print(f'after calc {len(df)}')
     return df
 
 def calculate_base_revenues_ipem(df, related_df, YEARS, INDEXES, IPEM):
@@ -308,11 +315,7 @@ def calculate_base_revenues_ipem(df, related_df, YEARS, INDEXES, IPEM):
     df = df.merge(related_df, left_on='ipem_gr', right_on='Ключ ИПЕМ',how='left')
     df = df.merge(related_df, left_on='ipem_pr', right_on='Ключ ИПЕМ',how='left')
 
-    # condition = df['index']==234
-    # print(df[condition]['Ключ ИПЕМ_x'])
-    # print(related_df.columns)
-
-
+    print(f'df after merge{len(df)}')
     coeffs = pd.read_excel('data/ipem_coeffs.xlsx')
     prices_dollar = pd.read_excel('data/prices$.xlsx')
 
@@ -464,7 +467,153 @@ def get_filters(df,rule_obj):
     return filters
 
 
-def market_coef (df):
+def bin_group(group, year,bins):
+    group_name = group.name
+    group_bins = bins.get(group_name)
+    if group_bins is None:
+        return group
+
+    column_name = f'marginality_{year}'
+    bin_column = f'bin_upper_{year}'
+
+    labels = group_bins[:-1]
+
+    group[bin_column] = pd.cut(
+        group[column_name],
+        bins=group_bins,
+        labels=labels,
+        include_lowest=True
+    )
+    return group
+
+
+def market_coef_key (df):
+    print('start market coef key routes')
+
+    df[f'ds_2024'] = df[f'Доходы 2024, тыс.руб'] / df[f'2024 Объем перевозок, т.']
+    df[f'money_loss_total'] = 0
+    df[f'cargo_loss_total'] = 0
+
+    df['rzd_costs_2024'] = df['Расходы по оплате услуг ОАО РЖД, руб. за тонну общая стоимость']
+    df['total_costs_2024'] = df['Общие расходы, руб. за тонну']
+    df['price_2024'] = df['Стоимость 1 тонны на рынке, руб./т.']
+    df['marginality_2024'] = df['Маржинальность к стоимости']
+    # базовая доля расходов жд в общих
+    df['rzd_rate'] = df['rzd_costs_2024'] / df['total_costs_2024']
+
+    elastic_df = pd.read_excel('data/fp/elastic_2025.xlsx')
+
+    category_column = 'Группа груза'
+    categories = df[category_column].unique()
+    bins = {}
+    for group in categories:
+        group_values = elastic_df[elastic_df['Категория'] == group]['Значение'].sort_values()
+        if not group_values.empty:
+            bins[group] = [-np.inf] + group_values.tolist() + [np.inf]
+
+    elastic_df['Значение'] = elastic_df['Значение'].astype(float)
+    for year in CON.YEARS:
+        df[f'ds_{year}'] = df[f'Доходы {year}, тыс.руб'] / df[f'{year} Объем перевозок, т.']
+        df[f'growth_rate_{year}'] = df[f'ds_{year}'] / df[f'ds_2024'] - 1
+        df[f'total_costs_{year}'] = df['total_costs_2024'] + df['rzd_costs_2024'] * df[f'growth_rate_{year}']
+        df[f'marginality_{year}'] = (df['price_2024'] - df[f'total_costs_{year}']) / df['price_2024']
+        df[f'marginality_change_{year}'] = (df[f'marginality_{year}'] - df[f'marginality_2024']) / df[f'marginality_2024']
+
+        df = df.groupby('Группа груза', group_keys=False).apply(lambda g: bin_group(g, year,bins))
+
+        # Делаем merge по группе и бину
+        df[f'bin_upper_{year}'] = df[f'bin_upper_{year}'].astype(float)
+
+        # Merge по группе и верхней границе бина
+        df = df.merge(
+            elastic_df,
+            left_on=['Группа груза', f'bin_upper_{year}'],
+            right_on=['Категория', 'Значение'],
+            how='left'
+        ).rename(columns={'Коэффициент': f'market_coefficient_{year}'})
+
+        cols_to_drop = [col for col in df.columns if '_x' in col]
+        df = df.drop(columns=cols_to_drop, errors='ignore')
+
+        df.loc[df['isconst'] == 1, f'market_coefficient_{year}'] = 1
+
+        df[f'money_loss_{year}'] = df[f'Доходы {year}, тыс.руб'] * (1 - df[f'market_coefficient_{year}'])
+        df[f'cargo_loss_{year}'] = df[f'{year} Объем перевозок, т.'] * (1 - df[f'market_coefficient_{year}'])
+        df[f'money_loss_total'] += df[f'money_loss_{year}']
+        df[f'cargo_loss_total'] += df[f'cargo_loss_{year}']
+
+
+    grouped = df.groupby(category_column, as_index=False)
+
+    # Список столбцов для суммирования
+    sum_columns = []
+
+    # Формируем список нужных столбцов
+    for year in CON.YEARS:
+        sum_columns.append(f'cargo_loss_{year}')
+        sum_columns.append(f'{year} Объем перевозок, т.')
+
+    df_summary = grouped[sum_columns].sum()
+
+    # Теперь добавляем коэффициенты
+    for year in CON.YEARS:
+        loss_col = f'cargo_loss_{year}'
+        volume_col = f'{year} Объем перевозок, т.'
+        coef_col = f'market_coefficient_{year}'
+        # Проверка деления на ноль
+        df_summary[coef_col] = 1 - (df_summary[loss_col] / df_summary[volume_col])
+        df_summary[coef_col] = df_summary[coef_col].fillna(1.0)  # если объем == 0, то потерь нет → коэффициент = 1.0
+
+    print('end market coef key routes')
+
+    # Оставляем только category_column и market_coefficient_*
+    cols_to_keep = [category_column] + [f'market_coefficient_{year}' for year in CON.YEARS]
+    df_summary = df_summary[cols_to_keep]
+    return df_summary
+
+def market_coef (df, key_df):
+    print('start market coef')
+
+    category_column = 'Группа груза'
+    agg_params = {}
+    agg_params[f'Доходы 2024, тыс.руб'] = 'sum'
+    agg_params[f'2024 Объем перевозок, т.'] = 'sum'
+    agg_params[f'2024 ЦЭКР груззоборот, тыс ткм'] = 'sum'
+
+    for year in CON.YEARS:
+        agg_params[f'Доходы {year}, тыс.руб'] = 'sum'
+        agg_params[f'{year} Объем перевозок, т.'] = 'sum'
+        agg_params[f'{year} ЦЭКР груззоборот, тыс ткм'] = 'sum'
+
+
+    df = df.groupby(['Группа груза', 'Вид перевозки', 'Направления', 'Холдинг','Код груза','Род вагона','Тип парка']).agg(agg_params).reset_index()
+
+    df = df.merge(
+        key_df,
+        on=category_column,
+        how='left'
+    )
+
+    df[f'money_loss_total'] = 0
+    df[f'cargo_loss_total'] = 0
+    df[f'money_loss_2024'] = 0
+    df[f'cargo_loss_2024'] = 0
+    df[f'money_after_loss_2024'] = df[f'Доходы 2024, тыс.руб']
+    df[f'cargo_after_loss_2024'] = df[f'2024 Объем перевозок, т.']
+    df[f'turnover_after_loss_2024'] = df[f'2024 ЦЭКР груззоборот, тыс ткм']
+
+    for year in CON.YEARS:
+        df[f'market_coefficient_{year}'] = df[f'market_coefficient_{year}'].fillna(1)
+        df[f'money_loss_{year}'] = df[f'Доходы {year}, тыс.руб'] * (1 - df[f'market_coefficient_{year}'])
+        df[f'money_after_loss_{year}'] = df[f'Доходы {year}, тыс.руб'] * df[f'market_coefficient_{year}']
+        df[f'cargo_loss_{year}'] = df[f'{year} Объем перевозок, т.'] * (1 - df[f'market_coefficient_{year}'])
+        df[f'cargo_after_loss_{year}'] =  df[f'{year} Объем перевозок, т.'] * df[f'market_coefficient_{year}']
+        df[f'turnover_after_loss_{year}'] =  df[f'{year} ЦЭКР груззоборот, тыс ткм'] * df[f'market_coefficient_{year}']
+        df[f'money_loss_total'] += df[f'money_loss_{year}']
+        df[f'cargo_loss_total'] += df[f'cargo_loss_{year}']
+    return df
+
+def market_coef_old (df):
     print('start market coef')
     agg_params = {}
     agg_params[f'Доходы 2024, тыс.руб'] = 'sum'

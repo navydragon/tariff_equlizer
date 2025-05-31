@@ -13,7 +13,11 @@ FULL_YEARS = [2024] + CON.YEARS
 def draw_slider (type,year,value, max=None, step=1,is_vertical=True, placement="right", classname='my-slider'):
     value = float(value)
     if max is None:
-        max = value * 2
+        if value == 0:
+            max = 1000
+        else:
+            max = value * 2
+
     res = dcc.Slider(
         min=0, max=max, marks=None, step=step, value=value, vertical=is_vertical, verticalHeight=200, className=classname,
         id={'type': type, 'index': year},
@@ -74,7 +78,7 @@ def update_base_input(value):
 def update_base_slider(value,max, step):
    triggered_id = callback_context.triggered_id
    index = triggered_id['index']
-   res = draw_slider (type='base',year=index,max=max,value=value, step=step)
+   res = draw_slider (type='base',year=index,max=max,value=value, step=0.01)
    return res
 
 
@@ -323,6 +327,11 @@ def draw_equilizer(type, period, values):
     if period is None:
         period=FULL_YEARS
 
+    step = 1
+    if type == 'base':
+        step = 0.01
+
+
     return [
         dbc.Row([*[dbc.Col(year, className='my-slider__text',
                            style={'display': 'block'} if year in period else {'display': 'none'}) for year in
@@ -335,7 +344,7 @@ def draw_equilizer(type, period, values):
         ]),
         dbc.Row([
             *[dbc.Col([
-                draw_slider(type=type, year=year, value=values[index])
+                draw_slider(type=type, year=year, value=values[index], step=step)
             ], id={'type': f'{type}_container', 'index': year}, className='text-center',
                 style={'display': 'block'} if year in period else {'display': 'none'}) for index, year in
                 enumerate(FULL_YEARS)]

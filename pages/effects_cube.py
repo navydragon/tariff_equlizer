@@ -88,7 +88,7 @@ def results():
             dcc.Loading(
                 id="loading",
                 type="default",
-                color="#e21a1a",
+                color="#063971",
                 fullscreen=False,
                 children=[html.Div([], id='table_div')]
             ),
@@ -129,17 +129,16 @@ def recount_base(
 
     index_df = get_revenue_parameters()
     indexation_variant = 'Индексация по расп.N2991-р'
-    index_param = 'indexation' if indexation_variant == 'Индексация по расп.N2991-р' else 'icd'
 
     global rp
     rp = {}
     for param in index_df['param'].unique():
         rp[param] = index_df[index_df['param'] == param].sort_values('year')['value'].tolist()
-    rp.get('cap_rem').insert(0, 1.05)
-    rp.get('taxes').insert(0, 1.015)
-    rp.get('tb').insert(0, 1)
-    rp.get('invest').insert(0, 1)
-    rp.get('indexation').insert(0, 1.08)
+    # rp.get('cap_rem').insert(0, 1.05)
+    # rp.get('taxes').insert(0, 1.015)
+    # rp.get('tb').insert(0, 1)
+    # rp.get('invest').insert(0, 1)
+    # rp.get('indexation').insert(0, 1.08)
 
     res_df = group_and_combine(group1, group2, filter, filter2)
     res_df = make_result_table(res_df, group1, group2)
@@ -164,10 +163,7 @@ def regroup(group1, group2, filter, filter2):
 
 
 def group_and_combine(group1, group2, filter, filter2):
-    base_cap_rem = 1.05
-    base_taxes = 1.015
-    base_tb = 1
-    base_invest = 1
+
     if group1 == 'Тарифные решения':
         if group2 is not None:
             df_gr = calc.group_data(df, group2, 'Нет')
@@ -194,11 +190,11 @@ def group_and_combine(group1, group2, filter, filter2):
         pr_factors_mul = 1
         indexation_mul = 1
 
-        for year_index, year in enumerate([2024] + CON.YEARS, start=1):
+        for year_index, year in enumerate(CON.YEARS, start=1):
 
             rev_year = row[f'Доходы {year}, тыс.руб']
             rev_year_prev = row[f'Доходы {year - 1}, тыс.руб']
-            rev_year_base = row[f'Доходы 2023, тыс.руб']
+            rev_year_base = row[f'Доходы 2024, тыс.руб']
 
             if rev_year_prev == 0:
                 pr_factor = 1
@@ -212,17 +208,21 @@ def group_and_combine(group1, group2, filter, filter2):
 
             pr_factors_mul *= pr_factor
             indexation_mul *= indexation[year_index]
-
             res_row[f'base_plus_{year}'] = rev_year / cap_rem[year_index] / tb[year_index] * cap_rem[0] * tb[
                 0] - rev_year_base * pr_factors_mul
             res_row[
                 f'base_{year}'] = rev_year_base * pr_factors_mul * indexation_mul - rev_year_base * pr_factors_mul * indexation_mul / \
                                   indexation[year_index]
-            res_row[f'cap_rem_{year}'] = rev_year / taxes[year_index] / tb[year_index] - rev_year / taxes[year_index] / \
-                                         tb[year_index] / cap_rem[year_index] * cap_rem[0]
-            res_row[f'taxes_{year}'] = rev_year - rev_year / taxes[year_index]
-            res_row[f'tb_{year}'] = rev_year / cap_rem[year_index] / taxes[year_index] - rev_year / cap_rem[
-                year_index] / taxes[year_index] / tb[year_index] * tb[0]
+            # res_row[f'cap_rem_{year}'] = rev_year / taxes[year_index] / tb[year_index] - rev_year / taxes[year_index] / \
+            #                              tb[year_index] / cap_rem[year_index] * cap_rem[0]
+            res_row[f'cap_rem_{year}'] = res_row[f'base_{year}'] * 0.7226
+            res_row[f'taxes_{year}'] = res_row[f'base_{year}'] * 0.16525
+            res_row[f'tb_{year}'] = res_row[f'base_{year}'] * 0.11214
+            # res_row[f'cap_rem_{year}'] = rev_year - rev_year / cap_rem[year_index]
+            # res_row[f'taxes_{year}'] = rev_year - rev_year / taxes[year_index]
+            #res_row[f'tb_{year}'] = rev_year - rev_year / tb[year_index]
+            # res_row[f'tb_{year}'] = rev_year / cap_rem[year_index] / taxes[year_index] - rev_year / cap_rem[
+            #    year_index] / taxes[year_index] / tb[year_index] * tb[0]
 
             if group1 != 'Тарифные решения':
                 res_row['parameter'] = row[group1]
@@ -235,8 +235,9 @@ def group_and_combine(group1, group2, filter, filter2):
                     row[f'Доходы 2024_{rule_index}, тыс.руб'] = 0
 
                     res_row[f'rules_{rule_index}_2024'] = 0
-                    res_row[f'rules_{rule_index}_{year}'] = (res_row[f'rules_{rule_index}_{year - 1}'] + row[
-                        f'Доходы {year}_{rule_index}, тыс.руб']) * indexation[year_index]
+                    res_row[f'rules_{rule_index}_{year}'] = row[f'Доходы {year}_{rule_index}, тыс.руб']
+                    # res_row[f'rules_{rule_index}_{year}'] = (res_row[f'rules_{rule_index}_{year - 1}'] + row[
+                    #     f'Доходы {year}_{rule_index}, тыс.руб']) * indexation[year_index]
                     rules_sum += res_row[f'rules_{rule_index}_{year}']
             res_row[f'rules_{year}'] = rules_sum
             if year != 2024:
@@ -312,7 +313,7 @@ def draw_grid(res_df):
 
 def make_result_table(df, group1, group2):
     my_dict = {
-        'Эффект от индексации': 'base_plus',
+        # 'Эффект от индексации': 'base_plus',
         'Базовая индексация': 'base',
         'Капитальный ремонт': 'cap_rem',
         'Налоговая надбавка': 'taxes',
@@ -334,14 +335,14 @@ def make_result_table(df, group1, group2):
             if group2 is not None: res_row[group2] = row['parameter2']
 
             res_row['Тарифное решение'] = key
-            for year_index, year in enumerate([2024] + CON.YEARS):
+            for year_index, year in enumerate(CON.YEARS):
                 res_row[str(year)] = round(row[f'{value}_{year}'] / 1000000, 3)
             res.append(res_row)
 
     res_df = pd.DataFrame(res)
     res_df = res_df.drop_duplicates()
 
-    years = [2024] + CON.YEARS
+    years = CON.YEARS
     res_df[str(years[0]) + '-' + str(years[-1])] = round(res_df[[str(year) for year in years]].sum(axis=1), 2)
 
     return res_df

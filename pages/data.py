@@ -37,7 +37,6 @@ def process_revenue_parameters_excel(df, key):
 
 main_data = None
 
-
 def get_main_data():
     global main_data
 
@@ -46,7 +45,7 @@ def get_main_data():
     caller_lineno = caller_frame.lineno
 
     # Print the caller information
-    print(f"Function called from file: {caller_filename}, line: {caller_lineno}")
+    # print(f"Function called from file: {caller_filename}, line: {caller_lineno}")
 
     # Вывод времени начала работы
     start_time = time.time()
@@ -69,6 +68,12 @@ def get_main_data():
 
 
 small_data = None
+
+
+def get_key_routes_data():
+    df = pd.read_excel('data/fp/key_routes_db.xlsx')
+
+    return df
 
 
 def get_small_data():
@@ -121,7 +126,7 @@ def make_ipem_related_routes(ipem_calculated):
                'Код станц назн РФ', 'Дор отпр', 'Дор наз', 'Род вагона',
                'Вид перевозки', 'Категория отпр.', 'Тип парка', 'Вид спец. контейнера',
                'Холдинг', 'Направления', 'Код груза(изпод)']
-    res = res.groupby(columns).sum().reset_index()
+    res = res.groupby(columns).sum(numeric_only=True).reset_index()
     res.to_feather('data/te/ipem_related_routes.feather')
 
 
@@ -157,8 +162,8 @@ def calculate_total_index(indexation_variant: str = 'Индексация по �
 
 
 def get_te_variants():
-    # df = pd.read_excel('data/te/variants/te_variants.xlsx')
-    # df.to_json('data/te/variants/te_variants.json', index=False)
+    #df = pd.read_excel('data/te/variants/te_variants.xlsx')
+    #df.to_json('data/te/variants/te_variants.json', index=False)
     return pd.read_json('data/te/variants/te_variants.json')
 
 
