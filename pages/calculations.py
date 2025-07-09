@@ -19,6 +19,7 @@ def calculate_data(data_type='main', params={}):
     print(f"Начало расчетов на строках БД {data_type}: {time.strftime('%Y-%m-%d %H:%M:%S')}")
     if data_type == 'main':
         df = get_main_data()
+        # df = df.sample(10000, random_state=12345)
     elif data_type == 'key_routes':
         df = get_key_routes_data()
     else:
@@ -62,7 +63,8 @@ def group_data(df, param1, param2):
         agg_params[revenue] = 'sum'
         agg_params[f'Доходы {year}_0, тыс.руб'] = 'sum'
 
-
+        epl = f'{year} ЦЭКР груззоборот, тыс ткм'
+        agg_params[epl] = 'sum'
         rule_index = 0
         for rule_obj in rules:
             if rule_obj["active"]:
@@ -138,9 +140,9 @@ def group_data_cube(df):
     return df_grouped
 
 
-def  calculate_base_revenues(df, YEARS, INDEXES, EPL_CHANGE):
-    base_revenue_col = 'Доходы 2024, тыс.руб'
-    revenue_base = CON.PR_P
+def calculate_base_revenues(df, YEARS, INDEXES, EPL_CHANGE):
+
+    revenue_base = base_revenue_col = CON.PR_P
     epl_base = f'2024 ЦЭКР груззоборот, тыс ткм'
     rules = tr.load_rules(active_only=True)
     df = create_new_columns(df, YEARS, base_revenue_col,rules)
@@ -175,12 +177,15 @@ def  calculate_base_revenues(df, YEARS, INDEXES, EPL_CHANGE):
     for rule_obj in rules:
         rule_indexation[rule_obj["id"]] = []
 
-    # объем перевозок 2024
-    # df['2024 Объем перевозок, т.'] = df['2023 Объем перевозок, т.'] * df['2024 ЦЭКР груззоборот, тыс ткм'] * 1000 / df['2023 Грузооборот, т_км']
 
     df['epl_tarif_base'] = df[revenue_base] / df[epl_base]
 
     df['rules_total'] = 0
+    containers_special = {}
+
+
+
+
     for i, year in enumerate(YEARS):
         year_index *= INDEXES[i]
         revenue = f'Доходы {year}, тыс.руб'
@@ -197,11 +202,11 @@ def  calculate_base_revenues(df, YEARS, INDEXES, EPL_CHANGE):
             df.loc[df['epl_tarif_base'].isna(), revenue_noindex] = df[revenue_prev]
             df.loc[df[epl_prev].notna(), f'{year} Объем перевозок, т.'] = df[f'{year - 1} Объем перевозок, т.'] * (df[epl] / df[epl_prev])
             df.loc[df[epl_prev].isna(), f'{year} Объем перевозок, т.'] = df[f'{year - 1} Объем перевозок, т.']
-
         else:
             df[revenue_noindex] = df[revenue_prev]
             df[epl] = df[epl_prev]
             df[f'{year} Объем перевозок, т.'] = df[f'{year-1} Объем перевозок, т.']
+
         # базовая индексация
         df[revenue_base] = df[revenue_noindex] * (INDEXES[i]-1) * df['base_diff']
 
@@ -211,7 +216,7 @@ def  calculate_base_revenues(df, YEARS, INDEXES, EPL_CHANGE):
         for rule_obj in rules:
             rule_index += 1
             revenue_rule = f'Доходы {year}_{rule_index}, тыс.руб'
-            revenue_rule_prev = f'Доходы {int(year)-1}_{rule_index}, тыс.руб'
+
             filters = []
             for condition in rule_obj["conditions"]:
                 parameter = condition["parameter"]
@@ -224,14 +229,81 @@ def  calculate_base_revenues(df, YEARS, INDEXES, EPL_CHANGE):
                 else:
                     filters.append(~df[parameter].isin(values))
 
-            rule_coef = float(rule_obj['index_'+str(year)]) - 1
-            df.loc[np.logical_and.reduce(filters), revenue_rule] = df[revenue_noindex] * rule_coef * df['rules_diff'] * int(rule_obj['base_percent'])/100
-            df.loc[np.logical_and.reduce(filters), f'rules%_{year}'] *=  float(rule_obj['index_'+str(year)]) * df['rules_diff']
-            df.loc[np.logical_and.reduce(filters), f'rules%_{year}_{rule_index}'] =  float(rule_obj['index_'+str(year)])
+            if rule_obj['is_special'] == 1:
+                # if i == 0:
+                #     rule_obj['index_' + str(year)] = 1
+                # else:
+                func_name = rule_obj.get('special_func','')
+                if func_name == 'special_containers':
+                    rule_obj['index_2024'] = 1.107
+                    x_coeff, s_ch = special_containers(rule_obj['index_'+str(year)],rule_obj['index_'+str(year-1)], INDEXES[i])
+                    containers_special[year] = {
+                        "x_coeff": x_coeff,
+                        "s_ch": s_ch,
+                    }
+                    print(f"{year}, x={x_coeff}, s={s_ch}")
+
+                df[f'distance_value_{year}'] = x_coeff * df['Среднее расстояние по пд'] + s_ch
+
+                if i == 0:
+                    df[f'rule_index_{rule_index}_{year}'] = 1
+                else:
+                    df[f'rule_index_{rule_index}_{year}'] = df[f'distance_value_{year}'] / df[f'distance_value_{year-1}']
+
+
+
+                # old_col = f'cont_index{year}'
+                # new_col = f'rule_index_{rule_index}_{year}'
+                # if old_col in df.columns:
+                #     df[new_col] = df[old_col]
+
+                df.loc[df['Среднее расстояние по пд'] < 4000, f'rule_index_{rule_index}_{year}'] = 1
+
+                if year == 2029:
+                    kek = df.loc[np.logical_and.reduce(filters), :].groupby('Пояс дальности').agg({
+                        'Среднее расстояние по пд': 'first',
+                        f'distance_value_2027': 'mean',
+                        f'distance_value_2028': 'mean',
+                        f'distance_value_2029': 'mean',
+                        f'2027 ЦЭКР груззоборот, тыс ткм': 'sum',
+                        f'2028 ЦЭКР груззоборот, тыс ткм': 'sum',
+                        f'2029 ЦЭКР груззоборот, тыс ткм': 'sum',
+                        f'rule_index_{rule_index}_2027': 'mean',
+                        f'rule_index_{rule_index}_2028': 'mean',
+                        f'rule_index_{rule_index}_2029': 'mean'
+                    }).reset_index()
+                    coeffs = pd.read_excel('data/extended_rules.xlsx', sheet_name='Контейнеры')
+                    kek = kek.merge(coeffs, on='Пояс дальности', how='left')
+                    kek.to_excel(f'kek_{year}.xlsx')
+
+                rule_coef = df[f'rule_index_{rule_index}_{year}'] - 1
+
+                df.loc[np.logical_and.reduce(filters), revenue_rule] = df[revenue_noindex] * rule_coef * df['rules_diff'] * int(rule_obj['base_percent']) / 100
+
+                if (i != 0) and (containers_special.get(year).get('x_coeff') == containers_special.get(year-1).get('x_coeff')):
+                    df.loc[:, revenue_rule] = 0
+
+                # df.loc[df['Среднее расстояние по пд'] < 4000, revenue_rule] = 0
+
+
+            else:
+                rule_coef = float(rule_obj['index_'+str(year)]) - 1
+                df.loc[np.logical_and.reduce(filters), revenue_rule] = df[revenue_noindex] * rule_coef * df['rules_diff'] * int(rule_obj['base_percent'])/100
+                df.loc[np.logical_and.reduce(filters), f'rules%_{year}'] *=  float(rule_obj['index_'+str(year)]) * df['rules_diff']
+                df.loc[np.logical_and.reduce(filters), f'rules%_{year}_{rule_index}'] =  float(rule_obj['index_'+str(year)])
 
             df[revenue] += df[revenue_rule]
 
     return df
+
+
+def special_containers (coeff,prev_coeff, base_ind):
+    # print(f"coeff={coeff}, prev_coeff={prev_coeff}, base_ind={base_ind}")
+    # if prev_coeff == coeff:
+    #     return 1, 0
+    s_ch = (-104495* coeff + 117560) * base_ind
+    x_coeff = 15.079 * coeff / 0.57
+    return x_coeff, s_ch
 
 
 def create_new_columns (df, years, base_revenue_col, rules):

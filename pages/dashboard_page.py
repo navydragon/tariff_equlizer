@@ -207,6 +207,9 @@ def update_dashboard(
 
 ):
     global PARAMS
+    global df
+    global loss_df
+
     PARAMS = check_and_prepare_params(
         epl_change, market_loss, cif_fob, index_sell_prices, price_variant, index_sell_coal,
         index_oper, index_per, revenue_index_values
@@ -214,10 +217,13 @@ def update_dashboard(
 
     helpers.save_last_params(PARAMS)
 
+    # Определяем базу по правилам
+    rules = tr.load_rules(active_only=True)
+    database_type = 'main' if any(rule['is_special'] == 1 for rule in rules) else 'small'
+
     # Расчет на уровне маршрутов
-    global df
-    global loss_df
-    df = calc.calculate_data('small', PARAMS)
+
+    df = calc.calculate_data(database_type, PARAMS)
     # if 'Yes' in PARAMS['market']['use_market']:
     if PARAMS['market_loss'] == [True]:
         key_routes_df = calc.calculate_data('key_routes', PARAMS)

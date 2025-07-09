@@ -6,15 +6,21 @@ from dash import html, dcc, callback, Output, Input, State, ALL
 from pages.constants import Constants as CON
 import numpy as np
 
-dash.register_page(__name__, name="Обработка данных", path='/load_data', order=10, my_class='my-navbar__icon-1')
+# dash.register_page(__name__, name="Обработка данных", path='/load_data', order=10, my_class='my-navbar__icon-1')
 
 
 def layout():
 
-    # load_data()
-    load_key_routes()
+    load_data()
+    # load_key_routes()
 
     return html.Div([])
+
+
+def calculate_average_distance(range_str):
+    start, end = map(int, range_str.split('-'))
+    return round((start + end) / 2)
+
 
 
 def load_key_routes():
@@ -97,8 +103,6 @@ def load_data():
     holdings_df.to_feather('data/fp/holdings.feather')
 
 
-
-
     group_parameters = ['Группа груза',
                         'Код груза', 'Код груза(изпод)',
                         'Дор отпр', 'Дор наз',
@@ -107,7 +111,7 @@ def load_data():
                         # 'Маршрут',
                         'Род вагона',
                         'Вид перевозки','Категория отпр.','Тип парка','Вид спец. контейнера',
-                        'Холдинг','Направления',
+                        'Холдинг','Направления','Пояс дальности', 'Среднее расстояние по пд'
                         ]
 
     agg_params = {
@@ -119,6 +123,7 @@ def load_data():
 
     column_mapping = {
         '2024 Доходы,тыс.руб': 'Доходы 2024, тыс.руб',
+        '2024 Пояс дальности': 'Пояс дальности'
        # '2023 Доходы,тыс.руб': 'Доходы 2023, тыс.руб'
     }
 
@@ -130,6 +135,8 @@ def load_data():
     # Переименование колонок
 
     df.rename(columns=column_mapping, inplace=True)
+
+    df['Среднее расстояние по пд'] = df['Пояс дальности'].apply(calculate_average_distance)
 
     df_grouped = df.groupby(group_parameters).agg(agg_params).reset_index()
 
@@ -157,7 +164,8 @@ def load_data():
     print(len(df_grouped_small))
 
 
-def mean_distance(df):
+def mean_distance(df: pd.DataFrame) -> pd.DataFrame:
+    '''Средняя дальность'''
     df['Средняя дальность, км'] = df['2024 Грузооборот, т_км'] / df[
         '2024 Объем перевозок, т.']
     # Замена бесконечных значений на NaN

@@ -77,6 +77,7 @@ class Constants:
         {'label': year, 'value': str(year)} for year in range(2026, 2031)
     ]
     YEARS = [2025,  2026, 2027, 2028, 2029, 2030, 2031, 2032, 2033, 2034, 2035]
+    FULL_YEARS = [2024, 2025, 2026, 2027, 2028, 2029, 2030, 2031, 2032, 2033, 2034, 2035]
     LITTLE_YEARS = [2025,  2026, 2027, 2028, 2029, 2030]
     # YEARS = LITTLE_YEARS
 

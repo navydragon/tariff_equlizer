@@ -28,7 +28,7 @@ df = get_ipem_data()
 ipem_calculated = []
 ipc_df = pd.read_excel('data/te/ipc.xlsx', header=None)
 ipc_dict = pd.Series(ipc_df.iloc[1].values, index=ipc_df.iloc[0].values).to_dict()
-FULL_YEARS = [2024] + CON.YEARS
+FULL_YEARS = CON.FULL_YEARS
 
 
 cargo_mapping = {
@@ -372,12 +372,12 @@ def update_equlizer(route,trip,cargo_group,mesage_group, trip_group,
         #html.Div(dcc.Dropdown(value=None, id="variant_select", style={'display': 'none'}),)
     ])
 
-    #print(route)
+    print(route)
     #print(ipem_calculated['route'].unique())
 
     if type == 'Маршрут':
         if route is None: return ([],no)
-        current_route = ipem_calculated[ipem_calculated['route'] == route]
+        current_route = ipem_calculated[ipem_calculated['index'] == route]
 
     else:
         if mesage_group is None:
@@ -446,7 +446,10 @@ def recount_graph(costs,bases, rules,
                   type, trip, cargo_group, mesage_group, trip_group,
                   period, route,message):
     period = sorted(period)
-    print("called recount_graph")
+
+    if "внутр." in message.lower():
+        message = 'внутренние'
+
     no = html.Div([
         html.Em('Последовательно выберите груз, холдинг, вид сообщения и маршрут'),
         html.Div(dcc.Dropdown(value=None, id="variant_select", style={'display': 'none'}), )
@@ -454,7 +457,7 @@ def recount_graph(costs,bases, rules,
     if type == 'Маршрут':
         if route is None:
             return (no,no,no,no,no,no, no)
-        current_route = ipem_calculated[ipem_calculated['route'] == route]
+        current_route = ipem_calculated[ipem_calculated['index'] == route]
     else:
         if (mesage_group is None) or (cargo_group is None):
             return (no,no,no,no,no, no, no)
@@ -470,6 +473,7 @@ def recount_graph(costs,bases, rules,
         'Маржинальность холдинга',
         'Себестоимость производства',
         'Расходы на оплату услуг ОАО "РЖД"',
+        'Расходы по оплате услуг операторов',
         'Расходы по оплате услуг операторов',
         'Расходы на перевалку',
         'Расходы на фрахт'
@@ -498,25 +502,29 @@ def recount_graph(costs,bases, rules,
 
 
     for index,year in enumerate(FULL_YEARS):
-
         if year == 2024:
-            rzd.append(current_route.iloc[0][f'{trip_col}_{year}'].round(2))
+            rzd.append(current_route.iloc[0][f'{trip_col}_{year}'].round(2) / 1.107)
             rzd_gr.append(current_route.iloc[0][f'{CON.RZD_GR}_{year}'].round(2))
             if trip=='Кругорейс':
                 rzd_por.append(current_route.iloc[0][f'{CON.RZD_POR}_{year}'].round(2))
-
+        elif year == 2025:
+                rzd.append(current_route.iloc[0][f'{trip_col}_{year-1}'].round(2))
+                rzd_gr.append(current_route.iloc[0][f'{CON.RZD_GR}_{year-1}'].round(2))
+                if trip == 'Кругорейс':
+                    rzd_por.append(current_route.iloc[0][f'{CON.RZD_POR}_{year-1}'].round(2))
         else:
+
             rzd_val = rzd[-1] + rzd[-1]*(bases[index]-1) + rzd[-1]*(rules[index]-1)
             rzd.append(round(rzd_val,2))
             rzd_gr_val = rzd_gr[-1] + rzd_gr[-1]*(bases[index]-1) + rzd_gr[-1]*(current_route.iloc[0][f'rules%_{year}_gr']-1)
             rzd_gr.append(round(rzd_gr_val,2))
             if trip == 'Кругорейс':
                 rzd_por_val = rzd_por[-1] + rzd_por[-1]*(bases[index]-1) + rzd_por[-1]*(current_route.iloc[0][f'rules%_{year}_por']-1)
-
                 rzd_por.append(round(rzd_por_val,2))
 
 
-        year_price = prices_rub[index] if message == 'внутренние' else prices[index]*dollar_prices[index]
+
+        year_price = prices_rub[index] if message == 'внутренние' else prices[index] * dollar_prices[index]
 
 
         price_rub.append(year_price)
@@ -716,6 +724,9 @@ def recount_graph(costs,bases, rules,
 
 
 def make_tabs(route,trip, message, price_message,period,cif_fob, params_variant):
+
+    if "внутр." in message.lower():
+        message = 'внутренние'
 
     PRICES_DOLLAR = get_dollar_rate()
     is_export = 'block' if message != 'внутренние' else 'none'
@@ -1082,13 +1093,20 @@ def message_select(message,cargo):
     State('cargo_select','value'),
     prevent_initial_call=True
 )
-def holding_select(holding,message,cargo):
+def holding_select(holding, message, cargo):
     disabled = True if holding is None else False
     placeholder = '' if holding is None else 'Выберите маршрут'
-    condition = (df['Группа груза'] == cargo) & (df['Холдинг грузоотправителя'] == holding) & (df['Вид сообщения'] == message)
-    options = df.loc[condition, 'route'].unique()
+    condition = (df['Группа груза'] == cargo) & (df['Холдинг грузоотправителя'] == holding) & (
+                df['Вид сообщения'] == message)
 
-    return (options,disabled,None,placeholder)
+    # Фильтруем DataFrame по условию
+    filtered_df = df.loc[condition, ['route', 'Груз', 'Тип отправки', 'index']].drop_duplicates()
+
+    # Формируем options с label и value
+    options = [{'label': f"{row['route']} ({row['Груз']}) - {row['Тип отправки']}", 'value': row['index']} for _, row in
+               filtered_df.iterrows()]
+
+    return (options, disabled, None, placeholder)
 
 
 @callback(

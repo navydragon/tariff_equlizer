@@ -68,13 +68,15 @@ def revenues_layout(last_params):
             html.Div('',className='my-separate my-separate_width_300 my-separate_vector_left'),
             html.Div([
                 html.Div([
-                    html.H4('Варианты индексации', className='my-section__subtitle'),
+                    html.H4('Индексация на базе композитного индекса по расп. N2991-р', className='my-section__subtitle'),
+
                     dbc.Select(
                         id='indexation_variant',
                         options=['Индексация по расп.N2991-р', 'Индекс Затраты+'],
                         value=indexation_variant,
                         # disabled=True,
-                        className='form-select'
+                        className='form-select',
+                        style={'display': 'none'}
                     ),
                 ], className='my-section__item')
             ],className='my-section__item'),

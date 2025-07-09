@@ -1,7 +1,7 @@
 import dash
 from dash import html
 from pages.navbar import navbar
-from dash_auth import BasicAuth
+# from dash_auth import BasicAuth
 
 
 import webbrowser
@@ -48,7 +48,7 @@ app.layout = html.Div([
 
 
 
-debug = False
+debug = True
 
 
 if not debug:

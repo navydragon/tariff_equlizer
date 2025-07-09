@@ -50,7 +50,7 @@ def rules_layout():
             [
                 html.Div([
                     html.Button("",id="create_modal_button_prev",n_clicks=0, className='my-button my-button_margin_left my-button__type_create'),
-                    html.Span('Добавить новое тарифное рещение', className='my-button_margin_left'),
+                    html.Span('Добавить новое тарифное решение', className='my-button_margin_left'),
                 ], className='my-button__menu'),
                 html.Hr(),
                 html.Div([

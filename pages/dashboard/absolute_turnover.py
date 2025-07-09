@@ -31,7 +31,7 @@ def filters():
                     html.Label('млрд ткм'),
                     dcc.Dropdown(
                         id='group_parameter_turnover',
-                        options=['Группа груза','Код груза','Направления','Род вагона','Вид перевозки','Категория отправки','Тип парка','Холдинг'],
+                        options=['Группа груза','Код груза','Направления','Род вагона','Вид перевозки','Категория отпр.','Тип парка','Холдинг'],
                         searchable=True,
                         clearable=False,
                         value=''
@@ -43,7 +43,7 @@ def filters():
                         id='group_parameter2_turnover',
                         options=['Группа груза', 'Код груза', 'Направления',
                                  'Род вагона', 'Вид перевозки',
-                                 'Категория отправки', 'Тип парка', 'Холдинг'],
+                                 'Категория отпр.', 'Тип парка', 'Холдинг'],
                         searchable=True,
                         value=None
                     ),
@@ -63,12 +63,35 @@ def filters():
     )
 
 def draw_grid(res_df):
-    sum_row = {col: round(res_df[col].sum(),2) if pd.api.types.is_numeric_dtype(res_df[col]) else 'ИТОГО' for col in res_df.columns}
+    # Создаем mapping для колонок с проблемными символами
+    column_mapping = {}
+    clean_columns = []
+
+    for col in res_df.columns:
+        clean_col = col.replace('.', '_').replace(' ', '_').replace(',', '_')
+        column_mapping[col] = clean_col
+        clean_columns.append(clean_col)
+
+    # Переименовываем колонки для AgGrid
+    clean_df = res_df.copy()
+    clean_df.columns = clean_columns
+
+    sum_row = {
+        clean_col: round(res_df[orig_col].sum(), 2) if pd.api.types.is_numeric_dtype(res_df[orig_col]) else 'ИТОГО'
+        for orig_col, clean_col in column_mapping.items()}
+
+    columnDefs = [
+        {
+            "headerName": orig_col,  # Отображаемое название
+            "field": clean_col  # Поле для данных
+        }
+        for orig_col, clean_col in column_mapping.items()
+    ]
 
     grid = dag.AgGrid(
         id="main_grid",
-        rowData=res_df.to_dict("records"),
-        columnDefs=[{"headerName": col, "field": col} for col in res_df.columns],
+        rowData=clean_df.to_dict("records"),
+        columnDefs=columnDefs,
         defaultColDef={"sortable": True, "filter": True, "resizable": True},
         dashGridOptions={
             'pinnedTopRowData': [sum_row],

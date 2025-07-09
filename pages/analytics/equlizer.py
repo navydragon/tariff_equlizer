@@ -7,7 +7,7 @@ import pandas as pd
 
 ipc_df = pd.read_excel('data/te/ipc.xlsx', header=None)
 ipc_dict = pd.Series(ipc_df.iloc[1].values, index=ipc_df.iloc[0].values).to_dict()
-FULL_YEARS = [2024] + CON.YEARS
+FULL_YEARS = CON.FULL_YEARS
 
 
 def draw_slider (type,year,value, max=None, step=1,is_vertical=True, placement="right", classname='my-slider'):

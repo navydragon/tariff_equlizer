@@ -69,7 +69,7 @@ def results():
                         id='group_parameter2',
                         options=['Группа груза', 'Код груза', 'Направления',
                                  'Род вагона', 'Вид перевозки',
-                                 'Категория отправки', 'Тип парка', 'Холдинг'],
+                                 'Категория отпр.', 'Тип парка', 'Холдинг'],
                         searchable=True,
                         value=None
                     ),
@@ -125,7 +125,12 @@ def recount_base(
     helpers.save_last_params(params)
 
     global df
-    df = calc.calculate_data([], params)
+
+    # Определяем базу по правилам
+    rules = tr.load_rules(active_only=True)
+    database_type = 'main' if any(rule['is_special'] == 1 for rule in rules) else 'small'
+
+    df = calc.calculate_data(database_type, params)
 
     index_df = get_revenue_parameters()
     indexation_variant = 'Индексация по расп.N2991-р'
@@ -183,46 +188,58 @@ def group_and_combine(group1, group2, filter, filter2):
     tb = rp.get('tb')
     rules = tr.load_rules(active_only=True)
 
+    cap_rem_2024_total = 142348877.406051
+    taxes_2024_total = 32553370.5964365
+    tb_2024_total = 22091640.3407531
+
+
+    cap_rem_totals = [142348877.406051]
+    taxes_totals = [32553370.5964365]
+    tb_totals = [22091640.3407531]
+    base_totals = [0]
+
+    for year_index, year in enumerate(CON.YEARS, start=1):
+        epl_change_total = df_gr[f'{year} ЦЭКР груззоборот, тыс ткм'].sum() / df_gr[f'{year-1} ЦЭКР груззоборот, тыс ткм'].sum()
+        cap_rem_totals.append(cap_rem_totals[-1] * indexation[year_index] * epl_change_total)
+        taxes_totals.append(taxes_totals[-1] * indexation[year_index] * epl_change_total)
+        tb_totals.append(tb_totals[-1] * indexation[year_index] * epl_change_total)
+        base_totals.append(df_gr[f'Доходы {year}_0, тыс.руб'].sum())
+
     for index, row in df_gr.iterrows():
         res_row = {}
 
-        pr_factors = []
-        pr_factors_mul = 1
-        indexation_mul = 1
+        rev_year_base = row[f'Доходы 2024, тыс.руб']
+        epl_year_base = row[f'2024 ЦЭКР груззоборот, тыс ткм']
+        epl_part = row[f'2024 ЦЭКР груззоборот, тыс ткм'] / df_gr[f'2024 ЦЭКР груззоборот, тыс ткм'].sum()
+        cap_rem_values = {
+            2024 : cap_rem_2024_total * epl_part,
+        }
+        taxes_values = {
+            2024: taxes_2024_total * epl_part,
+        }
+        tb_values = {
+            2024: tb_2024_total * epl_part,
+        }
 
         for year_index, year in enumerate(CON.YEARS, start=1):
 
             rev_year = row[f'Доходы {year}, тыс.руб']
             rev_year_prev = row[f'Доходы {year - 1}, тыс.руб']
-            rev_year_base = row[f'Доходы 2024, тыс.руб']
+            epl_year = row[f'{year} ЦЭКР груззоборот, тыс ткм']
+            epl_year_prev = row[f'{year - 1} ЦЭКР груззоборот, тыс ткм']
 
-            if rev_year_prev == 0:
-                pr_factor = 1
-            else:
-                pr_factor = (
-                        rev_year / rev_year_prev /
-                        cap_rem[year_index] * cap_rem[year_index - 1] /
-                        tb[year_index] * tb[year_index - 1] /
-                        indexation[year_index]
-                )
 
-            pr_factors_mul *= pr_factor
-            indexation_mul *= indexation[year_index]
-            res_row[f'base_plus_{year}'] = rev_year / cap_rem[year_index] / tb[year_index] * cap_rem[0] * tb[
-                0] - rev_year_base * pr_factors_mul
-            res_row[
-                f'base_{year}'] = rev_year_base * pr_factors_mul * indexation_mul - rev_year_base * pr_factors_mul * indexation_mul / \
-                                  indexation[year_index]
-            # res_row[f'cap_rem_{year}'] = rev_year / taxes[year_index] / tb[year_index] - rev_year / taxes[year_index] / \
-            #                              tb[year_index] / cap_rem[year_index] * cap_rem[0]
-            res_row[f'cap_rem_{year}'] = res_row[f'base_{year}'] * 0.7226
-            res_row[f'taxes_{year}'] = res_row[f'base_{year}'] * 0.16525
-            res_row[f'tb_{year}'] = res_row[f'base_{year}'] * 0.11214
-            # res_row[f'cap_rem_{year}'] = rev_year - rev_year / cap_rem[year_index]
-            # res_row[f'taxes_{year}'] = rev_year - rev_year / taxes[year_index]
-            #res_row[f'tb_{year}'] = rev_year - rev_year / tb[year_index]
-            # res_row[f'tb_{year}'] = rev_year / cap_rem[year_index] / taxes[year_index] - rev_year / cap_rem[
-            #    year_index] / taxes[year_index] / tb[year_index] * tb[0]
+            cap_rem_values[year] = cap_rem_totals[1] / base_totals[1] * row[f'Доходы {year}_0, тыс.руб']
+            taxes_values[year] = taxes_totals[1] / base_totals[1] * row[f'Доходы {year}_0, тыс.руб']
+            tb_values[year] = tb_totals[1] / base_totals[1] * row[f'Доходы {year}_0, тыс.руб']
+
+
+
+            res_row[f'base_{year}'] = row[f'Доходы {year}_0, тыс.руб']
+            res_row[f'cap_rem_{year}'] = cap_rem_values[year]
+            res_row[f'taxes_{year}'] = taxes_values[year]
+            res_row[f'tb_{year}'] = tb_values[year]
+
 
             if group1 != 'Тарифные решения':
                 res_row['parameter'] = row[group1]
@@ -278,24 +295,38 @@ def update_filter2(param):
 
 
 def draw_grid(res_df):
-    sum_row = {col: round(res_df[col].sum(), 2) if pd.api.types.is_numeric_dtype(res_df[col]) else 'ИТОГО' for col in
-               res_df.columns}
-    column_defs = [
+    # Создаем mapping для колонок с проблемными символами
+    column_mapping = {}
+    clean_columns = []
+
+    for col in res_df.columns:
+        clean_col = col.replace('.', '_').replace(' ', '_').replace(',', '_')
+        column_mapping[col] = clean_col
+        clean_columns.append(clean_col)
+
+    # Переименовываем колонки для AgGrid
+    clean_df = res_df.copy()
+    clean_df.columns = clean_columns
+    sum_row = {
+        clean_col: round(res_df[orig_col].sum(), 2) if pd.api.types.is_numeric_dtype(res_df[orig_col]) else 'ИТОГО'
+        for orig_col, clean_col in column_mapping.items()}
+
+    columnDefs = [
         {
-            "headerName": col, "field": col, "aggFunc": "sum", "enableValue": True,
-            "valueFormatter": {"function": "params.value == 0 ? 0 : d3.format('(.3f')(params.value)"},
-        } if res_df[col].dtype != 'object' else {"headerName": col, "field": col}
-        for col in res_df.columns
+            "headerName": orig_col,  # Отображаемое название
+            "field": clean_col  # Поле для данных
+        }
+        for orig_col, clean_col in column_mapping.items()
     ]
     grid = dag.AgGrid(
         id="main_grid",
-        rowData=res_df.to_dict("records"),
-        columnDefs=column_defs,
+        rowData=clean_df.to_dict("records"),
+        columnDefs=columnDefs,
         defaultColDef={"sortable": True, "filter": True, "resizable": True},
         enableEnterpriseModules=True,
         dashGridOptions={
             'groupIncludeFooter': True,
-            'groupIncludeTotalFooter': True,
+           # 'groupIncludeTotalFooter': True,
             'statusBar': {
                 'statusPanels': [
                     {'statusPanel': 'agAggregationComponent', 'statusPanelParams': {'aggFuncs': ['sum']}}

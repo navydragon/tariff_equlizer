@@ -126,7 +126,6 @@ def make_structure_table(route, test_df, test_df2, gdf, test_df_tr, years, costs
 
 
 def effects_table(route,rzd,bases,rules, trip_type):
-
     suffix = '_gr' if trip_type == 'Груженый рейс' else ''
     head = html.Thead([
         html.Tr([
@@ -187,7 +186,7 @@ def effects_table(route,rzd,bases,rules, trip_type):
                         children=[
                             round(rzd[index - 1] * (route[f'rules%_{year}{suffix}'].values[0] - 1), 2),
                             html.Br(),
-                            '(', '+' if route[f'rules%_{year}{suffix}'].values[0] > 0 else '' , round( rzd[index - 1] * (route[f'rules%_{year}{suffix}'].values[0] - 1) * 100 / rzd[index - 1], 2),
+                            '(', '+' if round(rzd[index - 1] * (route[f'rules%_{year}{suffix}'].values[0] - 1), 2) > 0 else '' , round( rzd[index - 1] * (route[f'rules%_{year}{suffix}'].values[0] - 1) * 100 / rzd[index - 1], 2),
                             '%)'
                         ]
                     )

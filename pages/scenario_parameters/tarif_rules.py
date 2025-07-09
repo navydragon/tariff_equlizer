@@ -51,7 +51,7 @@ def rules_layout():
             [
                 html.Div([
                     html.Button("",id="create_modal_button",n_clicks=0, className='my-button my-button_margin_left my-button__type_create'),
-                    html.Span('Добавить новое тарифное рещение', className='my-button_margin_left'),
+                    html.Span('Добавить новое тарифное решение', className='my-button_margin_left'),
                 ], className='my-button__menu'),
                 html.Hr(),
                 html.Div([
@@ -86,6 +86,7 @@ def add_condition_row(param_name,num):
     tariff_data = get_small_data()
     index = PARAMETERS.index(param_name)
     value_options = tariff_data[PARAMETERS[index]].unique()
+    value_options = [str(opt) for opt in value_options]
     result = dbc.Row([
         dbc.Col([
             html.Label('Параметр'),
@@ -127,9 +128,12 @@ def print_condition_rows(conditions):
     for i, condition in enumerate(conditions):
         index = PARAMETERS.index(condition['parameter'])
         value_options = tariff_data[PARAMETERS[index]].unique()
+        value_options = [str(opt) for opt in value_options]
         parameter = condition["parameter"]
         include = condition["include"]
         values = condition["values"].split(';') if condition["values"] else []
+        print(values)
+        print(value_options)
         num = i + 1
         result.append(
             dbc.Row([
@@ -206,6 +210,7 @@ def update_values_dropdown_options(selected_param, curr_value):
     if curr_value == None:
         curr_value = ['Все']
     value_options = ['Все'] + list(tariff_data[selected_param].unique())
+    value_options = [str(opt) for opt in value_options]
     return value_options, curr_value
 
 
@@ -224,6 +229,7 @@ def calculate_stat(values_list, includes_list, parameters_list,base_percent):
     total_epl = filtered_data[CON.EPL].sum()
     total_revenue = filtered_data[CON.PR_P].sum()
     for index, (values, parameter, include) in enumerate(zip(values_list, parameters_list, includes_list)):
+        filtered_data[parameter] = filtered_data[parameter].astype(str)
         if values == ['Все']:
             values = filtered_data[parameter].unique()
         if include == 'включает':
@@ -276,8 +282,18 @@ def update_rules(clicks, delete_clicks, *rule_states):
     if ctx.triggered:
         if 'process_rule_button' in ctx.triggered[0]['prop_id'] and clicks>0:
             if RULE_ID_MEM != None:
-                delete_rule_from_db(RULE_ID_MEM)
-            store_rule_to_db(rule_states)
+                with sqlite3.connect('data/database.db') as conn:
+                    cursor = conn.cursor()
+                    cursor.execute('SELECT is_special, special_func FROM rules WHERE id = ?', (RULE_ID_MEM,))
+                    row = cursor.fetchone()
+                    if row:
+                        is_special, special_func = row
+                        params = {
+                            "is_special": is_special,
+                            "special_func": special_func,
+                        }
+                        delete_rule_from_db(RULE_ID_MEM)
+                        store_rule_to_db(rule_states,params)
         elif 'delete_rule' in ctx.triggered[0]['prop_id']:
             button_id = ctx.triggered[0]['prop_id'].split('.')[0]
             button_id = json.loads(button_id)
@@ -428,26 +444,15 @@ def print_rules():
                 dbc.Checkbox(id={'type': 'rule_active', 'index': rule_obj['id']}, value=rule_obj['active'], className=''),
                 rule_obj['name']
             ], style={'display': 'flex', 'align-items': 'center'}),
-            # html.Td([
-            #     html.Div(
-            #         condition["parameter"] + ' ' + condition[
-            #             "include"] + ' ' + condition["values"]
-            #     ) for condition in rule_obj["conditions"]
-            # ]),
-            # html.Td([
-            #     html.Strong(rule_obj["variant"], className=''),
-            #     html.Span(', '.join(str(rule_obj[f"index_{year}"]) for year in CON.YEARS))
-            #
-            # ]),
+
             html.Td([
                 html.Div([
                     html.Button(
                                id={'type': 'edit_modal_button', 'index': rule_obj['id']},
                                n_clicks=0, className='my-button my-button__type_edit my-button_margin_left'),
                     html.Button( id={'type': 'delete_rule', 'index': rule_obj['id']},
-                        n_clicks=0,className='my-button my-button__type_delete my-button_margin_left'),
-
-                ], className='my-button__menu')
+                        n_clicks=0,className='my-button my-button__type_delete my-button_margin_left') if rule_obj['is_special'] == 0 else "",
+                ], className='my-button__menu') ,
 
             ])
         ],id=rule_obj["id"]))
@@ -484,6 +489,8 @@ def load_rules(id=None, active_only=False):
                 "index_2033": rule[13],
                 "index_2034": rule[14],
                 "index_2035": rule[15],
+                "is_special": rule[16],
+                "special_func": rule[17],
                 "conditions": []
             }
             conditions = cursor.execute(
@@ -523,7 +530,8 @@ def delete_rule_from_db(rule_id):
         cursor.execute('''DELETE FROM conditions WHERE rule_id = ?''', (rule_id,))
         cursor.execute('''DELETE FROM rules WHERE id = ?''', (rule_id,))
 
-def store_rule_to_db(rule_states):
+
+def store_rule_to_db(rule_states, params):
     rule_id = generate_random_string(4)
     name = rule_states[0]
     parameters = rule_states[1]
@@ -532,15 +540,17 @@ def store_rule_to_db(rule_states):
     variant = rule_states[4]
     indexes = rule_states[5]
     base_percent = rule_states[6]
-    print(indexes[0])
+    is_special = params.get('is_special', 0)
+    special_func = params.get('special_func', "")
+
     with sqlite3.connect('data/database.db') as conn:
         cursor = conn.cursor()
         cursor.execute('''
-                            INSERT INTO rules (id, name, variant, index_2025, index_2026, index_2027, index_2028, index_2029, index_2030, base_percent, index_2031, index_2032, index_2033, index_2034, index_2035)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            INSERT INTO rules (id, name, variant, index_2025, index_2026, index_2027, index_2028, index_2029, index_2030, base_percent, index_2031, index_2032, index_2033, index_2034, index_2035, is_special, special_func)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ''', (
         rule_id, name, variant, indexes[0], indexes[1], indexes[2], indexes[3],
-        indexes[4], indexes[5], base_percent, indexes[6], indexes[7], indexes[8],indexes[9], indexes[10] ))
+        indexes[4], indexes[5], base_percent, indexes[6], indexes[7], indexes[8],indexes[9], indexes[10], is_special, special_func ))
         for index in range(len(parameters)):
             cursor.execute('''
                             INSERT INTO conditions (rule_id, parameter, include, values_list)

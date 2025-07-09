@@ -14,15 +14,14 @@ from pages.constants import Constants as CON
 from pages.data import get_ipem_data
 from pages.scenario_parameters.misc import input_states, check_and_prepare_params
 
-dash.register_page(__name__, name="Экономика экспортных грузов", path='/export_marginality', order=6,
-                   my_class='my-navbar__icon-2')
+# dash.register_page(__name__, name="Экономика экспортных грузов", path='/export_marginality', order=6, my_class='my-navbar__icon-2')
 
 df = []
 
 df = get_ipem_data()
 
 ipem_calculated = []
-FULL_YEARS = [2024] + CON.YEARS
+FULL_YEARS = CON.YEARS
 tables = {}
 
 

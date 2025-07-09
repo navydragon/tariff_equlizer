@@ -47,7 +47,11 @@ def update_dashboard(
         index_oper, index_per, revenue_index_values
     )
 
-    df = calc.calculate_data('small', params)
+    # Определяем базу по правилам
+    rules = tr.load_rules(active_only=True)
+    database_type = 'main' if any(rule['is_special'] == 1 for rule in rules) else 'small'
+
+    df = calc.calculate_data(database_type, params)
     select_columns = ["Группа груза", "Направления", "Дор отпр", "Дор наз", "Вид перевозки", "Холдинг", 'Род вагона',
                       'Категория отпр.', 'Тип парка', 'Вид спец. контейнера']
     columns_for_del = list(set(list(df.select_dtypes(exclude=['floating']))) - set(select_columns))
