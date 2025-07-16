@@ -5,10 +5,11 @@ from pages.navbar import navbar
 
 
 import webbrowser
+import sys
 
 
 external_stylesheets = [
-
+ 
 ]
 meta_tag = html.Meta(name='google', content='notranslate')
 
@@ -48,7 +49,14 @@ app.layout = html.Div([
 
 
 
-debug = True
+# debug = True
+try:
+    if hasattr(sys, 'frozen') and hasattr(sys, '_MEIPASS'):
+        debug = False
+    else:
+        debug = True
+except Exception:
+    debug = True
 
 
 if not debug:

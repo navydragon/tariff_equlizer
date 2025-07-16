@@ -10,7 +10,6 @@ import pages.scenario_parameters.tarif_rules as tr
 import pages.scenario_parameters.tarif_rules_prev as tr_prev
 
 
-
 CON = Constants(2025)
 
 
@@ -156,12 +155,30 @@ def calculate_base_revenues(df, YEARS, INDEXES, EPL_CHANGE):
             parameter = condition["parameter"]
             include = condition["include"]
             values = condition["values"].split(';') if condition["values"] else []
-            if values == ['Все']:
-                values = df[parameter].unique()
-            if include == 'включает':
-                filters.append(df[parameter].isin(values))
+            if include in ('>', '<'):
+                # Для числовых параметров: фильтрация по > или <
+                try:
+                    value = None
+                    if isinstance(values, list):
+                        value = values[0] if values else None
+                    else:
+                        value = values
+                    if value is None or value == '':
+                        continue
+                    value = float(value)
+                    if include == '>':
+                        filters.append(df[parameter] > value)
+                    elif include == '<':
+                        filters.append(df[parameter] < value)
+                except Exception:
+                    continue
             else:
-                filters.append(~df[parameter].isin(values))
+                if values == ['Все']:
+                    values = df[parameter].unique()
+                if include == 'включает':
+                    filters.append(df[parameter].isin(values))
+                else:
+                    filters.append(~df[parameter].isin(values))
         if rule_obj['variant'] == 'млрд': # миллиарды
             total = df.loc[np.logical_and.reduce(filters), base_revenue_col].sum()
             df.loc[np.logical_and.reduce(filters), 'part'] = df.loc[np.logical_and.reduce(filters), base_revenue_col] / total
@@ -222,12 +239,30 @@ def calculate_base_revenues(df, YEARS, INDEXES, EPL_CHANGE):
                 parameter = condition["parameter"]
                 include = condition["include"]
                 values = condition["values"].split(';') if condition["values"] else []
-                if values == ['Все']:
-                    values = df[parameter].unique()
-                if include == 'включает':
-                    filters.append(df[parameter].isin(values))
+                if include in ('>', '<'):
+                    # Для числовых параметров: фильтрация по > или <
+                    try:
+                        value = None
+                        if isinstance(values, list):
+                            value = values[0] if values else None
+                        else:
+                            value = values
+                        if value is None or value == '':
+                            continue
+                        value = float(value)
+                        if include == '>':
+                            filters.append(df[parameter] > value)
+                        elif include == '<':
+                            filters.append(df[parameter] < value)
+                    except Exception:
+                        continue
                 else:
-                    filters.append(~df[parameter].isin(values))
+                    if values == ['Все']:
+                        values = df[parameter].unique()
+                    if include == 'включает':
+                        filters.append(df[parameter].isin(values))
+                    else:
+                        filters.append(~df[parameter].isin(values))
 
             if rule_obj['is_special'] == 1:
                 # if i == 0:
@@ -257,7 +292,7 @@ def calculate_base_revenues(df, YEARS, INDEXES, EPL_CHANGE):
                 # if old_col in df.columns:
                 #     df[new_col] = df[old_col]
 
-                df.loc[df['Среднее расстояние по пд'] < 4000, f'rule_index_{rule_index}_{year}'] = 1
+                # df.loc[df['Среднее расстояние по пд'] < 4000, f'rule_index_{rule_index}_{year}'] = 1
 
                 if year == 2029:
                     kek = df.loc[np.logical_and.reduce(filters), :].groupby('Пояс дальности').agg({
@@ -512,12 +547,30 @@ def calculate_related(df, params):
                 include = condition["include"]
                 values = condition["values"].split(';') if condition[
                     "values"] else []
-                if values == ['Все']:
-                    values = df[parameter].unique()
-                if include == 'включает':
-                    filters.append(df[parameter].isin(values))
+                if include in ('>', '<'):
+                    # Для числовых параметров: фильтрация по > или <
+                    try:
+                        value = None
+                        if isinstance(values, list):
+                            value = values[0] if values else None
+                        else:
+                            value = values
+                        if value is None or value == '':
+                            continue
+                        value = float(value)
+                        if include == '>':
+                            filters.append(df[parameter] > value)
+                        elif include == '<':
+                            filters.append(df[parameter] < value)
+                    except Exception:
+                        continue
                 else:
-                    filters.append(~df[parameter].isin(values))
+                    if values == ['Все']:
+                        values = df[parameter].unique()
+                    if include == 'включает':
+                        filters.append(df[parameter].isin(values))
+                    else:
+                        filters.append(~df[parameter].isin(values))
 
             df.loc[np.logical_and.reduce(filters), f'rules%_{year}'] += (float(rule_obj['index_' + str(year)])-1) * float(rule_obj['base_percent'])/100
             df.loc[np.logical_and.reduce(filters), f'rules%_{year}_{rule_index}'] =  float(rule_obj['index_'+str(year)]) * float(rule_obj['base_percent'])/100
@@ -530,12 +583,30 @@ def get_filters(df,rule_obj):
         parameter = condition["parameter"]
         include = condition["include"]
         values = condition["values"].split(';') if condition["values"] else []
-        if values == ['Все']:
-            values = df[parameter].unique()
-        if include == 'включает':
-            filters.append(df[parameter].isin(values))
+        if include in ('>', '<'):
+            # Для числовых параметров: фильтрация по > или <
+            try:
+                value = None
+                if isinstance(values, list):
+                    value = values[0] if values else None
+                else:
+                    value = values
+                if value is None or value == '':
+                    continue
+                value = float(value)
+                if include == '>':
+                    filters.append(df[parameter] > value)
+                elif include == '<':
+                    filters.append(df[parameter] < value)
+            except Exception:
+                continue
         else:
-            filters.append(~df[parameter].isin(values))
+            if values == ['Все']:
+                values = df[parameter].unique()
+            if include == 'включает':
+                filters.append(df[parameter].isin(values))
+            else:
+                filters.append(~df[parameter].isin(values))
     return filters
 
 

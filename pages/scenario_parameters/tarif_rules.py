@@ -6,9 +6,12 @@ import string
 import dash
 import dash_bootstrap_components as dbc
 from dash import html, dcc, callback, Input, Output, State, ALL, MATCH
+from dash import ctx
 
 from pages.constants import Constants as CON
 from pages.data import get_small_data
+import pandas as pd
+import numpy as np
 
 
 def generate_random_string(length):
@@ -29,11 +32,10 @@ PARAMETERS = [
     'Вид спец. контейнера',
     'Холдинг',
     'Направления',
-    'Категория дальности'
+    'Среднее расстояние по пд'
 ]
 
 years = CON.YEARS
-
 
 
 new_rule_states = [
@@ -45,6 +47,7 @@ new_rule_states = [
     State({'type': 'rule_indexation_input', 'index': ALL}, 'value'),
     State('base_percent','value')
 ]
+
 
 def rules_layout():
     modal = html.Div(
@@ -101,19 +104,22 @@ def add_condition_row(param_name,num):
             html.Label(''),
             dcc.Dropdown(
                 id={'type': 'include_dropdown', 'index': num},
-                options=['включает', 'не включает'],
+                options=['включает', 'не включает','<','>'],
                 clearable=False,
                 value='включает',
             ),
         ],width=2),
         dbc.Col([
             html.Label('Значения'),
-            dcc.Dropdown(
-                id={'type': 'values_dropdown', 'index': num},
-                options=value_options,
-                clearable=False,
-                multi=True
-            ),
+            html.Div(
+                dcc.Dropdown(
+                    id={'type': 'values_dropdown', 'index': num},
+                    options=value_options,
+                    clearable=False,
+                    multi=True
+                ),
+                id={'type': 'values_dropdown_container', 'index': num}
+            )
         ], width=5),
         dbc.Col([
             dbc.Button( id={'type': 'delete_button', 'index': num},  n_clicks=0, className='my-button my-button__type_delete my-button_margin_left'),
@@ -132,9 +138,37 @@ def print_condition_rows(conditions):
         parameter = condition["parameter"]
         include = condition["include"]
         values = condition["values"].split(';') if condition["values"] else []
-        print(values)
-        print(value_options)
         num = i + 1
+        # Определяем компонент для значений
+        if pd.api.types.is_numeric_dtype(tariff_data[parameter]):
+            # Числовой столбец — Input
+            if values:
+                value = values[0]
+            else:
+                value = 0
+            value_component = html.Div(
+                dcc.Input(
+                    id={'type': 'values_dropdown', 'index': num},
+                    type='number',
+                    value=value,
+                    debounce=True,
+                    className='form-control',
+                    style={'width': '100%', 'height': '40px', 'font-size': '1.1rem'}
+                ),
+                id={'type': 'values_dropdown_container', 'index': num}
+            )
+        else:
+            # Не числовой — Dropdown
+            value_component = html.Div(
+                dcc.Dropdown(
+                    id={'type': 'values_dropdown', 'index': num},
+                    options=value_options,
+                    clearable=False,
+                    multi=True,
+                    value=values
+                ),
+                id={'type': 'values_dropdown_container', 'index': num}
+            )
         result.append(
             dbc.Row([
                 dbc.Col([
@@ -150,31 +184,23 @@ def print_condition_rows(conditions):
                     html.Label(''),
                     dcc.Dropdown(
                         id={'type': 'include_dropdown', 'index': num},
-                        options=['включает', 'не включает'],
+                        options=['включает', 'не включает', '<', '>'],
                         clearable=False,
                         value=include,
                     ),
                 ], width=2),
                 dbc.Col([
                     html.Label('Значения'),
-                    dcc.Dropdown(
-                        id={'type': 'values_dropdown', 'index': num},
-                        options=value_options,
-                        clearable=False,
-                        multi=True,
-                        value=values
-                    ),
+                    value_component
                 ], width=5),
                 dbc.Col([
                     dbc.Button('Удалить',
                                id={'type': 'delete_button', 'index': num},
                                n_clicks=0, size='sm', color='danger'),
                 ], width=1)
-                # if num != '0' else None
             ], id={'type': 'rule_row', 'index': num},
                 style={'display': 'flex', 'align-items': 'flex-end',
                        'margin-bottom': '10px'})
-
         )
     return result
 
@@ -199,44 +225,96 @@ def update_conditions(add_clicks, delete_clicks, conditions):
 
     return conditions
 
+
+def is_numeric_column(series):
+    return pd.api.types.is_numeric_dtype(series)
+
 @callback(
-    Output({'type': 'values_dropdown', 'index': MATCH}, 'options'),
-    Output({'type': 'values_dropdown', 'index': MATCH}, 'value'),
+    Output({'type': 'values_dropdown_container', 'index': MATCH}, 'children'),
     Input({'type': 'parameter_dropdown', 'index': MATCH}, 'value'),
     State({'type': 'values_dropdown', 'index': MATCH}, 'value'),
+    State({'type': 'parameter_dropdown', 'index': MATCH}, 'id'),
 )
-def update_values_dropdown_options(selected_param, curr_value):
+def update_values_dropdown_options(selected_param, curr_value, param_dropdown_id):
+    index = param_dropdown_id['index']
     tariff_data = get_small_data()
-    if curr_value == None:
-        curr_value = ['Все']
-    value_options = ['Все'] + list(tariff_data[selected_param].unique())
-    value_options = [str(opt) for opt in value_options]
-    return value_options, curr_value
+
+    if pd.api.types.is_numeric_dtype(tariff_data[selected_param]):
+        print(f'numeric {curr_value}')
+        if curr_value is None or type(curr_value) == list:
+            curr_value = 0
+        return dcc.Input(
+            id={'type': 'values_dropdown', 'index': index},
+            type='number',
+            value=curr_value,
+            debounce=True,
+            className='form-control',
+            style={'width': '100%', 'height': '40px', 'font-size': '1.1rem'}
+        )
+    else:
+        if curr_value is None or curr_value == []:
+            curr_value = ['Все']
+        value_options = ['Все'] + list(tariff_data[selected_param].unique())
+        value_options = [str(opt) for opt in value_options]
+
+        return dcc.Dropdown(
+            id={'type': 'values_dropdown', 'index': index},
+            options=value_options,
+            value=curr_value,
+            multi=True,
+            clearable=False,
+          #  className='form-control'
+        )
 
 
 
 
 @callback(
-    Output('rule_stat','children'),
-    Output('base_percent_input','value'),
+    Output('rule_stat', 'children'),
+    Output('base_percent_input', 'value'),
     Input({'type': 'values_dropdown', 'index': ALL}, 'value'),
     Input({'type': 'include_dropdown', 'index': ALL}, 'value'),
     State({'type': 'parameter_dropdown', 'index': ALL}, 'value'),
     Input('base_percent','value'),
 )
-def calculate_stat(values_list, includes_list, parameters_list,base_percent):
-    filtered_data = get_small_data()
+def calculate_stat(values_list, includes_list, parameters_list, base_percent):
+    filtered_data = get_small_data().copy()
     total_epl = filtered_data[CON.EPL].sum()
     total_revenue = filtered_data[CON.PR_P].sum()
+
     for index, (values, parameter, include) in enumerate(zip(values_list, parameters_list, includes_list)):
-        filtered_data[parameter] = filtered_data[parameter].astype(str)
-        if values == ['Все']:
-            values = filtered_data[parameter].unique()
-        if include == 'включает':
-            filtered_data = filtered_data[
-                filtered_data[parameter].isin(values)]
+        # Приводим к строке для нечисловых, к float для числовых
+        if pd.api.types.is_numeric_dtype(filtered_data[parameter]):
+            # Числовой параметр: фильтрация по > или <
+            try:
+                value = None
+                if isinstance(values, list):
+                    # Если вдруг пришёл список, берём первый элемент
+                    value = values[0] if values else None
+                else:
+                    value = values
+                if value is None or value == '':
+                    continue  # пропускаем фильтр, если нет значения
+                value = float(value)
+                if include == '>':
+                    filtered_data = filtered_data[filtered_data[parameter] > value]
+                elif include == '<':
+                    filtered_data = filtered_data[filtered_data[parameter] < value]
+            except Exception:
+                continue
         else:
-            filtered_data = filtered_data[~filtered_data[parameter].isin(values)]
+            filtered_data[parameter] = filtered_data[parameter].astype(str)
+            if values is None:
+                values = []
+            if values == ['Все']:
+                values = filtered_data[parameter].unique()
+            if not isinstance(values, (list, tuple, set, pd.Series, np.ndarray)):
+                values = [values]
+            if include == 'включает':
+                filtered_data = filtered_data[
+                    filtered_data[parameter].isin(values)]
+            else:
+                filtered_data = filtered_data[~filtered_data[parameter].isin(values)]
     epl_percent = round((filtered_data[CON.EPL].sum() / total_epl * 100)*int(base_percent)/100,2)
     revenue_percent = round((filtered_data[CON.PR_P].sum() / total_revenue * 100)*int(base_percent)/100,2)
     return html.P(f'Правило затронет {len(filtered_data)} строк, {epl_percent}% грузооборота, {revenue_percent}% доходов'), base_percent
@@ -281,7 +359,7 @@ def update_rules(clicks, delete_clicks, *rule_states):
 
     if ctx.triggered:
         if 'process_rule_button' in ctx.triggered[0]['prop_id'] and clicks>0:
-            if RULE_ID_MEM != None:
+            if RULE_ID_MEM is not None:
                 with sqlite3.connect('data/database.db') as conn:
                     cursor = conn.cursor()
                     cursor.execute('SELECT is_special, special_func FROM rules WHERE id = ?', (RULE_ID_MEM,))
@@ -294,6 +372,10 @@ def update_rules(clicks, delete_clicks, *rule_states):
                         }
                         delete_rule_from_db(RULE_ID_MEM)
                         store_rule_to_db(rule_states,params)
+            else:
+                # создание нового правила
+                params = {"is_special": 0, "special_func": ""}
+                store_rule_to_db(rule_states, params)
         elif 'delete_rule' in ctx.triggered[0]['prop_id']:
             button_id = ctx.triggered[0]['prop_id'].split('.')[0]
             button_id = json.loads(button_id)
@@ -341,8 +423,8 @@ def draw_modal(create,edit):
 
 def create_modal_body():
     return [
-                html.Label('Название'),
-                dbc.Input(id='rule_name', style={'z-index':9999}),
+                html.Label('Название решения'),
+                dbc.Input(id='rule_name', style={'z-index':9999, 'width': '100%', 'height': '40px', 'font-size': '1.1rem'}),
                 html.P('Введите условия',className='mt-2'),
                 dbc.Button('Добавить условие',size='sm',id='add_condition_button'),
                 html.Div([
@@ -379,7 +461,7 @@ def create_modal_body():
 def edit_modal_body(rule):
     return [
         html.Label('Название решения'),
-        dbc.Input(id='rule_name', value=rule['name']),
+        dbc.Input(id='rule_name', value=rule['name'], style={'width': '100%', 'height': '40px', 'font-size': '1.1rem'}),
         html.P('Введите условия', className='mt-2'),
         dbc.Button('Добавить условие', size='sm',
                    id='add_condition_button', n_clicks=len(rule["conditions"])),
@@ -552,11 +634,13 @@ def store_rule_to_db(rule_states, params):
         rule_id, name, variant, indexes[0], indexes[1], indexes[2], indexes[3],
         indexes[4], indexes[5], base_percent, indexes[6], indexes[7], indexes[8],indexes[9], indexes[10], is_special, special_func ))
         for index in range(len(parameters)):
+            v = values[index]
+            if not isinstance(v, list):
+                v = [v]
             cursor.execute('''
                             INSERT INTO conditions (rule_id, parameter, include, values_list)
                             VALUES (?, ?, ?, ?)
-                        ''', (rule_id, parameters[index], include[index],
-                              ';'.join(map(str, values[index]))))
+                        ''', (rule_id, parameters[index], include[index], ';'.join(map(str, v))))
 
 
 def base_percent_row(percent):

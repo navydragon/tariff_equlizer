@@ -22,7 +22,6 @@ def calculate_average_distance(range_str):
     return round((start + end) / 2)
 
 
-
 def load_key_routes():
     # 1. Подключение к SQLite и загрузка данных
     sqlite_file = 'db9.db'
@@ -44,7 +43,6 @@ def load_key_routes():
     for col in keys:
         df_sqlite[col] = df_sqlite[col].astype(str)
         df_excel[col] = df_excel[col].astype(str)
-
 
     df_merged = pd.merge(
         df_sqlite,
@@ -80,7 +78,6 @@ def load_key_routes():
     return True
 
 
-
 def load_data():
     conn = sqlite3.connect('db9.db')
 
@@ -92,7 +89,6 @@ def load_data():
 
     df = pd.read_sql_query(query, conn)
     conn.close()
-
 
     df.drop([
              'Субъект федерации отп',
@@ -137,6 +133,10 @@ def load_data():
     df.rename(columns=column_mapping, inplace=True)
 
     df['Среднее расстояние по пд'] = df['Пояс дальности'].apply(calculate_average_distance)
+
+    if 'Среднее расстояние по пд' in group_parameters:
+        group_parameters.remove('Среднее расстояние по пд')
+    agg_params['Среднее расстояние по пд'] = 'mean'
 
     df_grouped = df.groupby(group_parameters).agg(agg_params).reset_index()
 
