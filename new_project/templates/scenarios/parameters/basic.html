@@ -1,0 +1,101 @@
+<div class="card">
+  <div class="card-header">
+    <h3 class="card-title">Основные сведения</h3>
+  </div>
+  <div class="card-body">
+    <form
+      id="editScenarioForm"
+      data-scenario-edit-target="form"
+      data-action="submit->scenario-edit#submit"
+    >
+      {# Название #}
+      <div class="mb-3">
+        <label for="editScenarioName" class="form-label">Название *</label>
+        <input
+          type="text"
+          class="form-control"
+          id="editScenarioName"
+          name="name"
+          required
+          value="{{ scenario.name }}"
+          placeholder="Введите название сценария"
+          autocomplete="off"
+          data-scenario-edit-target="name"
+        />
+      </div>
+
+      {# Описание #}
+      <div class="mb-3">
+        <label for="editScenarioDescription" class="form-label">Описание</label>
+        <textarea
+          class="form-control"
+          id="editScenarioDescription"
+          name="description"
+          rows="3"
+          placeholder="Введите описание сценария (необязательно)"
+          autocomplete="off"
+          data-scenario-edit-target="description"
+        >{{ scenario.description }}</textarea>
+      </div>
+
+      {# Набор маршрутов #}
+      <div class="mb-3">
+        <label for="editScenarioRouteSet" class="form-label">Набор маршрутов *</label>
+        <select
+          id="editScenarioRouteSet"
+          class="form-select"
+          required
+          data-scenario-edit-target="routeSetSelect"
+          data-scenario-edit-current-route-set-id-value="{{ scenario.route_set_id }}"
+        >
+          <option value="">Загрузка...</option>
+        </select>
+        <div class="form-text">
+          Выберите набор маршрутов, к которому относится сценарий
+        </div>
+      </div>
+
+      {# Годы #}
+      <div class="row">
+        <div class="col-md-6 mb-3">
+          <label for="editScenarioStartYear" class="form-label">Год начала *</label>
+          <input
+            type="number"
+            class="form-control"
+            id="editScenarioStartYear"
+            name="start_year"
+            required
+            min="2000"
+            max="2100"
+            value="{{ scenario.start_year }}"
+            data-scenario-edit-target="startYear"
+          />
+        </div>
+        <div class="col-md-6 mb-3">
+          <label for="editScenarioEndYear" class="form-label">Год окончания *</label>
+          <input
+            type="number"
+            class="form-control"
+            id="editScenarioEndYear"
+            name="end_year"
+            required
+            min="2000"
+            max="2100"
+            value="{{ scenario.end_year }}"
+            data-scenario-edit-target="endYear"
+          />
+        </div>
+      </div>
+
+      <div class="mt-4">
+        <button type="submit" class="btn btn-primary">
+          <i class="ti ti-device-floppy"></i>
+          Сохранить изменения
+        </button>
+        <a href="{% url 'scenarios:management' %}" class="btn btn-secondary">
+          Отмена
+        </a>
+      </div>
+    </form>
+  </div>
+</div>

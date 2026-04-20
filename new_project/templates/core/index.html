@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+
+{% block title %}Главная · Цифровой тарифный инструментарий{% endblock %}
+
+{% block content %}
+<div class="page-header d-print-none">
+  <div class="row align-items-center">
+    <div class="col">
+      <h2 class="page-title">Заглушка дашборда</h2>
+      <div class="text-muted mt-1">
+        Django + htmx + Tabler · стартовый экран
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row row-deck row-cards mt-3">
+  <div class="col-md-6 col-lg-4">
+    <div class="card">
+      <div class="card-body">
+        <h3 class="card-title">Пример htmx-запроса</h3>
+        <p class="text-muted">
+          Нажмите кнопку, чтобы выполнить запрос к Django-обработчику через htmx.
+        </p>
+        <button
+          class="btn btn-primary"
+          hx-get="{% url 'hello_partial' %}"
+          hx-target="#htmx-result"
+          hx-swap="innerHTML"
+        >
+          Нажать
+        </button>
+        <div id="htmx-result" class="mt-3 text-muted">
+          Здесь появится результат запроса.
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+

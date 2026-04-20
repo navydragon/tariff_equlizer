@@ -1,0 +1,754 @@
+{% extends "base.html" %}
+
+{% block title %}Станции · Цифровой тарифный инструментарий{% endblock %}
+
+{% block content %}
+<div class="page-header d-print-none">
+  <div class="row align-items-center">
+    <div class="col">
+      <h2 class="page-title">Станции</h2>
+      <div class="text-muted mt-1">
+        Справочник станций с поиском, фильтрацией и пагинацией
+      </div>
+    </div>
+    <div class="col-auto">
+      <button
+        type="button"
+        class="btn btn-primary"
+        data-bs-toggle="modal"
+        data-bs-target="#stationCreateModal"
+      >
+        <i class="ti ti-plus"></i>
+        Создать
+      </button>
+    </div>
+  </div>
+</div>
+
+<div class="page-body">
+  <div class="container-xl">
+    <div class="card">
+      <div class="card-body border-bottom py-3">
+        <div class="row">
+          <div class="col-12 col-md-3 mb-2">
+            <label class="form-label" for="stationSearchInput">Поиск</label>
+            <input
+              type="text"
+              id="stationSearchInput"
+              class="form-control"
+              placeholder="Код ЕСР, краткое или полное название"
+            />
+          </div>
+          <div class="col-6 col-md-3 mb-2">
+            <label class="form-label" for="stationRailroadFilter">Железная дорога</label>
+            <select id="stationRailroadFilter" class="form-select">
+              <option value="">Все дороги</option>
+              {% for r in railroads %}
+                <option value="{{ r.code }}">{{ r.code }} — {{ r.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-6 col-md-3 mb-2">
+            <label class="form-label" for="stationRegionFilter">Регион</label>
+            <select id="stationRegionFilter" class="form-select">
+              <option value="">Все регионы</option>
+              {% for reg in regions %}
+                <option value="{{ reg.id }}">{{ reg.full_name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-6 col-md-1 mb-2">
+            <label class="form-label" for="stationPageSize">На странице</label>
+            <select id="stationPageSize" class="form-select">
+              <option value="10">10</option>
+              <option value="20" selected>20</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+            </select>
+          </div>
+          <div class="col-6 col-md-2 mb-2 d-flex align-items-end justify-content-end">
+            <button id="stationSearchButton" class="btn btn-outline-primary me-2">
+              <i class="ti ti-search"></i>
+              Найти
+            </button>
+            <button id="stationResetButton" class="btn btn-outline-secondary">
+              <i class="ti ti-refresh"></i>
+              Сбросить
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div id="station-loading" class="text-center py-4" style="display: none;">
+        <div class="spinner-border text-primary" role="status">
+          <span class="visually-hidden">Загрузка...</span>
+        </div>
+      </div>
+
+      <div id="station-empty" class="text-center py-5" style="display: none;">
+        <div class="empty">
+          <div class="empty-icon">
+            <i class="ti ti-inbox" style="font-size: 3rem;"></i>
+          </div>
+          <p class="empty-title">Нет данных</p>
+          <p class="empty-text text-muted">
+            Попробуйте изменить условия поиска или создайте первую запись
+          </p>
+        </div>
+      </div>
+
+      <div class="table-responsive">
+        <table class="table table-vcenter card-table">
+          <thead>
+            <tr>
+              <th style="width: 8%;">Код ЕСР</th>
+              <th>Краткое название</th>
+              <th>Полное название</th>
+              <th style="width: 20%;">Регион</th>
+              <th style="width: 15%;">Железная дорога</th>
+              <th class="text-end" style="width: 12%;">Действия</th>
+            </tr>
+          </thead>
+          <tbody id="station-table-body">
+          </tbody>
+        </table>
+      </div>
+
+      <div class="card-footer d-flex align-items-center">
+        <p class="m-0 text-muted" id="station-summary"></p>
+        <ul class="pagination m-0 ms-auto" id="station-pagination"></ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div
+  class="modal modal-blur fade"
+  id="stationCreateModal"
+  tabindex="-1"
+  aria-hidden="true"
+>
+  <div class="modal-dialog modal-dialog-centered" role="document">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Создать станцию</h5>
+        <button
+          type="button"
+          class="btn-close"
+          data-bs-dismiss="modal"
+          aria-label="Close"
+        ></button>
+      </div>
+      <div class="modal-body">
+        <div id="stationCreateErrors"></div>
+        <form id="stationCreateForm">
+          <div class="mb-3">
+            <label class="form-label" for="stationCreateEsrCode">Код ЕСР</label>
+            <input
+              type="number"
+              class="form-control"
+              id="stationCreateEsrCode"
+              required
+            />
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="stationCreateShortName">Краткое название</label>
+            <input
+              type="text"
+              class="form-control"
+              id="stationCreateShortName"
+              required
+            />
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="stationCreateFullName">Полное название</label>
+            <input
+              type="text"
+              class="form-control"
+              id="stationCreateFullName"
+            />
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="stationCreateRegion">Регион</label>
+            <select id="stationCreateRegion" class="form-select" required>
+              <option value="">Выберите регион</option>
+              {% for reg in regions %}
+                <option value="{{ reg.id }}">{{ reg.full_name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="stationCreateRailroad">Железная дорога</label>
+            <select id="stationCreateRailroad" class="form-select" required>
+              <option value="">Выберите дорогу</option>
+              {% for r in railroads %}
+                <option value="{{ r.code }}">{{ r.code }} — {{ r.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button
+          type="button"
+          class="btn btn-link link-secondary"
+          data-bs-dismiss="modal"
+        >
+          Отмена
+        </button>
+        <button type="button" class="btn btn-primary" id="stationCreateSubmit">
+          <i class="ti ti-check"></i>
+          Сохранить
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div
+  class="modal modal-blur fade"
+  id="stationEditModal"
+  tabindex="-1"
+  aria-hidden="true"
+>
+  <div class="modal-dialog modal-dialog-centered" role="document">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Редактировать станцию</h5>
+        <button
+          type="button"
+          class="btn-close"
+          data-bs-dismiss="modal"
+          aria-label="Close"
+        ></button>
+      </div>
+      <div class="modal-body">
+        <div id="stationEditErrors"></div>
+        <form id="stationEditForm">
+          <input type="hidden" id="stationEditEsrCode" />
+          <div class="mb-3">
+            <label class="form-label" for="stationEditEsrCodeDisplay">Код ЕСР</label>
+            <input
+              type="number"
+              class="form-control"
+              id="stationEditEsrCodeDisplay"
+              disabled
+            />
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="stationEditShortName">Краткое название</label>
+            <input
+              type="text"
+              class="form-control"
+              id="stationEditShortName"
+              required
+            />
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="stationEditFullName">Полное название</label>
+            <input
+              type="text"
+              class="form-control"
+              id="stationEditFullName"
+            />
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="stationEditRegion">Регион</label>
+            <select id="stationEditRegion" class="form-select" required>
+              <option value="">Выберите регион</option>
+              {% for reg in regions %}
+                <option value="{{ reg.id }}">{{ reg.full_name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="stationEditRailroad">Железная дорога</label>
+            <select id="stationEditRailroad" class="form-select" required>
+              <option value="">Выберите дорогу</option>
+              {% for r in railroads %}
+                <option value="{{ r.code }}">{{ r.code }} — {{ r.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button
+          type="button"
+          class="btn btn-link link-secondary"
+          data-bs-dismiss="modal"
+        >
+          Отмена
+        </button>
+        <button type="button" class="btn btn-primary" id="stationEditSubmit">
+          <i class="ti ti-check"></i>
+          Сохранить
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  const state = {
+    page: 1,
+    pageSize: 20,
+    totalPages: 1,
+    searchTimeout: null,
+  };
+
+  function getCookie(name) {
+    let cookieValue = null;
+    if (document.cookie && document.cookie !== '') {
+      const cookies = document.cookie.split(';');
+      for (let i = 0; i < cookies.length; i++) {
+        const cookie = cookies[i].trim();
+        if (cookie.substring(0, name.length + 1) === (name + '=')) {
+          cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+          break;
+        }
+      }
+    }
+    return cookieValue;
+  }
+
+  function escapeHtml(text) {
+    if (text == null) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
+  function showLoading(isLoading) {
+    const loading = document.getElementById('station-loading');
+    const empty = document.getElementById('station-empty');
+    const tbody = document.getElementById('station-table-body');
+
+    if (isLoading) {
+      loading.style.display = 'block';
+      empty.style.display = 'none';
+      tbody.innerHTML = '';
+    } else {
+      loading.style.display = 'none';
+    }
+  }
+
+  function loadStations(page) {
+    if (page) {
+      state.page = page;
+    }
+
+    const searchInput = document.getElementById('stationSearchInput');
+    const railroadSelect = document.getElementById('stationRailroadFilter');
+    const regionSelect = document.getElementById('stationRegionFilter');
+    const pageSizeSelect = document.getElementById('stationPageSize');
+
+    state.pageSize = parseInt(pageSizeSelect.value || '20', 10);
+
+    const params = new URLSearchParams();
+    params.set('page', state.page.toString());
+    params.set('page_size', state.pageSize.toString());
+
+    const search = searchInput.value.trim();
+    if (search) {
+      params.set('search', search);
+    }
+
+    const railroad = railroadSelect.value;
+    if (railroad) {
+      params.set('railroad', railroad);
+    }
+
+    const region = regionSelect.value;
+    if (region) {
+      params.set('region_id', region);
+    }
+
+    showLoading(true);
+
+    fetch('{% url "station_list_api" %}?' + params.toString(), {
+      method: 'GET',
+      headers: {
+        'X-CSRFToken': getCookie('csrftoken'),
+      },
+    })
+      .then(response => response.json())
+      .then(data => {
+        showLoading(false);
+        const tbody = document.getElementById('station-table-body');
+        const empty = document.getElementById('station-empty');
+
+        if (!data.success) {
+          tbody.innerHTML =
+            '<tr><td colspan="6"><div class="alert alert-danger mb-0">' +
+            escapeHtml((data.errors || []).join(', ') || 'Ошибка загрузки') +
+            '</div></td></tr>';
+          return;
+        }
+
+        if (!data.items || data.items.length === 0) {
+          tbody.innerHTML = '';
+          empty.style.display = 'block';
+        } else {
+          empty.style.display = 'none';
+          tbody.innerHTML = data.items.map(createRowHtml).join('');
+        }
+
+        state.page = data.page || 1;
+        state.pageSize = data.page_size || state.pageSize;
+        state.totalPages = data.total_pages || 1;
+
+        updateSummary(data.total);
+        updatePagination();
+        attachRowHandlers();
+      })
+      .catch(error => {
+        console.error('Ошибка загрузки станций:', error);
+        const tbody = document.getElementById('station-table-body');
+        tbody.innerHTML =
+          '<tr><td colspan="6"><div class="alert alert-danger mb-0">Ошибка загрузки станций</div></td></tr>';
+      });
+  }
+
+  function createRowHtml(item) {
+    return `
+      <tr data-code="${item.esr_code}">
+        <td>${escapeHtml(String(item.esr_code))}</td>
+        <td>${escapeHtml(item.short_name || '')}</td>
+        <td>${escapeHtml(item.full_name || '')}</td>
+        <td>${escapeHtml(item.region_full_name || '')}</td>
+        <td>${escapeHtml(item.railroad_code || '')}</td>
+        <td class="text-end">
+          <div class="btn-group" role="group" aria-label="Действия">
+            <button
+              type="button"
+              class="btn btn-sm btn-outline-primary station-edit-btn"
+              data-code="${item.esr_code}"
+              title="Редактировать"
+            >
+              <i class="ti ti-edit"></i>
+            </button>
+            <button
+              type="button"
+              class="btn btn-sm btn-outline-danger station-delete-btn"
+              data-code="${item.esr_code}"
+              title="Удалить"
+            >
+              <i class="ti ti-trash"></i>
+            </button>
+          </div>
+        </td>
+      </tr>
+    `;
+  }
+
+  function updateSummary(total) {
+    const summary = document.getElementById('station-summary');
+    if (!summary) return;
+
+    const from = (state.page - 1) * state.pageSize + 1;
+    const to = Math.min(state.page * state.pageSize, total || 0);
+    if (!total) {
+      summary.textContent = 'Нет записей';
+    } else {
+      summary.textContent =
+        'Показаны ' + from + '–' + to + ' из ' + total + ' записей';
+    }
+  }
+
+  function updatePagination() {
+    const container = document.getElementById('station-pagination');
+    if (!container) return;
+
+    const page = state.page;
+    const totalPages = state.totalPages || 1;
+    container.innerHTML = '';
+
+    function createPageItem(label, targetPage, disabled, active) {
+      const li = document.createElement('li');
+      li.className = 'page-item';
+      if (disabled) li.classList.add('disabled');
+      if (active) li.classList.add('active');
+
+      const a = document.createElement('a');
+      a.className = 'page-link';
+      a.href = '#';
+      a.textContent = label;
+      if (!disabled) {
+        a.addEventListener('click', function(e) {
+          e.preventDefault();
+          if (targetPage && targetPage !== state.page) {
+            loadStations(targetPage);
+          }
+        });
+      }
+
+      li.appendChild(a);
+      container.appendChild(li);
+    }
+
+    createPageItem('‹', page - 1, page <= 1, false);
+
+    const maxButtons = 5;
+    let start = Math.max(1, page - Math.floor(maxButtons / 2));
+    let end = start + maxButtons - 1;
+    if (end > totalPages) {
+      end = totalPages;
+      start = Math.max(1, end - maxButtons + 1);
+    }
+
+    for (let p = start; p <= end; p++) {
+      createPageItem(p.toString(), p, false, p === page);
+    }
+
+    createPageItem('›', page + 1, page >= totalPages, false);
+  }
+
+  function attachRowHandlers() {
+    document.querySelectorAll('.station-edit-btn').forEach(btn => {
+      btn.addEventListener('click', function() {
+        const code = this.dataset.code;
+        openEditModal(code);
+      });
+    });
+
+    document.querySelectorAll('.station-delete-btn').forEach(btn => {
+      btn.addEventListener('click', function() {
+        const code = this.dataset.code;
+        deleteStation(code);
+      });
+    });
+  }
+
+  function openEditModal(code) {
+    fetch('{% url "station_detail_api" 0 %}'.replace('/0/', '/' + encodeURIComponent(code) + '/'), {
+      method: 'GET',
+      headers: {
+        'X-CSRFToken': getCookie('csrftoken'),
+      },
+    })
+      .then(response => response.json())
+      .then(data => {
+        if (!data.success || !data.item) {
+          showEditErrors(['Не удалось загрузить станцию']);
+          return;
+        }
+
+        const item = data.item;
+        document.getElementById('stationEditEsrCode').value = item.esr_code;
+        document.getElementById('stationEditEsrCodeDisplay').value = item.esr_code;
+        document.getElementById('stationEditShortName').value = item.short_name || '';
+        document.getElementById('stationEditFullName').value = item.full_name || '';
+        document.getElementById('stationEditRegion').value = item.region_id || '';
+        document.getElementById('stationEditRailroad').value = item.railroad_code || '';
+
+        document.getElementById('stationEditErrors').innerHTML = '';
+
+        const modalEl = document.getElementById('stationEditModal');
+        const modal = new bootstrap.Modal(modalEl);
+        modal.show();
+      })
+      .catch(error => {
+        console.error('Ошибка загрузки станции:', error);
+        showEditErrors(['Ошибка загрузки станции']);
+      });
+  }
+
+  function showCreateErrors(errors) {
+    const container = document.getElementById('stationCreateErrors');
+    if (!container) return;
+    if (!errors || !errors.length) {
+      container.innerHTML = '';
+      return;
+    }
+    container.innerHTML =
+      '<div class="alert alert-danger" role="alert">' +
+      errors.map(e => '<div>' + escapeHtml(e) + '</div>').join('') +
+      '</div>';
+  }
+
+  function showEditErrors(errors) {
+    const container = document.getElementById('stationEditErrors');
+    if (!container) return;
+    if (!errors || !errors.length) {
+      container.innerHTML = '';
+      return;
+    }
+    container.innerHTML =
+      '<div class="alert alert-danger" role="alert">' +
+      errors.map(e => '<div>' + escapeHtml(e) + '</div>').join('') +
+      '</div>';
+  }
+
+  function createStation() {
+    const esrCode = document.getElementById('stationCreateEsrCode').value;
+    const shortName = document.getElementById('stationCreateShortName').value.trim();
+    const fullName = document.getElementById('stationCreateFullName').value.trim();
+    const regionId = document.getElementById('stationCreateRegion').value;
+    const railroadCode = document.getElementById('stationCreateRailroad').value;
+
+    const payload = {
+      esr_code: esrCode,
+      short_name: shortName,
+      full_name: fullName,
+      region_id: regionId,
+      railroad_code: railroadCode,
+    };
+
+    fetch('{% url "station_create_api" %}', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': getCookie('csrftoken'),
+      },
+      body: JSON.stringify(payload),
+    })
+      .then(response => response.json())
+      .then(data => {
+        if (!data.success) {
+          showCreateErrors(data.errors || ['Ошибка при создании станции']);
+          return;
+        }
+
+        showCreateErrors([]);
+        const modalEl = document.getElementById('stationCreateModal');
+        const modal = bootstrap.Modal.getInstance(modalEl);
+        if (modal) {
+          modal.hide();
+        }
+        document.getElementById('stationCreateForm').reset();
+        loadStations();
+      })
+      .catch(error => {
+        console.error('Ошибка создания станции:', error);
+        showCreateErrors(['Ошибка создания станции']);
+      });
+  }
+
+  function updateStation() {
+    const esrCode = document.getElementById('stationEditEsrCode').value;
+    const shortName = document.getElementById('stationEditShortName').value.trim();
+    const fullName = document.getElementById('stationEditFullName').value.trim();
+    const regionId = document.getElementById('stationEditRegion').value;
+    const railroadCode = document.getElementById('stationEditRailroad').value;
+
+    const payload = {
+      short_name: shortName,
+      full_name: fullName,
+      region_id: regionId,
+      railroad_code: railroadCode,
+    };
+
+    fetch('{% url "station_update_api" 0 %}'.replace('/0/update/', '/' + encodeURIComponent(esrCode) + '/update/'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': getCookie('csrftoken'),
+      },
+      body: JSON.stringify(payload),
+    })
+      .then(response => response.json())
+      .then(data => {
+        if (!data.success) {
+          showEditErrors(data.errors || ['Ошибка при сохранении станции']);
+          return;
+        }
+
+        showEditErrors([]);
+        const modalEl = document.getElementById('stationEditModal');
+        const modal = bootstrap.Modal.getInstance(modalEl);
+        if (modal) {
+          modal.hide();
+        }
+        loadStations();
+      })
+      .catch(error => {
+        console.error('Ошибка сохранения станции:', error);
+        showEditErrors(['Ошибка сохранения станции']);
+      });
+  }
+
+  function deleteStation(code) {
+    if (!confirm('Вы действительно хотите удалить эту станцию?')) {
+      return;
+    }
+
+    fetch('{% url "station_delete_api" 0 %}'.replace('/0/delete/', '/' + encodeURIComponent(code) + '/delete/'), {
+      method: 'POST',
+      headers: {
+        'X-CSRFToken': getCookie('csrftoken'),
+      },
+    })
+      .then(response => response.json())
+      .then(data => {
+        if (!data.success) {
+          alert((data.errors || ['Ошибка удаления станции']).join('\\n'));
+          return;
+        }
+
+        loadStations();
+      })
+      .catch(error => {
+        console.error('Ошибка удаления станции:', error);
+        alert('Ошибка удаления станции');
+      });
+  }
+
+  function initEvents() {
+    const searchInput = document.getElementById('stationSearchInput');
+    const searchButton = document.getElementById('stationSearchButton');
+    const resetButton = document.getElementById('stationResetButton');
+    const railroadSelect = document.getElementById('stationRailroadFilter');
+    const regionSelect = document.getElementById('stationRegionFilter');
+    const pageSizeSelect = document.getElementById('stationPageSize');
+
+    searchButton.addEventListener('click', function() {
+      loadStations(1);
+    });
+
+    resetButton.addEventListener('click', function() {
+      searchInput.value = '';
+      railroadSelect.value = '';
+      regionSelect.value = '';
+      pageSizeSelect.value = '20';
+      loadStations(1);
+    });
+
+    searchInput.addEventListener('input', function() {
+      clearTimeout(state.searchTimeout);
+      state.searchTimeout = setTimeout(function() {
+        loadStations(1);
+      }, 400);
+    });
+
+    railroadSelect.addEventListener('change', function() {
+      loadStations(1);
+    });
+
+    regionSelect.addEventListener('change', function() {
+      loadStations(1);
+    });
+
+    pageSizeSelect.addEventListener('change', function() {
+      loadStations(1);
+    });
+
+    document.getElementById('stationCreateSubmit').addEventListener('click', function() {
+      createStation();
+    });
+
+    document.getElementById('stationEditSubmit').addEventListener('click', function() {
+      updateStation();
+    });
+  }
+
+  document.addEventListener('DOMContentLoaded', function() {
+    initEvents();
+    loadStations(1);
+  });
+})();
+</script>
+
+{% endblock %}
+

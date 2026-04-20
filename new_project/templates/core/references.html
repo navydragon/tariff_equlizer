@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+
+{% block title %}Справочники · Цифровой тарифный инструментарий{% endblock %}
+
+{% block content %}
+<div class="page-header d-print-none">
+  <div class="row align-items-center">
+    <div class="col">
+      <h2 class="page-title">Справочники</h2>
+      <div class="text-muted mt-1">
+        Выберите справочник для управления данными
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row row-cards mt-3">
+  <div class="col-md-6 col-lg-3">
+    <a
+      class="card card-sm card-link"
+      href="{% url 'cargo_list' %}"
+    >
+      <div class="card-body">
+        <div class="d-flex align-items-center">
+          <span class="avatar me-3 bg-primary-lt">
+            <i class="ti ti-package"></i>
+          </span>
+          <div>
+            <div class="fw-bold">Грузы</div>
+            <div class="text-muted">Открыть справочник грузов (ETSNG)</div>
+          </div>
+        </div>
+      </div>
+    </a>
+  </div>
+  <div class="col-md-6 col-lg-3">
+    <a
+      class="card card-sm card-link"
+      href="{% url 'railroad_list' %}"
+    >
+      <div class="card-body">
+        <div class="d-flex align-items-center">
+          <span class="avatar me-3 bg-info-lt">
+            <i class="ti ti-train"></i>
+          </span>
+          <div>
+            <div class="fw-bold">Железные дороги</div>
+            <div class="text-muted">Открыть справочник железных дорог</div>
+          </div>
+        </div>
+      </div>
+    </a>
+  </div>
+  <div class="col-md-6 col-lg-3">
+    <a
+      class="card card-sm card-link"
+      href="{% url 'region_list' %}"
+    >
+      <div class="card-body">
+        <div class="d-flex align-items-center">
+          <span class="avatar me-3 bg-success-lt">
+            <i class="ti ti-map"></i>
+          </span>
+          <div>
+            <div class="fw-bold">Регионы</div>
+            <div class="text-muted">Открыть справочник регионов</div>
+          </div>
+        </div>
+      </div>
+    </a>
+  </div>
+  <div class="col-md-6 col-lg-3">
+    <a
+      class="card card-sm card-link"
+      href="{% url 'station_list' %}"
+    >
+      <div class="card-body">
+        <div class="d-flex align-items-center">
+          <span class="avatar me-3 bg-warning-lt">
+            <i class="ti ti-building-rail"></i>
+          </span>
+          <div>
+            <div class="fw-bold">Станции</div>
+            <div class="text-muted">Открыть справочник станций</div>
+          </div>
+        </div>
+      </div>
+    </a>
+  </div>
+  <div class="col-md-6 col-lg-3">
+    <a
+      class="card card-sm card-link"
+      href="{% url 'wagon_kind_list' %}"
+    >
+      <div class="card-body">
+        <div class="d-flex align-items-center">
+          <span class="avatar me-3 bg-azure-lt">
+            <i class="ti ti-truck"></i>
+          </span>
+          <div>
+            <div class="fw-bold">Роды вагонов</div>
+            <div class="text-muted">Справочник рода вагона</div>
+          </div>
+        </div>
+      </div>
+    </a>
+  </div>
+  <div class="col-md-6 col-lg-3">
+    <a
+      class="card card-sm card-link"
+      href="{% url 'shipment_type_list' %}"
+    >
+      <div class="card-body">
+        <div class="d-flex align-items-center">
+          <span class="avatar me-3 bg-indigo-lt">
+            <i class="ti ti-route"></i>
+          </span>
+          <div>
+            <div class="fw-bold">Типы отправки</div>
+            <div class="text-muted">Справочник типа отправки</div>
+          </div>
+        </div>
+      </div>
+    </a>
+  </div>
+  <div class="col-md-6 col-lg-3">
+    <a
+      class="card card-sm card-link"
+      href="{% url 'message_type_list' %}"
+    >
+      <div class="card-body">
+        <div class="d-flex align-items-center">
+          <span class="avatar me-3 bg-teal-lt">
+            <i class="ti ti-message"></i>
+          </span>
+          <div>
+            <div class="fw-bold">Типы сообщения</div>
+            <div class="text-muted">Справочник типа сообщения</div>
+          </div>
+        </div>
+      </div>
+    </a>
+  </div>
+  <div class="col-md-6 col-lg-3">
+    <a
+      class="card card-sm card-link"
+      href="{% url 'routes_list' %}"
+    >
+      <div class="card-body">
+        <div class="d-flex align-items-center">
+          <span class="avatar me-3 bg-pink-lt">
+            <i class="ti ti-road"></i>
+          </span>
+          <div>
+            <div class="fw-bold">Маршруты</div>
+            <div class="text-muted">Наборы маршрутов и маршруты</div>
+          </div>
+        </div>
+      </div>
+    </a>
+  </div>
+</div>
+{% endblock %}
+

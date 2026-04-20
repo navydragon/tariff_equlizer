@@ -1,0 +1,171 @@
+{# Выбор сценария: выпадающий список #}
+<div id="scenarios-list-container">
+  <label class="form-label mb-2" for="scenarioSelectDrawer">Доступные сценарии</label>
+
+  <div id="scenarios-loading" class="text-center py-4" style="display: none;">
+    <div class="spinner-border text-primary" role="status">
+      <span class="visually-hidden">Загрузка...</span>
+    </div>
+  </div>
+
+  <select
+    id="scenarioSelectDrawer"
+    class="form-select"
+    style="display: none;"
+    aria-label="Выбор сценария"
+  >
+    {# Опции подставляются через AJAX #}
+  </select>
+
+  <div id="scenarios-empty" class="text-muted text-center py-4" style="display: none;">
+    <p>Нет доступных сценариев.</p>
+  </div>
+</div>
+
+<script>
+(function() {
+  let activeScenarioId = {{ request.user.active_scenario_id|default_if_none:"null" }};
+  let loadToken = 0;
+
+  function loadScenarios() {
+    const token = ++loadToken;
+    const loading = document.getElementById('scenarios-loading');
+    const select = document.getElementById('scenarioSelectDrawer');
+    const empty = document.getElementById('scenarios-empty');
+
+    if (!select) return;
+
+    loading.style.display = 'block';
+    select.style.display = 'none';
+    select.innerHTML = '';
+    empty.style.display = 'none';
+
+    fetch('{% url "scenarios:api_list" %}', {
+      method: 'GET',
+      headers: {
+        'X-CSRFToken': getCookie('csrftoken'),
+      },
+    })
+    .then(response => response.json())
+    .then(data => {
+      if (token !== loadToken) return; // Пришёл устаревший ответ
+      loading.style.display = 'none';
+
+      if (data.success && data.scenarios && data.scenarios.length > 0) {
+        const placeholder = document.createElement('option');
+        placeholder.value = '';
+        placeholder.textContent = 'Выберите сценарий…';
+        select.appendChild(placeholder);
+
+        for (const scenario of data.scenarios) {
+          const opt = document.createElement('option');
+          opt.value = String(scenario.id);
+          opt.dataset.routeSetId = scenario.route_set_id != null ? String(scenario.route_set_id) : '';
+          opt.textContent =
+            `${scenario.name} (${scenario.start_year}–${scenario.end_year})`;
+          if (activeScenarioId != null && scenario.id === activeScenarioId) {
+            opt.selected = true;
+          }
+          select.appendChild(opt);
+        }
+
+        if (activeScenarioId == null) {
+          placeholder.selected = true;
+        }
+
+        select.style.display = '';
+
+        select.onchange = function () {
+          const opt = select.selectedOptions[0];
+          if (!opt || !opt.value) return;
+          const scenarioId = parseInt(opt.value, 10);
+          const routeSetId = opt.dataset.routeSetId
+            ? parseInt(opt.dataset.routeSetId, 10)
+            : null;
+          setActiveScenario(scenarioId, routeSetId);
+        };
+
+        if (activeScenarioId && data.scenarios) {
+          const active = data.scenarios.find(s => s.id === activeScenarioId);
+          if (active) {
+            document.dispatchEvent(new CustomEvent('scenario:active-changed', {
+              bubbles: true,
+              detail: {
+                scenarioId: active.id,
+                routeSetId: active.route_set_id,
+              },
+            }));
+          }
+        }
+      } else {
+        empty.style.display = 'block';
+      }
+    })
+    .catch(error => {
+      if (token !== loadToken) return; // Устаревший запрос
+      loading.style.display = 'none';
+      console.error('Ошибка загрузки сценариев:', error);
+      select.style.display = '';
+      select.innerHTML = '';
+      const err = document.createElement('option');
+      err.value = '';
+      err.textContent = 'Ошибка загрузки сценариев';
+      err.disabled = true;
+      select.appendChild(err);
+    });
+  }
+
+  function setActiveScenario(scenarioId, routeSetId) {
+    const baseUrl = '/scenarios/api/' + scenarioId + '/set-active/';
+    fetch(baseUrl, {
+      method: 'POST',
+      headers: {
+        'X-CSRFToken': getCookie('csrftoken'),
+      },
+    })
+    .then(response => response.json())
+    .then(data => {
+      if (data.success) {
+        activeScenarioId = scenarioId;
+        loadScenarios();
+      } else {
+        alert('Ошибка установки активного сценария: ' + (data.errors ? data.errors.join(', ') : data.error));
+      }
+    })
+    .catch(error => {
+      console.error('Ошибка установки активного сценария:', error);
+      alert('Ошибка установки активного сценария: ' + error.message);
+    });
+  }
+
+  function getCookie(name) {
+    let cookieValue = null;
+    if (document.cookie && document.cookie !== '') {
+      const cookies = document.cookie.split(';');
+      for (let i = 0; i < cookies.length; i++) {
+        const cookie = cookies[i].trim();
+        if (cookie.substring(0, name.length + 1) === (name + '=')) {
+          cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+          break;
+        }
+      }
+    }
+    return cookieValue;
+  }
+
+  function init() {
+    const scenariosDrawer = document.getElementById('scenariosDrawer');
+    if (scenariosDrawer) {
+      scenariosDrawer.addEventListener('shown.bs.offcanvas', function() {
+        loadScenarios();
+      });
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+})();
+</script>

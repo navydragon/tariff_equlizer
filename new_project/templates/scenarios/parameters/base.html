@@ -1,0 +1,795 @@
+<style>
+  /* Portal: dropdown-меню в body, не обрезается overflow таблицы */
+  .btd-matrix-row.btd-matrix-dropdown-open {
+    position: relative;
+    z-index: 1060;
+  }
+  .btd-matrix-dropdown {
+    position: relative;
+  }
+  .btd-matrix-dropdown-portal {
+    position: fixed;
+    z-index: 1060;
+    min-width: 10rem;
+  }
+  .btd-matrix-dropdown-portal .dropdown-menu {
+    display: block;
+  }
+</style>
+<div class="card" id="btdCategoriesCard" data-scenario-id="{{ scenario.id }}">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <h3 class="card-title mb-0">Базовые тарифные решения</h3>
+    <button type="button" class="btn btn-primary btn-sm" id="btdAddCategoryBtn">
+      <i class="ti ti-plus"></i>
+      Добавить категорию
+    </button>
+  </div>
+  <div class="card-body">
+    <div id="btdCategoriesErrors"></div>
+
+    {# Матрица значений категорий по годам сценария #}
+    <div class="mt-4" id="btdValuesCard" data-scenario-id="{{ scenario.id }}">
+      <h4 class="mb-3">Значения базовых тарифных решений по годам</h4>
+      <div id="btdValuesErrors"></div>
+
+      <div class="table-responsive" id="btdValuesTableWrapper" style="overflow-x: auto; overflow-y: visible;">
+        <table class="table table-vcenter" id="btdValuesTable">
+          <thead>
+            <tr id="btdValuesHeaderRow">
+              <th class="w-1" style="width: 1px;"></th>
+              <th style="min-width: 220px;">Наименование</th>
+              {# Годы будут добавлены через JS #}
+            </tr>
+          </thead>
+          <tbody id="btdValuesTableBody">
+            {# Строки категорий и ячейки значений будут загружаться через JS #}
+          </tbody>
+        </table>
+      </div>
+      <small class="form-hint">
+        Нажмите по ячейке, чтобы отредактировать значение. Годы берутся из диапазона сценария.
+      </small>
+    </div>
+  </div>
+</div>
+
+{# Модалка добавления/редактирования категории #}
+<div class="modal fade" id="btdCategoryEditModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="btdCategoryModalTitle">Новая категория</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+      </div>
+      <div class="modal-body">
+        <div id="btdCategoryModalErrors"></div>
+        <form id="btdCategoryForm">
+          <input type="hidden" id="btdCategoryId" />
+          <div class="mb-3">
+            <label for="btdCategoryName" class="form-label">Название категории *</label>
+            <input
+              type="text"
+              class="form-control"
+              id="btdCategoryName"
+              name="name"
+              required
+              placeholder="Введите название категории"
+              autocomplete="off"
+            />
+          </div>
+          <div class="mb-3">
+            <label for="btdCategoryPosition" class="form-label">Позиция</label>
+            <input
+              type="number"
+              class="form-control"
+              id="btdCategoryPosition"
+              name="position"
+              min="1"
+              placeholder="Оставьте пустым, чтобы добавить в конец"
+            />
+            <small class="form-hint">
+              При удалении категории позиции ниже автоматически сдвигаются на 1.
+            </small>
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+        <button type="submit" form="btdCategoryForm" class="btn btn-primary">
+          <i class="ti ti-device-floppy"></i>
+          Сохранить
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# Модал Bootstrap 5 для редактирования значения категории по году #}
+<div class="modal fade" id="btdValueEditModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-sm modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="btdValueModalTitle">Редактирование значения</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label for="btdValueInput" class="form-label">Значение</label>
+          <input type="number" step="0.0001" class="form-control" id="btdValueInput" />
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+        <button type="button" class="btn btn-primary" id="btdValueSaveBtn">
+          <i class="ti ti-device-floppy"></i>
+          Сохранить
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  const card = document.getElementById('btdCategoriesCard');
+  if (!card) return;
+
+  const scenarioId = card.dataset.scenarioId;
+  const errorsContainer = document.getElementById('btdCategoriesErrors');
+  const addBtn = document.getElementById('btdAddCategoryBtn');
+  const categoryModalEl = document.getElementById('btdCategoryEditModal');
+  const categoryModalInstance = categoryModalEl && typeof bootstrap !== 'undefined'
+    ? new bootstrap.Modal(categoryModalEl)
+    : null;
+  const form = document.getElementById('btdCategoryForm');
+  const modalTitle = document.getElementById('btdCategoryModalTitle');
+  const modalErrors = document.getElementById('btdCategoryModalErrors');
+  const inputId = document.getElementById('btdCategoryId');
+  const inputName = document.getElementById('btdCategoryName');
+  const inputPosition = document.getElementById('btdCategoryPosition');
+
+  function getCookie(name) {
+    let cookieValue = null;
+    if (document.cookie && document.cookie !== '') {
+      const cookies = document.cookie.split(';');
+      for (let i = 0; i < cookies.length; i++) {
+        const cookie = cookies[i].trim();
+        if (cookie.substring(0, name.length + 1) === (name + '=')) {
+          cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+          break;
+        }
+      }
+    }
+    return cookieValue;
+  }
+
+  function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
+  function showErrorMessages(messages, inModal) {
+    const target = inModal ? modalErrors : errorsContainer;
+    if (!target) return;
+    if (!Array.isArray(messages)) {
+      messages = [String(messages)];
+    }
+    let errorHtml = '<div class="alert alert-danger"><ul class="mb-0">';
+    messages.forEach(msg => {
+      errorHtml += '<li>' + escapeHtml(msg) + '</li>';
+    });
+    errorHtml += '</ul></div>';
+    target.innerHTML = errorHtml;
+    if (!inModal) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  function clearErrors(inModal) {
+    const target = inModal ? modalErrors : errorsContainer;
+    if (target) target.innerHTML = '';
+  }
+
+  function showToast(type, message) {
+    let toastElement;
+    if (type === 'success') {
+      toastElement = document.getElementById('toastSuccess');
+      const timeElement = document.getElementById('toastSuccessTime');
+      if (timeElement) {
+        const now = new Date();
+        const dateStr = now.toLocaleDateString('ru-RU', {
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric'
+        });
+        const timeStr = now.toLocaleTimeString('ru-RU', {
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit'
+        });
+        timeElement.textContent = dateStr + ' ' + timeStr;
+      }
+    } else {
+      toastElement = document.getElementById('toastError');
+      const toastBody = document.getElementById('toastErrorBody');
+      if (toastBody) {
+        toastBody.innerHTML = message;
+      }
+    }
+
+    if (toastElement && typeof bootstrap !== 'undefined') {
+      const toast = new bootstrap.Toast(toastElement, {
+        autohide: true,
+        delay: 5000
+      });
+      toast.show();
+    }
+  }
+
+  function openCreateForm() {
+    clearErrors(true);
+    inputId.value = '';
+    inputName.value = '';
+    inputPosition.value = '';
+    modalTitle.textContent = 'Новая категория';
+    if (categoryModalInstance) {
+      categoryModalInstance.show();
+      categoryModalEl.addEventListener('shown.bs.modal', function onShown() {
+        categoryModalEl.removeEventListener('shown.bs.modal', onShown);
+        inputName.focus();
+      }, { once: true });
+    }
+  }
+
+  function openEditForm(id, name, position) {
+    clearErrors(true);
+    inputId.value = id;
+    inputName.value = name || '';
+    inputPosition.value = position || '';
+    modalTitle.textContent = 'Редактирование категории';
+    if (categoryModalInstance) {
+      categoryModalInstance.show();
+      categoryModalEl.addEventListener('shown.bs.modal', function onShown() {
+        categoryModalEl.removeEventListener('shown.bs.modal', onShown);
+        inputName.focus();
+      }, { once: true });
+    }
+  }
+
+  function hideCategoryModal() {
+    if (categoryModalInstance) categoryModalInstance.hide();
+  }
+
+  addBtn.addEventListener('click', function() {
+    openCreateForm();
+  });
+
+  window.btdOpenCategoryEditModal = function(id, name, position) {
+    openEditForm(id, name, position);
+  };
+
+  form.addEventListener('submit', function(e) {
+    e.preventDefault();
+    clearErrors(true);
+
+    const id = inputId.value || null;
+    const name = inputName.value.trim();
+    const positionValue = inputPosition.value.trim();
+    const position = positionValue ? parseInt(positionValue, 10) : null;
+
+    if (!name) {
+      showErrorMessages('Название категории обязательно', true);
+      return;
+    }
+
+    const payload = {
+      name: name,
+    };
+    if (position !== null && !Number.isNaN(position)) {
+      payload.position = position;
+    }
+
+    let url;
+    if (id) {
+      url = `/scenarios/api/btd-categories/${id}/update/`;
+    } else {
+      url = `/scenarios/api/${scenarioId}/btd-categories/create/`;
+    }
+
+    fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': getCookie('csrftoken'),
+      },
+      body: JSON.stringify(payload),
+    })
+      .then(response => response.json())
+      .then(data => {
+        if (data.success) {
+          showToast('success', id ? 'Категория обновлена' : 'Категория создана');
+          hideCategoryModal();
+          window.dispatchEvent(new CustomEvent('btd-categories-updated'));
+        } else {
+          const messages = data.errors || data.error || 'Ошибка сохранения категории';
+          if (Array.isArray(messages)) {
+            showErrorMessages(messages, true);
+            showToast('error', messages.join('<br>'));
+          } else {
+            showErrorMessages(messages, true);
+            showToast('error', messages);
+          }
+        }
+      })
+      .catch(error => {
+        console.error('Ошибка сохранения категории BTD:', error);
+        showErrorMessages('Ошибка сохранения категории', true);
+        showToast('error', 'Ошибка сохранения категории');
+      });
+  });
+
+})();
+
+(function() {
+  const card = document.getElementById('btdValuesCard');
+  if (!card) return;
+
+  const scenarioId = card.dataset.scenarioId;
+  const errorsContainer = document.getElementById('btdValuesErrors');
+  const headerRow = document.getElementById('btdValuesHeaderRow');
+  const tableBody = document.getElementById('btdValuesTableBody');
+  const modalEl = document.getElementById('btdValueEditModal');
+  const modalTitleEl = document.getElementById('btdValueModalTitle');
+  const modalInputEl = document.getElementById('btdValueInput');
+  const modalSaveBtn = document.getElementById('btdValueSaveBtn');
+  const modalInstance = modalEl && typeof bootstrap !== 'undefined'
+    ? new bootstrap.Modal(modalEl)
+    : null;
+  let currentCategoryId = null;
+  let currentYear = null;
+  let currentCellEl = null;
+
+  function getCookie(name) {
+    let cookieValue = null;
+    if (document.cookie && document.cookie !== '') {
+      const cookies = document.cookie.split(';');
+      for (let i = 0; i < cookies.length; i++) {
+        const cookie = cookies[i].trim();
+        if (cookie.substring(0, name.length + 1) === (name + '=')) {
+          cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+          break;
+        }
+      }
+    }
+    return cookieValue;
+  }
+
+  function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
+  function clearErrors() {
+    errorsContainer.innerHTML = '';
+  }
+
+  function showErrorMessages(messages) {
+    if (!Array.isArray(messages)) {
+      messages = [String(messages)];
+    }
+    let errorHtml = '<div class="alert alert-danger"><ul class="mb-0">';
+    messages.forEach(msg => {
+      errorHtml += '<li>' + escapeHtml(msg) + '</li>';
+    });
+    errorHtml += '</ul></div>';
+    errorsContainer.innerHTML = errorHtml;
+    errorsContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  function showToast(type, message) {
+    let toastElement;
+    if (type === 'success') {
+      toastElement = document.getElementById('toastSuccess');
+      const timeElement = document.getElementById('toastSuccessTime');
+      if (timeElement) {
+        const now = new Date();
+        const dateStr = now.toLocaleDateString('ru-RU', {
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric'
+        });
+        const timeStr = now.toLocaleTimeString('ru-RU', {
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit'
+        });
+        timeElement.textContent = dateStr + ' ' + timeStr;
+      }
+    } else {
+      toastElement = document.getElementById('toastError');
+      const toastBody = document.getElementById('toastErrorBody');
+      if (toastBody) {
+        toastBody.innerHTML = message;
+      }
+    }
+
+    if (toastElement && typeof bootstrap !== 'undefined') {
+      const toast = new bootstrap.Toast(toastElement, {
+        autohide: true,
+        delay: 5000
+      });
+      toast.show();
+    }
+  }
+
+  function renderMatrix(years, categories, totalCoefficient) {
+    closeAllMatrixDropdowns();
+
+    // Шапка
+    while (headerRow.children.length > 2) {
+      headerRow.removeChild(headerRow.lastChild);
+    }
+    years.forEach(function(year) {
+      const th = document.createElement('th');
+      th.textContent = year;
+      headerRow.appendChild(th);
+    });
+
+    // Тело
+    tableBody.innerHTML = '';
+    if (!categories || categories.length === 0) {
+      const tr = document.createElement('tr');
+      const td = document.createElement('td');
+      td.colSpan = years.length + 2;
+      td.className = 'text-center text-muted';
+      td.textContent = 'Категории не заданы';
+      tr.appendChild(td);
+      tableBody.appendChild(tr);
+      return;
+    }
+
+    const total = categories.length;
+
+    categories.forEach(function(category, index) {
+      const tr = document.createElement('tr');
+      tr.className = 'btd-matrix-row';
+      tr.dataset.id = String(category.id);
+      tr.dataset.name = category.name;
+      tr.dataset.position = String(category.position);
+
+      const isFirst = index === 0;
+      const isLast = index === total - 1;
+
+      const actionsTd = document.createElement('td');
+      actionsTd.className = 'w-1';
+      actionsTd.innerHTML = `
+        <div class="dropdown btd-matrix-dropdown">
+          <button type="button" class="btn btn-icon btn-ghost-secondary btn-sm btd-matrix-dropdown-toggle" aria-label="Действия">
+            <i class="ti ti-dots-vertical"></i>
+          </button>
+          <ul class="dropdown-menu dropdown-menu-end btd-matrix-dropdown-menu">
+            <li><a class="dropdown-item btd-matrix-action-edit" href="#" data-id="${category.id}">
+              <i class="ti ti-edit me-2"></i>Редактировать
+            </a></li>
+            <li><a class="dropdown-item btd-matrix-action-delete text-danger" href="#" data-id="${category.id}">
+              <i class="ti ti-trash me-2"></i>Удалить
+            </a></li>
+            <li><hr class="dropdown-divider"></li>
+            <li><a class="dropdown-item btd-matrix-action-move-up ${isFirst ? 'disabled' : ''}" href="#" data-id="${category.id}">
+              <i class="ti ti-arrow-up me-2"></i>Поднять выше
+            </a></li>
+            <li><a class="dropdown-item btd-matrix-action-move-down ${isLast ? 'disabled' : ''}" href="#" data-id="${category.id}">
+              <i class="ti ti-arrow-down me-2"></i>Опустить ниже
+            </a></li>
+          </ul>
+        </div>
+      `;
+      tr.appendChild(actionsTd);
+
+      const nameTd = document.createElement('td');
+      nameTd.className = 'btd-matrix-name';
+      nameTd.textContent = category.name;
+      tr.appendChild(nameTd);
+
+      years.forEach(function(year) {
+        const td = document.createElement('td');
+        const values = category.values || {};
+        const key = String(year);
+        const rawValue = Object.prototype.hasOwnProperty.call(values, key) ? values[key] : '';
+        let valueText;
+        if (rawValue === null || rawValue === undefined || String(rawValue).trim() === '') {
+          valueText = 'нет';
+        } else {
+          valueText = String(rawValue);
+        }
+
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'btn btn-link p-0 btd-value-cell';
+        btn.dataset.categoryId = String(category.id);
+        btn.dataset.year = String(year);
+        btn.textContent = valueText;
+
+        td.appendChild(btn);
+        tr.appendChild(td);
+      });
+
+      tableBody.appendChild(tr);
+    });
+
+    // Итоговая строка «Итоговый коэффициент»
+    if (years && years.length > 0) {
+      const totalRow = document.createElement('tr');
+      totalRow.className = 'btd-matrix-total-row fw-semibold';
+
+      const emptyTd = document.createElement('td');
+      totalRow.appendChild(emptyTd);
+
+      const nameTd = document.createElement('td');
+      nameTd.textContent = 'Итоговый коэффициент';
+      totalRow.appendChild(nameTd);
+
+      const totals = totalCoefficient || {};
+
+      years.forEach(function(year) {
+        const td = document.createElement('td');
+        const key = String(year);
+        const rawValue = Object.prototype.hasOwnProperty.call(totals, key) ? totals[key] : '';
+        const text = (rawValue === null || rawValue === undefined || String(rawValue).trim() === '')
+          ? ''
+          : String(rawValue);
+        td.textContent = text;
+        totalRow.appendChild(td);
+      });
+
+      tableBody.appendChild(totalRow);
+    }
+  }
+
+  let openDropdownRow = null;
+  let openDropdownPortal = null;
+  let openDropdownEl = null;
+
+  function closeAllMatrixDropdowns() {
+    if (openDropdownPortal && openDropdownPortal.parentNode) {
+      const menu = openDropdownPortal.querySelector('.btd-matrix-dropdown-menu');
+      if (openDropdownEl && menu) {
+        openDropdownEl.appendChild(menu);
+        menu.classList.remove('show');
+      }
+      openDropdownPortal.remove();
+      openDropdownPortal = null;
+      openDropdownEl = null;
+    }
+    tableBody.querySelectorAll('.btd-matrix-dropdown.show').forEach(function(dd) {
+      dd.classList.remove('show');
+    });
+    tableBody.querySelectorAll('.btd-matrix-row.btd-matrix-dropdown-open').forEach(function(row) {
+      row.classList.remove('btd-matrix-dropdown-open');
+    });
+    openDropdownRow = null;
+  }
+
+  function toggleMatrixDropdown(btn) {
+    const dropdown = btn.closest('.btd-matrix-dropdown');
+    if (!dropdown) return;
+    const wasOpen = dropdown.classList.contains('show');
+    closeAllMatrixDropdowns();
+    if (!wasOpen) {
+      const menu = dropdown.querySelector('.btd-matrix-dropdown-menu');
+      const row = dropdown.closest('.btd-matrix-row');
+      if (!menu || !row) return;
+
+      dropdown.classList.add('show');
+      row.classList.add('btd-matrix-dropdown-open');
+      openDropdownRow = row;
+      openDropdownEl = dropdown;
+
+      const rect = btn.getBoundingClientRect();
+      const portal = document.createElement('div');
+      portal.className = 'btd-matrix-dropdown-portal';
+      portal.style.left = rect.left + 'px';
+      portal.style.top = (rect.bottom + 2) + 'px';
+
+      dropdown.removeChild(menu);
+      menu.classList.add('show');
+      portal.appendChild(menu);
+      document.body.appendChild(portal);
+      openDropdownPortal = portal;
+    }
+  }
+
+  function loadMatrix() {
+    clearErrors();
+    fetch(`/scenarios/api/${scenarioId}/btd-values/matrix/`, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+      },
+    })
+      .then(function(response) { return response.json(); })
+      .then(function(data) {
+        if (data.success) {
+          renderMatrix(
+            data.years,
+            data.categories,
+            data.total_coefficient || {}
+          );
+        } else {
+          showErrorMessages(data.errors || data.error || 'Ошибка загрузки значений');
+        }
+      })
+      .catch(function(error) {
+        console.error('Ошибка загрузки матрицы значений BTD:', error);
+        showErrorMessages('Ошибка загрузки значений');
+      });
+  }
+
+  tableBody.addEventListener('click', function(e) {
+    const toggleBtn = e.target.closest('.btd-matrix-dropdown-toggle');
+    if (toggleBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      toggleMatrixDropdown(toggleBtn);
+      return;
+    }
+
+    const cellBtn = e.target.closest('.btd-value-cell');
+    if (cellBtn && modalInstance) {
+      currentCellEl = cellBtn;
+      currentCategoryId = cellBtn.dataset.categoryId;
+      currentYear = parseInt(cellBtn.dataset.year, 10);
+      const rawText = (cellBtn.textContent || '').trim();
+      modalInputEl.value = rawText === 'нет' ? '' : rawText;
+      if (modalTitleEl) {
+        modalTitleEl.textContent = `Редактирование значения (${currentYear} год)`;
+      }
+      modalInstance.show();
+      return;
+    }
+
+  });
+
+  function moveCategoryFromMatrix(categoryId, direction) {
+    clearErrors();
+    fetch(`/scenarios/api/btd-categories/${categoryId}/move/`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': getCookie('csrftoken'),
+      },
+      body: JSON.stringify({ direction: direction }),
+    })
+      .then(function(response) { return response.json(); })
+      .then(function(data) {
+        if (data.success) {
+          showToast('success', direction === 'up' ? 'Категория поднята' : 'Категория опущена');
+          window.dispatchEvent(new CustomEvent('btd-categories-updated'));
+        } else {
+          const messages = data.errors || data.error || 'Ошибка смены позиции';
+          showErrorMessages(messages);
+          showToast('error', Array.isArray(messages) ? messages.join('<br>') : messages);
+        }
+      })
+      .catch(function(error) {
+        console.error('Ошибка смены позиции BTD:', error);
+        showErrorMessages('Ошибка смены позиции');
+        showToast('error', 'Ошибка смены позиции');
+      });
+  }
+
+  if (modalSaveBtn && modalInstance) {
+    modalSaveBtn.addEventListener('click', function() {
+      if (!currentCategoryId || !currentYear || !currentCellEl) {
+        modalInstance.hide();
+        return;
+      }
+
+      const value = (modalInputEl.value || '').trim();
+      if (!value) {
+        showErrorMessages('Значение не может быть пустым');
+        return;
+      }
+
+      fetch('/scenarios/api/btd-values/update/', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': getCookie('csrftoken'),
+        },
+        body: JSON.stringify({
+          scenario_id: parseInt(scenarioId, 10),
+          category_id: parseInt(currentCategoryId, 10),
+          year: currentYear,
+          value: value,
+        }),
+      })
+        .then(function(response) {
+          return response.json();
+        })
+        .then(function(data) {
+          if (data.success) {
+            clearErrors();
+            showToast('success', 'Значение сохранено');
+            modalInstance.hide();
+            loadMatrix();
+          } else {
+            const messages = data.errors || data.error || 'Ошибка сохранения значения';
+            showErrorMessages(messages);
+            showToast('error', Array.isArray(messages) ? messages.join('<br>') : messages);
+          }
+        })
+        .catch(function(error) {
+          console.error('Ошибка сохранения значения BTD:', error);
+          showErrorMessages('Ошибка сохранения значения');
+          showToast('error', 'Ошибка сохранения значения');
+        });
+    });
+  }
+
+  // Закрытие dropdown при клике вне его; обработка кликов по меню в portal (body)
+  document.addEventListener('click', function(e) {
+    const editLink = e.target.closest('.btd-matrix-action-edit');
+    const deleteLink = e.target.closest('.btd-matrix-action-delete');
+    const moveUpLink = e.target.closest('.btd-matrix-action-move-up');
+    const moveDownLink = e.target.closest('.btd-matrix-action-move-down');
+    const inPortal = e.target.closest('.btd-matrix-dropdown-portal');
+
+    if (inPortal && (editLink || deleteLink || moveUpLink || moveDownLink)) {
+      e.preventDefault();
+      const row = openDropdownRow;
+      closeAllMatrixDropdowns();
+      if (!row) return;
+
+      if (editLink && !editLink.classList.contains('disabled')) {
+        const nameCell = row.querySelector('.btd-matrix-name');
+        const id = editLink.dataset.id;
+        const name = nameCell ? nameCell.textContent.trim() : '';
+        const position = row.dataset.position || '';
+        if (typeof window.btdOpenCategoryEditModal === 'function') {
+          window.btdOpenCategoryEditModal(id, name, position);
+        }
+      } else if (deleteLink && !deleteLink.classList.contains('disabled')) {
+        const categoryId = deleteLink.dataset.id;
+        if (!categoryId) return;
+        if (!confirm('Удалить категорию? Позиции последующих категорий будут сдвинуты.')) return;
+        clearErrors();
+        fetch(`/scenarios/api/btd-categories/${categoryId}/delete/`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') },
+        })
+          .then(function(r) { return r.json(); })
+          .then(function(data) {
+            if (data.success) {
+              showToast('success', 'Категория удалена');
+              window.dispatchEvent(new CustomEvent('btd-categories-updated'));
+            } else {
+              const m = data.errors || data.error || 'Ошибка удаления категории';
+              showErrorMessages(m);
+              showToast('error', Array.isArray(m) ? m.join('<br>') : m);
+            }
+          })
+          .catch(function() {
+            showErrorMessages('Ошибка удаления категории');
+            showToast('error', 'Ошибка удаления категории');
+          });
+      } else if (moveUpLink && !moveUpLink.classList.contains('disabled')) {
+        moveCategoryFromMatrix(moveUpLink.dataset.id, 'up');
+      } else if (moveDownLink && !moveDownLink.classList.contains('disabled')) {
+        moveCategoryFromMatrix(moveDownLink.dataset.id, 'down');
+      }
+      return;
+    }
+
+    if (!e.target.closest('.btd-matrix-dropdown') && !e.target.closest('.btd-matrix-dropdown-portal')) {
+      closeAllMatrixDropdowns();
+    }
+  });
+
+  // Загружаем матрицу при открытии страницы
+  loadMatrix();
+
+  // Обновляем матрицу при смене порядка категорий
+  window.addEventListener('btd-categories-updated', loadMatrix);
+})();
+</script>

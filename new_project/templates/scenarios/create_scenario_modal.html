@@ -1,0 +1,95 @@
+<div class="modal-header">
+  <h5 class="modal-title" id="createScenarioModalLabel">Создать сценарий</h5>
+  <button
+    type="button"
+    class="btn-close"
+    data-bs-dismiss="modal"
+    aria-label="Close"
+  ></button>
+</div>
+
+<div class="modal-body">
+  <div id="createScenarioErrors"></div>
+
+  <form id="createScenarioForm">
+    {# Выбор базового сценария (обязательно) #}
+    <div class="mb-3" id="baseScenarioContainer">
+      <label for="baseScenarioSelect" class="form-label">Базовый сценарий *</label>
+      <select class="form-select" id="baseScenarioSelect" name="base_scenario_id" required>
+        <option value="">Выберите сценарий</option>
+        {% for scenario in scenarios %}
+        <option value="{{ scenario.id }}">
+          {{ scenario.name }} ({{ scenario.start_year }}-{{ scenario.end_year }})
+        </option>
+        {% endfor %}
+      </select>
+    </div>
+
+    {# Название #}
+    <div class="mb-3">
+      <label for="scenarioName" class="form-label">Название *</label>
+      <input
+        type="text"
+        class="form-control"
+        id="scenarioName"
+        name="name"
+        required
+        placeholder="Введите название сценария"
+        autocomplete="off"
+      />
+    </div>
+
+    {# Описание #}
+    <div class="mb-3">
+      <label for="scenarioDescription" class="form-label">Описание</label>
+      <textarea
+        class="form-control"
+        id="scenarioDescription"
+        name="description"
+        rows="3"
+        placeholder="Введите описание сценария (необязательно)"
+        autocomplete="off"
+      ></textarea>
+    </div>
+
+    {# Годы #}
+    <div class="row">
+      <div class="col-md-6 mb-3">
+        <label for="scenarioStartYear" class="form-label">Год начала *</label>
+        <input
+          type="number"
+          class="form-control"
+          id="scenarioStartYear"
+          name="start_year"
+          required
+          min="2000"
+          max="2100"
+          value="2025"
+        />
+      </div>
+      <div class="col-md-6 mb-3">
+        <label for="scenarioEndYear" class="form-label">Год окончания *</label>
+        <input
+          type="number"
+          class="form-control"
+          id="scenarioEndYear"
+          name="end_year"
+          required
+          min="2000"
+          max="2100"
+          value="2035"
+        />
+      </div>
+    </div>
+  </form>
+</div>
+
+<div class="modal-footer">
+  <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+    Отмена
+  </button>
+  <button type="submit" form="createScenarioForm" class="btn btn-primary">
+    Создать
+  </button>
+</div>
+

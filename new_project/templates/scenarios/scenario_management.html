@@ -1,0 +1,440 @@
+{% extends "base.html" %}
+
+{% block title %}Управление сценариями · Цифровой тарифный инструментарий{% endblock %}
+
+{% block content %}
+<div class="page-header d-print-none">
+  <div class="row align-items-center">
+    <div class="col">
+      <h2 class="page-title">Управление сценариями</h2>
+      <div class="text-muted mt-1">
+        Создание, редактирование и управление сценариями
+      </div>
+    </div>
+    <div class="col-auto">
+      <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createScenarioModal">
+        <i class="ti ti-plus"></i>
+        Создать
+      </button>
+    </div>
+  </div>
+</div>
+
+<div class="page-body">
+  <div class="container-xl">
+    {# Индикатор загрузки #}
+    <div id="scenarios-loading" class="text-center py-5" style="display: none;">
+      <div class="spinner-border text-primary" role="status">
+        <span class="visually-hidden">Загрузка...</span>
+      </div>
+    </div>
+
+    {# Сообщение об отсутствии сценариев #}
+    <div id="scenarios-empty" class="text-center py-5" style="display: none;">
+      <div class="empty">
+        <div class="empty-icon">
+          <i class="ti ti-inbox" style="font-size: 3rem;"></i>
+        </div>
+        <p class="empty-title">Нет сценариев</p>
+        <p class="empty-text text-muted">
+          Создайте первый сценарий, чтобы начать работу
+        </p>
+        <div class="empty-action">
+          <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createScenarioModal">
+            <i class="ti ti-plus"></i>
+            Создать сценарий
+          </button>
+        </div>
+      </div>
+    </div>
+
+    {# Сетка карточек сценариев #}
+    <div id="scenarios-grid" class="row row-cards mt-3" style="display: flex; flex-wrap: wrap;">
+      {# Карточки будут загружены через AJAX #}
+    </div>
+  </div>
+</div>
+
+{# Модальное окно создания сценария #}
+<div class="modal modal-blur fade" id="createScenarioModal" tabindex="-1" aria-labelledby="createScenarioModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered" role="document">
+    <div class="modal-content" id="createScenarioModalContent">
+      {# Контент будет загружен через htmx или fetch #}
+    </div>
+  </div>
+</div>
+
+{# Модальное окно редактирования сценария #}
+<div class="modal modal-blur fade" id="editScenarioModal" tabindex="-1" aria-labelledby="editScenarioModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered" role="document">
+    <div class="modal-content" id="editScenarioModalContent">
+      {# Контент будет загружен динамически #}
+    </div>
+  </div>
+</div>
+
+<style>
+  /* Выравнивание высоты карточек */
+  #scenarios-grid .col-md-6,
+  #scenarios-grid .col-lg-4 {
+    display: flex;
+  }
+  
+  #scenarios-grid .card {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+  }
+  
+  #scenarios-grid .card-body {
+    display: flex;
+    flex-direction: column;
+    flex-grow: 1;
+  }
+  
+  #scenarios-grid .card-body > .mt-auto {
+    margin-top: auto;
+  }
+</style>
+
+<script>
+(function() {
+  // Загрузка списка сценариев (глобальная функция для использования в модальных окнах)
+  window.loadScenarios = function() {
+    const loading = document.getElementById('scenarios-loading');
+    const empty = document.getElementById('scenarios-empty');
+    const grid = document.getElementById('scenarios-grid');
+
+    loading.style.display = 'block';
+    empty.style.display = 'none';
+    grid.innerHTML = '';
+
+    fetch('{% url "scenarios:api_list" %}', {
+      method: 'GET',
+      headers: {
+        'X-CSRFToken': getCookie('csrftoken'),
+      },
+    })
+    .then(response => response.json())
+    .then(data => {
+      loading.style.display = 'none';
+      
+      if (data.success && data.scenarios && data.scenarios.length > 0) {
+        grid.innerHTML = data.scenarios.map(scenario => createScenarioCard(scenario)).join('');
+        attachCardEventHandlers();
+      } else {
+        empty.style.display = 'block';
+      }
+    })
+    .catch(error => {
+      loading.style.display = 'none';
+      console.error('Ошибка загрузки сценариев:', error);
+      grid.innerHTML = '<div class="col-12"><div class="alert alert-danger">Ошибка загрузки сценариев</div></div>';
+    });
+  };
+
+  // Создание карточки сценария
+  function createScenarioCard(scenario) {
+    const currentUserId = {{ request.user.id|default:0 }};
+    const activeScenarioId = {{ request.user.active_scenario_id|default_if_none:"null" }};
+    const isOwner = scenario.author_id === currentUserId;
+    const isActive = activeScenarioId !== null && scenario.id === activeScenarioId;
+    
+    // Формируем список кнопок действий
+    let actionButtons = '';
+    
+    if (isOwner) {
+      actionButtons = `
+        <div class="btn-list mt-3">
+          <button class="btn btn-sm btn-outline-primary edit-scenario-btn" data-scenario-id="${scenario.id}">
+            <i class="ti ti-edit"></i>
+            Редактировать
+          </button>
+          ${!isActive ? `
+            <button class="btn btn-sm btn-outline-danger delete-scenario-btn" data-scenario-id="${scenario.id}">
+              <i class="ti ti-trash"></i>
+              Удалить
+            </button>
+          ` : `
+            <button class="btn btn-sm btn-outline-danger" disabled title="Нельзя удалить активный сценарий">
+              <i class="ti ti-trash"></i>
+              Удалить
+            </button>
+          `}
+        </div>
+      `;
+    }
+
+    return `
+      <div class="col-md-6 col-lg-4 d-flex">
+        <div class="card w-100 d-flex flex-column" data-scenario-id="${scenario.id}">
+          <div class="card-header">
+            <h3 class="card-title">
+              ${escapeHtml(scenario.name)}
+            </h3>
+          </div>
+          <div class="card-body d-flex flex-column flex-grow-1">
+            <div class="text-muted mb-2">
+              <i class="ti ti-calendar"></i>
+              ${scenario.start_year} - ${scenario.end_year}
+            </div>
+            <div class="text-muted mb-2">
+              <i class="ti ti-user"></i>
+              ${escapeHtml(scenario.author_name)}
+            </div>
+            ${scenario.description ? `<p class="text-muted small mb-2">${escapeHtml(scenario.description)}</p>` : '<div class="mb-2"></div>'}
+            <div class="mt-auto">
+              ${actionButtons}
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  // Прикрепление обработчиков событий к карточкам
+  function attachCardEventHandlers() {
+    // Редактирование
+    document.querySelectorAll('.edit-scenario-btn').forEach(btn => {
+      btn.addEventListener('click', function() {
+        const scenarioId = this.dataset.scenarioId;
+        openEditPage(scenarioId);
+      });
+    });
+
+    // Удаление
+    document.querySelectorAll('.delete-scenario-btn').forEach(btn => {
+      btn.addEventListener('click', function() {
+        const scenarioId = this.dataset.scenarioId;
+        deleteScenario(scenarioId);
+      });
+    });
+  }
+
+  // Открытие страницы редактирования
+  function openEditPage(scenarioId) {
+    window.location.href = '/scenarios/edit/' + scenarioId + '/';
+  }
+
+  // Удаление сценария
+  function deleteScenario(scenarioId) {
+    if (!confirm('Вы уверены, что хотите удалить этот сценарий?')) {
+      return;
+    }
+
+    fetch('/scenarios/api/' + scenarioId + '/delete/', {
+      method: 'POST',
+      headers: {
+        'X-CSRFToken': getCookie('csrftoken'),
+      },
+    })
+    .then(response => response.json())
+    .then(data => {
+      if (data.success) {
+        loadScenarios();
+      } else {
+        alert('Ошибка удаления: ' + (data.errors ? data.errors.join(', ') : data.error));
+      }
+    })
+    .catch(error => {
+      console.error('Ошибка удаления сценария:', error);
+      alert('Ошибка при удалении сценария');
+    });
+  }
+
+  // Загрузка модального окна создания
+  function loadCreateModal() {
+    const modalContent = document.getElementById('createScenarioModalContent');
+    modalContent.innerHTML = '<div class="text-center p-4"><div class="spinner-border" role="status"></div></div>';
+
+    fetch('{% url "scenarios:create_modal" %}', {
+      method: 'GET',
+      headers: {
+        'X-CSRFToken': getCookie('csrftoken'),
+      },
+    })
+    .then(response => response.text())
+    .then(html => {
+      modalContent.innerHTML = html;
+
+      // Обработчик отправки формы создания
+      const createForm = document.getElementById('createScenarioForm');
+      if (createForm) {
+        createForm.addEventListener('submit', function(e) {
+          e.preventDefault();
+          
+          const errorsContainer = document.getElementById('createScenarioErrors');
+          errorsContainer.innerHTML = '';
+
+          const baseScenarioId = document.getElementById('baseScenarioSelect').value;
+          if (!baseScenarioId) {
+            errorsContainer.innerHTML = '<div class="alert alert-danger">Необходимо выбрать базовый сценарий</div>';
+            return;
+          }
+
+          const formData = {
+            name: document.getElementById('scenarioName').value,
+            description: document.getElementById('scenarioDescription').value,
+            start_year: parseInt(document.getElementById('scenarioStartYear').value),
+            end_year: parseInt(document.getElementById('scenarioEndYear').value),
+            base_scenario_id: parseInt(baseScenarioId),
+          };
+
+          fetch('{% url "scenarios:api_create" %}', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-CSRFToken': getCookie('csrftoken'),
+            },
+            body: JSON.stringify(formData),
+          })
+          .then(response => response.json())
+          .then(data => {
+            if (data.success) {
+              // Закрываем модальное окно через кнопку закрытия (самый надежный способ)
+              const modalElement = document.getElementById('createScenarioModal');
+              if (modalElement) {
+                // Ищем кнопку закрытия в модальном окне
+                const closeBtn = modalElement.querySelector('[data-bs-dismiss="modal"]');
+                if (closeBtn) {
+                  closeBtn.click();
+                } else if (typeof bootstrap !== 'undefined') {
+                  // Если кнопки нет, используем Bootstrap API
+                  const modal = bootstrap.Modal.getInstance(modalElement);
+                  if (modal) {
+                    modal.hide();
+                  }
+                }
+              }
+              loadScenarios();
+            } else {
+              let errorHtml = '<div class="alert alert-danger"><ul class="mb-0">';
+              if (data.errors) {
+                data.errors.forEach(error => {
+                  errorHtml += '<li>' + escapeHtml(error) + '</li>';
+                });
+              } else if (data.error) {
+                errorHtml += '<li>' + escapeHtml(data.error) + '</li>';
+              }
+              errorHtml += '</ul></div>';
+              errorsContainer.innerHTML = errorHtml;
+            }
+          })
+          .catch(error => {
+            console.error('Ошибка создания сценария:', error);
+            errorsContainer.innerHTML = '<div class="alert alert-danger">Ошибка при создании сценария</div>';
+          });
+        });
+      }
+    })
+    .catch(error => {
+      console.error('Ошибка загрузки формы создания:', error);
+      modalContent.innerHTML = '<div class="alert alert-danger m-3">Ошибка загрузки формы создания</div>';
+    });
+  }
+
+  // Вспомогательные функции
+  function getCookie(name) {
+    let cookieValue = null;
+    if (document.cookie && document.cookie !== '') {
+      const cookies = document.cookie.split(';');
+      for (let i = 0; i < cookies.length; i++) {
+        const cookie = cookies[i].trim();
+        if (cookie.substring(0, name.length + 1) === (name + '=')) {
+          cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+          break;
+        }
+      }
+    }
+    return cookieValue;
+  }
+
+  function escapeHtml(text) {
+    if (text == null) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
+  // Инициализация
+  function init() {
+    // Загрузка сценариев при загрузке страницы
+    loadScenarios();
+
+    // Обработчик открытия модального окна создания
+    const createModal = document.getElementById('createScenarioModal');
+    if (createModal) {
+      createModal.addEventListener('show.bs.modal', function(event) {
+        loadCreateModal();
+      });
+      
+      // Обработчик закрытия модального окна создания - очищаем содержимое и backdrop
+      createModal.addEventListener('hidden.bs.modal', function() {
+        // Очищаем содержимое модального окна
+        const modalContent = document.getElementById('createScenarioModalContent');
+        if (modalContent) {
+          modalContent.innerHTML = '';
+        }
+        
+        // Принудительно удаляем backdrop, если он остался
+        setTimeout(function() {
+          const backdrops = document.querySelectorAll('.modal-backdrop');
+          backdrops.forEach(function(backdrop) {
+            backdrop.remove();
+          });
+          
+          // Очищаем стили body
+          document.body.classList.remove('modal-open');
+          document.body.style.overflow = '';
+          document.body.style.paddingRight = '';
+          
+          // Убираем класс show с модального окна на всякий случай
+          createModal.classList.remove('show');
+          createModal.style.display = 'none';
+          createModal.setAttribute('aria-hidden', 'true');
+          createModal.removeAttribute('aria-modal');
+        }, 100);
+      });
+    }
+
+    // Обработчик закрытия модального окна редактирования
+    const editModal = document.getElementById('editScenarioModal');
+    if (editModal) {
+      editModal.addEventListener('hidden.bs.modal', function() {
+        // Очищаем содержимое модального окна
+        const modalContent = document.getElementById('editScenarioModalContent');
+        if (modalContent) {
+          modalContent.innerHTML = '';
+        }
+        
+        // Принудительно удаляем backdrop, если он остался
+        setTimeout(function() {
+          const backdrops = document.querySelectorAll('.modal-backdrop');
+          backdrops.forEach(function(backdrop) {
+            backdrop.remove();
+          });
+          
+          // Очищаем стили body
+          document.body.classList.remove('modal-open');
+          document.body.style.overflow = '';
+          document.body.style.paddingRight = '';
+          
+          // Убираем класс show с модального окна на всякий случай
+          editModal.classList.remove('show');
+          editModal.style.display = 'none';
+          editModal.setAttribute('aria-hidden', 'true');
+          editModal.removeAttribute('aria-modal');
+        }, 100);
+      });
+    }
+  }
+
+  // Запуск после загрузки DOM
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+})();
+</script>
+{% endblock %}

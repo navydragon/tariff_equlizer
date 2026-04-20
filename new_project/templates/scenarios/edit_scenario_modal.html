@@ -1,0 +1,173 @@
+<div class="modal-header">
+  <h5 class="modal-title" id="editScenarioModalLabel">Редактировать сценарий</h5>
+  <button
+    type="button"
+    class="btn-close"
+    data-bs-dismiss="modal"
+    aria-label="Close"
+  ></button>
+</div>
+
+<div class="modal-body">
+  <div id="editScenarioErrors"></div>
+
+  <form id="editScenarioForm" data-scenario-id="{{ scenario.id }}">
+    {# Название #}
+    <div class="mb-3">
+      <label for="editScenarioName" class="form-label">Название *</label>
+      <input
+        type="text"
+        class="form-control"
+        id="editScenarioName"
+        name="name"
+        required
+        value="{{ scenario.name }}"
+        placeholder="Введите название сценария"
+        autocomplete="off"
+      />
+    </div>
+
+    {# Описание #}
+    <div class="mb-3">
+      <label for="editScenarioDescription" class="form-label">Описание</label>
+      <textarea
+        class="form-control"
+        id="editScenarioDescription"
+        name="description"
+        rows="3"
+        placeholder="Введите описание сценария (необязательно)"
+        autocomplete="off"
+      >{{ scenario.description }}</textarea>
+    </div>
+
+    {# Годы #}
+    <div class="row">
+      <div class="col-md-6 mb-3">
+        <label for="editScenarioStartYear" class="form-label">Год начала *</label>
+        <input
+          type="number"
+          class="form-control"
+          id="editScenarioStartYear"
+          name="start_year"
+          required
+          min="2000"
+          max="2100"
+          value="{{ scenario.start_year }}"
+        />
+      </div>
+      <div class="col-md-6 mb-3">
+        <label for="editScenarioEndYear" class="form-label">Год окончания *</label>
+        <input
+          type="number"
+          class="form-control"
+          id="editScenarioEndYear"
+          name="end_year"
+          required
+          min="2000"
+          max="2100"
+          value="{{ scenario.end_year }}"
+        />
+      </div>
+    </div>
+  </form>
+</div>
+
+<div class="modal-footer">
+  <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+    Отмена
+  </button>
+  <button type="submit" form="editScenarioForm" class="btn btn-primary">
+    Сохранить
+  </button>
+</div>
+
+<script>
+(function() {
+  const form = document.getElementById('editScenarioForm');
+  if (!form) return;
+
+  form.addEventListener('submit', function(e) {
+    e.preventDefault();
+    
+    const scenarioId = form.dataset.scenarioId;
+    const errorsContainer = document.getElementById('editScenarioErrors');
+    errorsContainer.innerHTML = '';
+
+    const formData = {
+      name: document.getElementById('editScenarioName').value,
+      description: document.getElementById('editScenarioDescription').value,
+      start_year: parseInt(document.getElementById('editScenarioStartYear').value),
+      end_year: parseInt(document.getElementById('editScenarioEndYear').value),
+    };
+
+    fetch('/scenarios/api/' + scenarioId + '/update/', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': getCookie('csrftoken'),
+      },
+      body: JSON.stringify(formData),
+    })
+    .then(response => response.json())
+    .then(data => {
+      if (data.success) {
+        // Закрываем модальное окно
+        const modalElement = form.closest('.modal');
+        if (modalElement && typeof bootstrap !== 'undefined') {
+          const modal = bootstrap.Modal.getInstance(modalElement);
+          if (modal) {
+            modal.hide();
+          } else {
+            // Альтернативный способ закрытия через data-атрибуты
+            const closeBtn = modalElement.querySelector('[data-bs-dismiss="modal"]');
+            if (closeBtn) {
+              closeBtn.click();
+            }
+          }
+        }
+        // Обновляем список сценариев на странице управления
+        if (typeof loadScenarios === 'function') {
+          loadScenarios();
+        }
+      } else {
+        // Показываем ошибки
+        let errorHtml = '<div class="alert alert-danger"><ul class="mb-0">';
+        if (data.errors) {
+          data.errors.forEach(error => {
+            errorHtml += '<li>' + escapeHtml(error) + '</li>';
+          });
+        } else if (data.error) {
+          errorHtml += '<li>' + escapeHtml(data.error) + '</li>';
+        }
+        errorHtml += '</ul></div>';
+        errorsContainer.innerHTML = errorHtml;
+      }
+    })
+    .catch(error => {
+      console.error('Ошибка обновления сценария:', error);
+      errorsContainer.innerHTML = '<div class="alert alert-danger">Ошибка при обновлении сценария</div>';
+    });
+  });
+
+  function getCookie(name) {
+    let cookieValue = null;
+    if (document.cookie && document.cookie !== '') {
+      const cookies = document.cookie.split(';');
+      for (let i = 0; i < cookies.length; i++) {
+        const cookie = cookies[i].trim();
+        if (cookie.substring(0, name.length + 1) === (name + '=')) {
+          cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+          break;
+        }
+      }
+    }
+    return cookieValue;
+  }
+
+  function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+})();
+</script>

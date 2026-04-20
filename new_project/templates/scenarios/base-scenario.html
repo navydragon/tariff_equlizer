@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+
+{% block title %}Сценарий · Цифровой тарифный инструментарий{% endblock %}
+
+{% block content %}
+<div class="page-header d-print-none">
+  <div class="row align-items-center">
+    <div class="col">
+      <h2 class="page-title">Сценарий</h2>
+      <div class="text-muted mt-1">
+        Шаблон сценария
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="page-body">
+  <div class="container-xl">
+    {% block scenario_content %}{% endblock %}
+  </div>
+</div>
+
+<style>
+  /* Размер панели сценариев: 100% ширины на малых экранах, 50% на lg и выше */
+  #scenariosDrawer.offcanvas-scenarios {
+    width: 100vw;
+    max-width: 100vw;
+    z-index: 1045;
+  }
+
+  @media (min-width: 992px) {
+    #scenariosDrawer.offcanvas-scenarios {
+      width: 50vw;
+      max-width: 50vw;
+    }
+  }
+
+</style>
+
+{# Плавающая кнопка с кисточкой в левом нижнем углу #}
+<a
+  class="btn btn-primary btn-icon position-fixed bottom-0 start-0 m-3"
+  data-bs-toggle="offcanvas"
+  href="#scenariosDrawer"
+  role="button"
+  aria-controls="scenariosDrawer"
+>
+  <i class="ti ti-settings"></i>
+</a>
+
+{# Левый offcanvas \"Сценарии\" #}
+<div
+  class="offcanvas offcanvas-start offcanvas-scenarios"
+  tabindex="-1"
+  id="scenariosDrawer"
+  aria-labelledby="scenariosDrawerLabel"
+  data-bs-backdrop="static"
+>
+  <div class="offcanvas-header">
+    <h2 class="offcanvas-title" id="scenariosDrawerLabel">Сценарии</h2>
+    <button
+      type="button"
+      class="btn-close"
+      data-bs-dismiss="offcanvas"
+      aria-label="Close"
+    ></button>
+  </div>
+  <div class="offcanvas-body">
+    {% block scenarios_drawer_body %}
+      {% include "scenarios/scenario_window.html" %}
+    {% endblock %}
+  </div>
+</div>
+{% endblock %}
+

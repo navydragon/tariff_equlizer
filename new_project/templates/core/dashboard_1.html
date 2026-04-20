@@ -1,0 +1,103 @@
+{% extends "scenarios/base-scenario.html" %}
+
+{% block title %}Дашборд-1 · Цифровой тарифный инструментарий{% endblock %}
+
+{% block scenarios_drawer_body %}
+  {% include "scenarios/scenario_window.html" %}
+  <hr class="my-3" />
+  <div
+    data-controller="scenario-drawer-route-picker"
+    data-scenario-drawer-route-picker-routes-list-url-value="{% url 'route_list_api' %}"
+    data-scenario-drawer-route-picker-page-size-value="20"
+  >
+    <h4 class="h5 mb-2">Выбор маршрута</h4>
+    <p class="text-muted small mb-2">
+      Выберите сценарий в списке выше, затем найдите маршрут по поиску.
+    </p>
+    <div class="mb-3">
+      <label class="form-label" for="drawerRouteSearchInput">Поиск</label>
+      <input
+        id="drawerRouteSearchInput"
+        type="text"
+        class="form-control"
+        placeholder="Груз, станция, код маршрута..."
+        data-scenario-drawer-route-picker-target="searchInput"
+        data-action="input->scenario-drawer-route-picker#onSearchInput"
+      />
+    </div>
+    <div
+      class="text-center py-3"
+      style="display: none;"
+      data-scenario-drawer-route-picker-target="routeLoading"
+    >
+      <div class="spinner-border text-primary" role="status">
+        <span class="visually-hidden">Загрузка...</span>
+      </div>
+    </div>
+    <div
+      class="list-group"
+      style="max-height: 360px; overflow: auto;"
+      data-scenario-drawer-route-picker-target="routeList"
+    ></div>
+    <div
+      class="text-muted text-center py-4"
+      style="display: none;"
+      data-scenario-drawer-route-picker-target="routeEmpty"
+    >
+      Нет маршрутов по текущему поиску.
+    </div>
+    <div
+      class="alert alert-danger mt-3 d-none"
+      role="alert"
+      data-scenario-drawer-route-picker-target="routeErrors"
+    ></div>
+  </div>
+{% endblock %}
+
+{% block scenario_content %}
+<div class="row g-3 align-items-stretch">
+  <div class="col-lg-4">
+    <div class="card h-100">
+      <div class="card-header">Маршрут</div>
+      <div class="card-body">
+        <div
+          id="dashboardRoutePlaceholder"
+          class="text-muted"
+        >
+          Откройте панель слева внизу (шестерёнка), выберите сценарий и маршрут.
+        </div>
+
+        <div id="dashboardSelectedRouteCard" style="display: none;">
+          <div class="mb-2">
+            <div class="h5 mb-1" id="dashboardRouteCode"></div>
+            <div class="text-muted small" id="dashboardRouteCargo"></div>
+          </div>
+
+          <div class="mt-3">
+            <div class="mb-2">
+              <strong>Отправление:</strong>
+              <span id="dashboardRouteOrigin"></span>
+            </div>
+            <div class="mb-2">
+              <strong>Назначение:</strong>
+              <span id="dashboardRouteDestination"></span>
+            </div>
+            <div class="text-muted small">
+              <span id="dashboardRouteMessageType"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-8">
+    <div class="card h-100">
+      <div class="card-body">
+        <h3 class="h5 mb-2">Основная зона</h3>
+        <p class="text-muted m-0">Здесь будут остальные блоки дашборда.</p>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

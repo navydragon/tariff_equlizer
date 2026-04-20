@@ -1,0 +1,685 @@
+{% extends "base.html" %}
+
+{% block title %}Регионы · Цифровой тарифный инструментарий{% endblock %}
+
+{% block content %}
+<div class="page-header d-print-none">
+  <div class="row align-items-center">
+    <div class="col">
+      <h2 class="page-title">Регионы</h2>
+      <div class="text-muted mt-1">
+        Справочник регионов с поиском, фильтрацией и пагинацией
+      </div>
+    </div>
+    <div class="col-auto">
+      <button
+        type="button"
+        class="btn btn-primary"
+        data-bs-toggle="modal"
+        data-bs-target="#regionCreateModal"
+      >
+        <i class="ti ti-plus"></i>
+        Создать
+      </button>
+    </div>
+  </div>
+</div>
+
+<div class="page-body">
+  <div class="container-xl">
+    <div class="card">
+      <div class="card-body border-bottom py-3">
+        <div class="row">
+          <div class="col-12 col-md-4 mb-2">
+            <label class="form-label" for="regionSearchInput">Поиск</label>
+            <input
+              type="text"
+              id="regionSearchInput"
+              class="form-control"
+              placeholder="Краткое или полное название"
+            />
+          </div>
+          <div class="col-6 col-md-3 mb-2">
+            <label class="form-label" for="regionTypeFilter">Тип региона</label>
+            <select id="regionTypeFilter" class="form-select">
+              <option value="">Все типы</option>
+              {% for t in types %}
+                <option value="{{ t }}">{{ t }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-6 col-md-2 mb-2">
+            <label class="form-label" for="regionPageSize">На странице</label>
+            <select id="regionPageSize" class="form-select">
+              <option value="10">10</option>
+              <option value="20" selected>20</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+            </select>
+          </div>
+          <div class="col-6 col-md-3 mb-2 d-flex align-items-end justify-content-end">
+            <button id="regionSearchButton" class="btn btn-outline-primary me-2">
+              <i class="ti ti-search"></i>
+              Найти
+            </button>
+            <button id="regionResetButton" class="btn btn-outline-secondary">
+              <i class="ti ti-refresh"></i>
+              Сбросить
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div id="region-loading" class="text-center py-4" style="display: none;">
+        <div class="spinner-border text-primary" role="status">
+          <span class="visually-hidden">Загрузка...</span>
+        </div>
+      </div>
+
+      <div id="region-empty" class="text-center py-5" style="display: none;">
+        <div class="empty">
+          <div class="empty-icon">
+            <i class="ti ti-inbox" style="font-size: 3rem;"></i>
+          </div>
+          <p class="empty-title">Нет данных</p>
+          <p class="empty-text text-muted">
+            Попробуйте изменить условия поиска или создайте первую запись
+          </p>
+        </div>
+      </div>
+
+      <div class="table-responsive">
+        <table class="table table-vcenter card-table">
+          <thead>
+            <tr>
+              <th>Полное название</th>
+              <th style="width: 20%;">Краткое название</th>
+              <th style="width: 15%;">Тип</th>
+              <th class="text-end" style="width: 15%;">Действия</th>
+            </tr>
+          </thead>
+          <tbody id="region-table-body">
+          </tbody>
+        </table>
+      </div>
+
+      <div class="card-footer d-flex align-items-center">
+        <p class="m-0 text-muted" id="region-summary"></p>
+        <ul class="pagination m-0 ms-auto" id="region-pagination"></ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div
+  class="modal modal-blur fade"
+  id="regionCreateModal"
+  tabindex="-1"
+  aria-hidden="true"
+>
+  <div class="modal-dialog modal-dialog-centered" role="document">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Создать регион</h5>
+        <button
+          type="button"
+          class="btn-close"
+          data-bs-dismiss="modal"
+          aria-label="Close"
+        ></button>
+      </div>
+      <div class="modal-body">
+        <div id="regionCreateErrors"></div>
+        <form id="regionCreateForm">
+          <div class="mb-3">
+            <label class="form-label" for="regionCreateFullName">Полное название</label>
+            <input
+              type="text"
+              class="form-control"
+              id="regionCreateFullName"
+              required
+            />
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="regionCreateShortName">Краткое название</label>
+            <input
+              type="text"
+              class="form-control"
+              id="regionCreateShortName"
+            />
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="regionCreateType">Тип региона</label>
+            <input
+              type="text"
+              class="form-control"
+              id="regionCreateType"
+              required
+            />
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button
+          type="button"
+          class="btn btn-link link-secondary"
+          data-bs-dismiss="modal"
+        >
+          Отмена
+        </button>
+        <button type="button" class="btn btn-primary" id="regionCreateSubmit">
+          <i class="ti ti-check"></i>
+          Сохранить
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div
+  class="modal modal-blur fade"
+  id="regionEditModal"
+  tabindex="-1"
+  aria-hidden="true"
+>
+  <div class="modal-dialog modal-dialog-centered" role="document">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Редактировать регион</h5>
+        <button
+          type="button"
+          class="btn-close"
+          data-bs-dismiss="modal"
+          aria-label="Close"
+        ></button>
+      </div>
+      <div class="modal-body">
+        <div id="regionEditErrors"></div>
+        <form id="regionEditForm">
+          <input type="hidden" id="regionEditId" />
+          <div class="mb-3">
+            <label class="form-label" for="regionEditFullName">Полное название</label>
+            <input
+              type="text"
+              class="form-control"
+              id="regionEditFullName"
+              required
+            />
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="regionEditShortName">Краткое название</label>
+            <input
+              type="text"
+              class="form-control"
+              id="regionEditShortName"
+            />
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="regionEditType">Тип региона</label>
+            <input
+              type="text"
+              class="form-control"
+              id="regionEditType"
+              required
+            />
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button
+          type="button"
+          class="btn btn-link link-secondary"
+          data-bs-dismiss="modal"
+        >
+          Отмена
+        </button>
+        <button type="button" class="btn btn-primary" id="regionEditSubmit">
+          <i class="ti ti-check"></i>
+          Сохранить
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  const state = {
+    page: 1,
+    pageSize: 20,
+    totalPages: 1,
+    searchTimeout: null,
+  };
+
+  function getCookie(name) {
+    let cookieValue = null;
+    if (document.cookie && document.cookie !== '') {
+      const cookies = document.cookie.split(';');
+      for (let i = 0; i < cookies.length; i++) {
+        const cookie = cookies[i].trim();
+        if (cookie.substring(0, name.length + 1) === (name + '=')) {
+          cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+          break;
+        }
+      }
+    }
+    return cookieValue;
+  }
+
+  function escapeHtml(text) {
+    if (text == null) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
+  function showLoading(isLoading) {
+    const loading = document.getElementById('region-loading');
+    const empty = document.getElementById('region-empty');
+    const tbody = document.getElementById('region-table-body');
+
+    if (isLoading) {
+      loading.style.display = 'block';
+      empty.style.display = 'none';
+      tbody.innerHTML = '';
+    } else {
+      loading.style.display = 'none';
+    }
+  }
+
+  function loadRegions(page) {
+    if (page) {
+      state.page = page;
+    }
+
+    const searchInput = document.getElementById('regionSearchInput');
+    const typeSelect = document.getElementById('regionTypeFilter');
+    const pageSizeSelect = document.getElementById('regionPageSize');
+
+    state.pageSize = parseInt(pageSizeSelect.value || '20', 10);
+
+    const params = new URLSearchParams();
+    params.set('page', state.page.toString());
+    params.set('page_size', state.pageSize.toString());
+
+    const search = searchInput.value.trim();
+    if (search) {
+      params.set('search', search);
+    }
+
+    const type = typeSelect.value;
+    if (type) {
+      params.set('type', type);
+    }
+
+    showLoading(true);
+
+    fetch('{% url "region_list_api" %}?' + params.toString(), {
+      method: 'GET',
+      headers: {
+        'X-CSRFToken': getCookie('csrftoken'),
+      },
+    })
+      .then(response => response.json())
+      .then(data => {
+        showLoading(false);
+        const tbody = document.getElementById('region-table-body');
+        const empty = document.getElementById('region-empty');
+
+        if (!data.success) {
+          tbody.innerHTML =
+            '<tr><td colspan="4"><div class="alert alert-danger mb-0">' +
+            escapeHtml((data.errors || []).join(', ') || 'Ошибка загрузки') +
+            '</div></td></tr>';
+          return;
+        }
+
+        if (!data.items || data.items.length === 0) {
+          tbody.innerHTML = '';
+          empty.style.display = 'block';
+        } else {
+          empty.style.display = 'none';
+          tbody.innerHTML = data.items.map(createRowHtml).join('');
+        }
+
+        state.page = data.page || 1;
+        state.pageSize = data.page_size || state.pageSize;
+        state.totalPages = data.total_pages || 1;
+
+        updateSummary(data.total);
+        updatePagination();
+        attachRowHandlers();
+      })
+      .catch(error => {
+        console.error('Ошибка загрузки регионов:', error);
+        const tbody = document.getElementById('region-table-body');
+        tbody.innerHTML =
+          '<tr><td colspan="4"><div class="alert alert-danger mb-0">Ошибка загрузки регионов</div></td></tr>';
+      });
+  }
+
+  function createRowHtml(item) {
+    return `
+      <tr data-id="${item.id}">
+        <td>${escapeHtml(item.full_name)}</td>
+        <td>${escapeHtml(item.short_name || '')}</td>
+        <td>${escapeHtml(item.type || '')}</td>
+        <td class="text-end">
+          <div class="btn-group" role="group" aria-label="Действия">
+            <button
+              type="button"
+              class="btn btn-sm btn-outline-primary region-edit-btn"
+              data-id="${item.id}"
+              title="Редактировать"
+            >
+              <i class="ti ti-edit"></i>
+            </button>
+            <button
+              type="button"
+              class="btn btn-sm btn-outline-danger region-delete-btn"
+              data-id="${item.id}"
+              title="Удалить"
+            >
+              <i class="ti ti-trash"></i>
+            </button>
+          </div>
+        </td>
+      </tr>
+    `;
+  }
+
+  function updateSummary(total) {
+    const summary = document.getElementById('region-summary');
+    if (!summary) return;
+
+    const from = (state.page - 1) * state.pageSize + 1;
+    const to = Math.min(state.page * state.pageSize, total || 0);
+    if (!total) {
+      summary.textContent = 'Нет записей';
+    } else {
+      summary.textContent =
+        'Показаны ' + from + '–' + to + ' из ' + total + ' записей';
+    }
+  }
+
+  function updatePagination() {
+    const container = document.getElementById('region-pagination');
+    if (!container) return;
+
+    const page = state.page;
+    const totalPages = state.totalPages || 1;
+    container.innerHTML = '';
+
+    function createPageItem(label, targetPage, disabled, active) {
+      const li = document.createElement('li');
+      li.className = 'page-item';
+      if (disabled) li.classList.add('disabled');
+      if (active) li.classList.add('active');
+
+      const a = document.createElement('a');
+      a.className = 'page-link';
+      a.href = '#';
+      a.textContent = label;
+      if (!disabled) {
+        a.addEventListener('click', function(e) {
+          e.preventDefault();
+          if (targetPage && targetPage !== state.page) {
+            loadRegions(targetPage);
+          }
+        });
+      }
+
+      li.appendChild(a);
+      container.appendChild(li);
+    }
+
+    createPageItem('‹', page - 1, page <= 1, false);
+
+    const maxButtons = 5;
+    let start = Math.max(1, page - Math.floor(maxButtons / 2));
+    let end = start + maxButtons - 1;
+    if (end > totalPages) {
+      end = totalPages;
+      start = Math.max(1, end - maxButtons + 1);
+    }
+
+    for (let p = start; p <= end; p++) {
+      createPageItem(p.toString(), p, false, p === page);
+    }
+
+    createPageItem('›', page + 1, page >= totalPages, false);
+  }
+
+  function attachRowHandlers() {
+    document.querySelectorAll('.region-edit-btn').forEach(btn => {
+      btn.addEventListener('click', function() {
+        const id = this.dataset.id;
+        openEditModal(id);
+      });
+    });
+
+    document.querySelectorAll('.region-delete-btn').forEach(btn => {
+      btn.addEventListener('click', function() {
+        const id = this.dataset.id;
+        deleteRegion(id);
+      });
+    });
+  }
+
+  function openEditModal(id) {
+    fetch('{% url "region_detail_api" 0 %}'.replace('/0/', '/' + encodeURIComponent(id) + '/'), {
+      method: 'GET',
+      headers: {
+        'X-CSRFToken': getCookie('csrftoken'),
+      },
+    })
+      .then(response => response.json())
+      .then(data => {
+        if (!data.success || !data.item) {
+          showEditErrors(['Не удалось загрузить регион']);
+          return;
+        }
+
+        const item = data.item;
+        document.getElementById('regionEditId').value = item.id;
+        document.getElementById('regionEditFullName').value = item.full_name || '';
+        document.getElementById('regionEditShortName').value = item.short_name || '';
+        document.getElementById('regionEditType').value = item.type || '';
+
+        document.getElementById('regionEditErrors').innerHTML = '';
+
+        const modalEl = document.getElementById('regionEditModal');
+        const modal = new bootstrap.Modal(modalEl);
+        modal.show();
+      })
+      .catch(error => {
+        console.error('Ошибка загрузки региона:', error);
+        showEditErrors(['Ошибка загрузки региона']);
+      });
+  }
+
+  function showCreateErrors(errors) {
+    const container = document.getElementById('regionCreateErrors');
+    if (!container) return;
+    if (!errors || !errors.length) {
+      container.innerHTML = '';
+      return;
+    }
+    container.innerHTML =
+      '<div class="alert alert-danger" role="alert">' +
+      errors.map(e => '<div>' + escapeHtml(e) + '</div>').join('') +
+      '</div>';
+  }
+
+  function showEditErrors(errors) {
+    const container = document.getElementById('regionEditErrors');
+    if (!container) return;
+    if (!errors || !errors.length) {
+      container.innerHTML = '';
+      return;
+    }
+    container.innerHTML =
+      '<div class="alert alert-danger" role="alert">' +
+      errors.map(e => '<div>' + escapeHtml(e) + '</div>').join('') +
+      '</div>';
+  }
+
+  function createRegion() {
+    const fullName = document.getElementById('regionCreateFullName').value.trim();
+    const shortName = document.getElementById('regionCreateShortName').value.trim();
+    const type = document.getElementById('regionCreateType').value.trim();
+
+    const payload = {
+      full_name: fullName,
+      short_name: shortName,
+      type: type,
+    };
+
+    fetch('{% url "region_create_api" %}', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': getCookie('csrftoken'),
+      },
+      body: JSON.stringify(payload),
+    })
+      .then(response => response.json())
+      .then(data => {
+        if (!data.success) {
+          showCreateErrors(data.errors || ['Ошибка при создании региона']);
+          return;
+        }
+
+        showCreateErrors([]);
+        const modalEl = document.getElementById('regionCreateModal');
+        const modal = bootstrap.Modal.getInstance(modalEl);
+        if (modal) {
+          modal.hide();
+        }
+        document.getElementById('regionCreateForm').reset();
+        loadRegions();
+      })
+      .catch(error => {
+        console.error('Ошибка создания региона:', error);
+        showCreateErrors(['Ошибка создания региона']);
+      });
+  }
+
+  function updateRegion() {
+    const id = document.getElementById('regionEditId').value;
+    const fullName = document.getElementById('regionEditFullName').value.trim();
+    const shortName = document.getElementById('regionEditShortName').value.trim();
+    const type = document.getElementById('regionEditType').value.trim();
+
+    const payload = {
+      full_name: fullName,
+      short_name: shortName,
+      type: type,
+    };
+
+    fetch('{% url "region_update_api" 0 %}'.replace('/0/update/', '/' + encodeURIComponent(id) + '/update/'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': getCookie('csrftoken'),
+      },
+      body: JSON.stringify(payload),
+    })
+      .then(response => response.json())
+      .then(data => {
+        if (!data.success) {
+          showEditErrors(data.errors || ['Ошибка при сохранении региона']);
+          return;
+        }
+
+        showEditErrors([]);
+        const modalEl = document.getElementById('regionEditModal');
+        const modal = bootstrap.Modal.getInstance(modalEl);
+        if (modal) {
+          modal.hide();
+        }
+        loadRegions();
+      })
+      .catch(error => {
+        console.error('Ошибка сохранения региона:', error);
+        showEditErrors(['Ошибка сохранения региона']);
+      });
+  }
+
+  function deleteRegion(id) {
+    if (!confirm('Вы действительно хотите удалить этот регион?')) {
+      return;
+    }
+
+    fetch('{% url "region_delete_api" 0 %}'.replace('/0/delete/', '/' + encodeURIComponent(id) + '/delete/'), {
+      method: 'POST',
+      headers: {
+        'X-CSRFToken': getCookie('csrftoken'),
+      },
+    })
+      .then(response => response.json())
+      .then(data => {
+        if (!data.success) {
+          alert((data.errors || ['Ошибка удаления региона']).join('\\n'));
+          return;
+        }
+
+        loadRegions();
+      })
+      .catch(error => {
+        console.error('Ошибка удаления региона:', error);
+        alert('Ошибка удаления региона');
+      });
+  }
+
+  function initEvents() {
+    const searchInput = document.getElementById('regionSearchInput');
+    const searchButton = document.getElementById('regionSearchButton');
+    const resetButton = document.getElementById('regionResetButton');
+    const typeSelect = document.getElementById('regionTypeFilter');
+    const pageSizeSelect = document.getElementById('regionPageSize');
+
+    searchButton.addEventListener('click', function() {
+      loadRegions(1);
+    });
+
+    resetButton.addEventListener('click', function() {
+      searchInput.value = '';
+      typeSelect.value = '';
+      pageSizeSelect.value = '20';
+      loadRegions(1);
+    });
+
+    searchInput.addEventListener('input', function() {
+      clearTimeout(state.searchTimeout);
+      state.searchTimeout = setTimeout(function() {
+        loadRegions(1);
+      }, 400);
+    });
+
+    typeSelect.addEventListener('change', function() {
+      loadRegions(1);
+    });
+
+    pageSizeSelect.addEventListener('change', function() {
+      loadRegions(1);
+    });
+
+    document.getElementById('regionCreateSubmit').addEventListener('click', function() {
+      createRegion();
+    });
+
+    document.getElementById('regionEditSubmit').addEventListener('click', function() {
+      updateRegion();
+    });
+  }
+
+  document.addEventListener('DOMContentLoaded', function() {
+    initEvents();
+    loadRegions(1);
+  });
+})();
+</script>
+
+{% endblock %}
+

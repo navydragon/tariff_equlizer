@@ -1,0 +1,601 @@
+{% extends "base.html" %}
+
+{% block title %}{{ page_title }} · Цифровой тарифный инструментарий{% endblock %}
+
+{% block content %}
+<div
+  data-controller="routes"
+  data-routes-route-set-list-url-value="{{ route_set_list_api_url }}"
+  data-routes-route-set-detail-url-template-value="{{ route_set_detail_api_url_template }}"
+  data-routes-route-set-create-url-value="{{ route_set_create_api_url }}"
+  data-routes-route-set-update-url-template-value="{{ route_set_update_api_url_template }}"
+  data-routes-route-set-delete-url-template-value="{{ route_set_delete_api_url_template }}"
+  data-routes-route-list-url-value="{{ route_list_api_url }}"
+  data-routes-route-detail-url-template-value="{{ route_detail_api_url_template }}"
+  data-routes-route-create-url-value="{{ route_create_api_url }}"
+  data-routes-route-update-url-template-value="{{ route_update_api_url_template }}"
+  data-routes-route-delete-url-template-value="{{ route_delete_api_url_template }}"
+  data-routes-cargo-search-url-value="{% url 'cargo_list_api' %}"
+  data-routes-station-search-url-value="{% url 'station_list_api' %}"
+>
+<div class="page-header d-print-none">
+  <div class="row align-items-center">
+    <div class="col">
+      <h2 class="page-title">{{ page_title }}</h2>
+      <div class="text-muted mt-1">
+        {{ page_subtitle }}
+      </div>
+    </div>
+    <div class="col-auto">
+      <button
+        type="button"
+        class="btn btn-primary me-2"
+        data-bs-toggle="modal"
+        data-bs-target="#routeSetModal"
+        data-action="click->routes#openRouteSetCreate"
+      >
+        <i class="ti ti-folder-plus"></i>
+        Создать набор
+      </button>
+      <button
+        type="button"
+        class="btn btn-outline-primary me-2"
+        id="editRouteSetButton"
+        data-action="click->routes#openRouteSetEdit"
+      >
+        <i class="ti ti-folder"></i>
+        Редактировать набор
+      </button>
+      <button
+        type="button"
+        class="btn btn-outline-danger"
+        id="deleteRouteSetButton"
+        data-action="click->routes#deleteRouteSet"
+      >
+        <i class="ti ti-folder-minus"></i>
+        Удалить набор
+      </button>
+    </div>
+  </div>
+</div>
+
+<div class="page-body">
+  <div class="container-xl">
+    <div class="card mb-3">
+      <div class="card-body">
+        <div class="row align-items-end">
+          <div class="col-12 col-md-4 mb-2">
+            <label class="form-label" for="routeSetSelect">Набор маршрутов</label>
+            <select
+              id="routeSetSelect"
+              class="form-select"
+              data-routes-target="routeSetSelect"
+              data-action="change->routes#onRouteSetChange"
+            >
+            </select>
+            <div class="form-text">
+              Выберите набор для просмотра и редактирования маршрутов
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-body border-bottom py-3">
+        <div class="row align-items-end">
+          <div class="col-12 col-md-5 mb-2">
+            <label class="form-label" for="routesSearchQuery">Поиск по маршрутам</label>
+            <input
+              type="text"
+              id="routesSearchQuery"
+              class="form-control"
+              placeholder="Груз, станция, код маршрута или вид сообщения…"
+              data-routes-target="routesSearchQuery"
+              data-action="input->routes#onSearchInput"
+            />
+          </div>
+          <div class="col-6 col-md-2 mb-2">
+            <label class="form-label" for="routesPageSize">На странице</label>
+            <select
+              id="routesPageSize"
+              class="form-select"
+              data-routes-target="routesPageSize"
+              data-action="change->routes#onPageSizeChange"
+            >
+              <option value="10">10</option>
+              <option value="20" selected>20</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+            </select>
+          </div>
+          <div class="col-12 col-md-5 mb-2 d-flex align-items-end justify-content-end">
+            <button
+              id="routesApplyFiltersButton"
+              class="btn btn-outline-primary me-2"
+              data-action="click->routes#applyFilters"
+            >
+              <i class="ti ti-search"></i>
+              Применить
+            </button>
+            <button
+              id="routesResetFiltersButton"
+              class="btn btn-outline-secondary me-2"
+              data-action="click->routes#resetFilters"
+            >
+              <i class="ti ti-refresh"></i>
+              Сбросить
+            </button>
+            <button
+              type="button"
+              class="btn btn-success"
+              id="createRouteButton"
+              data-action="click->routes#openRouteCreate"
+            >
+              <i class="ti ti-road"></i>
+              Создать маршрут
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div
+        id="routes-loading"
+        class="text-center py-4"
+        style="display: none;"
+        data-routes-target="routesLoading"
+      >
+        <div class="spinner-border text-primary" role="status">
+          <span class="visually-hidden">Загрузка...</span>
+        </div>
+      </div>
+
+      <div
+        id="routes-empty"
+        class="text-center py-5"
+        style="display: none;"
+        data-routes-target="routesEmpty"
+      >
+        <div class="empty">
+          <div class="empty-icon">
+            <i class="ti ti-road-off" style="font-size: 3rem;"></i>
+          </div>
+          <p class="empty-title">Нет маршрутов</p>
+          <p class="empty-text text-muted">
+            Выберите набор или создайте первый маршрут
+          </p>
+        </div>
+      </div>
+
+      <div class="table-responsive">
+        <table class="table table-vcenter card-table">
+          <thead>
+            <tr>
+              <th>Груз</th>
+              <th>Отправление</th>
+              <th>Назначение</th>
+              <th>Вид сообщения</th>
+              <th>Код маршрута</th>
+              <th>Род вагона</th>
+              <th>Тип отправки</th>
+              <th>Трансп. расходы, руб./т</th>
+              <th>Рыночная цена, руб./т</th>
+              <th class="text-end">Действия</th>
+            </tr>
+          </thead>
+          <tbody
+            id="routes-table-body"
+            data-routes-target="routesTableBody"
+          ></tbody>
+        </table>
+      </div>
+
+      <div class="card-footer d-flex align-items-center">
+        <p
+          class="m-0 text-muted"
+          id="routes-summary"
+          data-routes-target="routesSummary"
+        ></p>
+        <ul
+          class="pagination m-0 ms-auto"
+          id="routes-pagination"
+          data-routes-target="routesPagination"
+        ></ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Модал набора маршрутов -->
+<div
+  class="modal modal-blur fade"
+  id="routeSetModal"
+  tabindex="-1"
+  aria-hidden="true"
+>
+  <div class="modal-dialog modal-dialog-centered" role="document">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="routeSetModalTitle">Набор маршрутов</h5>
+        <button
+          type="button"
+          class="btn-close"
+          data-bs-dismiss="modal"
+          aria-label="Close"
+        ></button>
+      </div>
+      <div class="modal-body">
+        <div
+          id="routeSetErrors"
+          data-routes-target="routeSetErrors"
+        ></div>
+        <form id="routeSetForm">
+          <input type="hidden" id="routeSetId" />
+          <div class="mb-3">
+            <label class="form-label" for="routeSetName">Название набора</label>
+            <input type="text" class="form-control" id="routeSetName" required />
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="routeSetCode">Код набора</label>
+            <input type="text" class="form-control" id="routeSetCode" required />
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-link link-secondary" data-bs-dismiss="modal">
+          Отмена
+        </button>
+        <button
+          type="button"
+          class="btn btn-primary"
+          id="routeSetSubmit"
+          data-action="click->routes#submitRouteSet"
+        >
+          <i class="ti ti-check"></i>
+          Сохранить
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Модал маршрута -->
+<div
+  class="modal modal-blur fade"
+  id="routeModal"
+  tabindex="-1"
+  aria-hidden="true"
+>
+  <div class="modal-dialog modal-dialog-centered modal-xl" role="document">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="routeModalTitle">Маршрут</h5>
+        <button
+          type="button"
+          class="btn-close"
+          data-bs-dismiss="modal"
+          aria-label="Close"
+        ></button>
+      </div>
+      <div class="modal-body">
+        <div id="routeErrors" data-routes-target="routeErrors"></div>
+        <form id="routeForm">
+          <input type="hidden" id="routeId" />
+          <div class="accordion" id="routeAccordion">
+            <div class="accordion-item">
+              <h2 class="accordion-header" id="routeAccHeading1">
+                <button
+                  class="accordion-button"
+                  type="button"
+                  data-bs-toggle="collapse"
+                  data-bs-target="#routeAccCollapse1"
+                  aria-expanded="true"
+                  aria-controls="routeAccCollapse1"
+                >
+                  Маршрут
+                </button>
+              </h2>
+              <div
+                id="routeAccCollapse1"
+                class="accordion-collapse collapse show"
+                aria-labelledby="routeAccHeading1"
+                data-bs-parent="#routeAccordion"
+              >
+                <div class="accordion-body">
+                  <div class="text-muted mb-3">
+                    География и основные параметры: что, откуда, куда, каким вагоном и типом отправки.
+                  </div>
+
+                  <div class="row">
+                    <div class="col-md-4 mb-3">
+                      <label class="form-label" for="routeCargo">Код груза (ETSNG)</label>
+                      <select
+                        id="routeCargo"
+                        class="form-select"
+                        data-routes-target="cargoSelect"
+                        placeholder="Начните вводить код или название груза"
+                      >
+                        <option value="">Выберите груз…</option>
+                      </select>
+                      <div class="form-text">
+                        Введите несколько символов кода или названия груза для поиска
+                      </div>
+                    </div>
+                    <div class="col-md-4 mb-3">
+                      <label class="form-label" for="routeOriginStation">Станция отправления</label>
+                      <select
+                        id="routeOriginStation"
+                        class="form-select"
+                        data-routes-target="originStationSelect"
+                        placeholder="Начните вводить код или название станции"
+                      >
+                        <option value="">Выберите станцию…</option>
+                      </select>
+                    </div>
+                    <div class="col-md-4 mb-3">
+                      <label class="form-label" for="routeDestinationStation">Станция назначения</label>
+                      <select
+                        id="routeDestinationStation"
+                        class="form-select"
+                        data-routes-target="destinationStationSelect"
+                        placeholder="Начните вводить код или название станции"
+                      >
+                        <option value="">Выберите станцию…</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div class="row">
+                    <div class="col-md-4 mb-3">
+                      <label class="form-label" for="routeShipperHolding">Холдинг грузоотправителя</label>
+                      <input type="text" id="routeShipperHolding" class="form-control" />
+                    </div>
+                    <div class="col-md-4 mb-3">
+                      <label class="form-label" for="routeShipper">Грузоотправитель</label>
+                      <input type="text" id="routeShipper" class="form-control" />
+                    </div>
+                    <div class="col-md-4 mb-3">
+                      <label class="form-label" for="routeMessageTypeId">ID типа сообщения</label>
+                      <select id="routeMessageTypeId" class="form-select">
+                        <option value="">Не выбрано</option>
+                        {% if message_types %}
+                          {% for mt in message_types %}
+                            <option value="{{ mt.id }}">{{ mt.name }}</option>
+                          {% endfor %}
+                        {% endif %}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div class="row">
+                    <div class="col-md-4 mb-3">
+                      <label class="form-label" for="routeWagonKindId">ID рода вагона</label>
+                      <select id="routeWagonKindId" class="form-select" required>
+                        <option value="">Не выбрано</option>
+                        {% if wagon_kinds %}
+                          {% for wk in wagon_kinds %}
+                            <option value="{{ wk.id }}">{{ wk.name }}</option>
+                          {% endfor %}
+                        {% endif %}
+                      </select>
+                    </div>
+                    <div class="col-md-4 mb-3">
+                      <label class="form-label" for="routeShipmentTypeId">ID типа отправки</label>
+                      <select id="routeShipmentTypeId" class="form-select" required>
+                        <option value="">Не выбрано</option>
+                        {% if shipment_types %}
+                          {% for st in shipment_types %}
+                            <option value="{{ st.id }}">{{ st.name }}</option>
+                          {% endfor %}
+                        {% endif %}
+                      </select>
+                    </div>
+                    <div class="col-md-4 mb-3">
+                      <label class="form-label" for="routeCode">Ключевой код маршрута</label>
+                      <input type="text" id="routeCode" class="form-control" />
+                    </div>
+                  </div>
+                  <div
+                    class="alert alert-info mt-2"
+                    id="routeSummary"
+                    data-routes-target="routeSummary"
+                    role="status"
+                  >
+                    <div><strong>Отправление:</strong> не выбрано</div>
+                    <div><strong>Назначение:</strong> не выбрано</div>
+                    <div><strong>Тип сообщения:</strong> не выбрано</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="accordion-item">
+              <h2 class="accordion-header" id="routeAccHeading2">
+                <button
+                  class="accordion-button collapsed"
+                  type="button"
+                  data-bs-toggle="collapse"
+                  data-bs-target="#routeAccCollapse2"
+                  aria-expanded="false"
+                  aria-controls="routeAccCollapse2"
+                >
+                  Операционные параметры
+                </button>
+              </h2>
+              <div
+                id="routeAccCollapse2"
+                class="accordion-collapse collapse"
+                aria-labelledby="routeAccHeading2"
+                data-bs-parent="#routeAccordion"
+              >
+                <div class="accordion-body">
+                  <div class="text-muted mb-3">
+                    Расстояния, сроки, возврат порожних и загрузка.
+                  </div>
+
+                  <div class="row">
+                    <div class="col-md-3 mb-3">
+                      <label class="form-label" for="routeDistanceLoaded">Расстояние груж., км</label>
+                      <input type="number" id="routeDistanceLoaded" class="form-control" />
+                    </div>
+                    <div class="col-md-3 mb-3">
+                      <label class="form-label" for="routeDistanceEmpty">Расстояние порожн., км</label>
+                      <input type="number" id="routeDistanceEmpty" class="form-control" />
+                    </div>
+                    <div class="col-md-3 mb-3">
+                      <label class="form-label" for="routeLoadTonsPerWagon">Загрузка, т/вагон</label>
+                      <input type="number" step="0.01" id="routeLoadTonsPerWagon" class="form-control" />
+                    </div>
+                    <div class="col-md-3 mb-3">
+                      <label class="form-label" for="routeEmptyReturnPct">Возврат порожних, %</label>
+                      <input type="number" step="0.01" id="routeEmptyReturnPct" class="form-control" />
+                    </div>
+                  </div>
+
+                  <div class="row">
+                    <div class="col-md-4 mb-3">
+                      <label class="form-label" for="routeDeliveryLoaded">Срок груж., сут</label>
+                      <input type="number" id="routeDeliveryLoaded" class="form-control" />
+                    </div>
+                    <div class="col-md-4 mb-3">
+                      <label class="form-label" for="routeDeliveryEmpty">Срок порожн., сут</label>
+                      <input type="number" id="routeDeliveryEmpty" class="form-control" />
+                    </div>
+                    <div class="col-md-4 mb-3">
+                      <label class="form-label" for="routeDeliveryOps">Срок погр./выгр., сут</label>
+                      <input type="number" id="routeDeliveryOps" class="form-control" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="accordion-item">
+              <h2 class="accordion-header" id="routeAccHeading3">
+                <button
+                  class="accordion-button collapsed"
+                  type="button"
+                  data-bs-toggle="collapse"
+                  data-bs-target="#routeAccCollapse3"
+                  aria-expanded="false"
+                  aria-controls="routeAccCollapse3"
+                >
+                  Тарифы и ставки
+                </button>
+              </h2>
+              <div
+                id="routeAccCollapse3"
+                class="accordion-collapse collapse"
+                aria-labelledby="routeAccHeading3"
+                data-bs-parent="#routeAccordion"
+              >
+                <div class="accordion-body">
+                  <div class="text-muted mb-3">
+                    Ставка на вагон и блок расходов РЖД.
+                  </div>
+
+                  <div class="row">
+                    <div class="col-md-3 mb-3">
+                      <label class="form-label" for="routeRatePerWagon">Ставка на вагон, руб./сут</label>
+                      <input type="number" step="0.01" id="routeRatePerWagon" class="form-control" />
+                    </div>
+                    <div class="col-md-3 mb-3">
+                      <label class="form-label" for="routeRzdLoaded">РЖД груж., руб./т</label>
+                      <input type="number" step="0.01" id="routeRzdLoaded" class="form-control" />
+                    </div>
+                    <div class="col-md-3 mb-3">
+                      <label class="form-label" for="routeRzdEmpty">РЖД порожн., руб./т</label>
+                      <input type="number" step="0.01" id="routeRzdEmpty" class="form-control" />
+                    </div>
+                    <div class="col-md-3 mb-3">
+                      <label class="form-label" for="routeRzdTotal">РЖД итого, руб./т</label>
+                      <input type="number" step="0.01" id="routeRzdTotal" class="form-control" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="accordion-item">
+              <h2 class="accordion-header" id="routeAccHeading4">
+                <button
+                  class="accordion-button collapsed"
+                  type="button"
+                  data-bs-toggle="collapse"
+                  data-bs-target="#routeAccCollapse4"
+                  aria-expanded="false"
+                  aria-controls="routeAccCollapse4"
+                >
+                  Экономика
+                </button>
+              </h2>
+              <div
+                id="routeAccCollapse4"
+                class="accordion-collapse collapse"
+                aria-labelledby="routeAccHeading4"
+                data-bs-parent="#routeAccordion"
+              >
+                <div class="accordion-body">
+                  <div class="text-muted mb-3">
+                    Прочие расходы и рыночная цена.
+                  </div>
+
+                  <div class="row">
+                    <div class="col-md-3 mb-3">
+                      <label class="form-label" for="routeOperatorsCost">Операторы, руб./т</label>
+                      <input type="number" step="0.01" id="routeOperatorsCost" class="form-control" />
+                    </div>
+                    <div class="col-md-3 mb-3">
+                      <label class="form-label" for="routeTransshipmentCost">Перевалка, руб./т</label>
+                      <input type="number" step="0.01" id="routeTransshipmentCost" class="form-control" />
+                    </div>
+                    <div class="col-md-3 mb-3">
+                      <label class="form-label" for="routeExcise">Акциз/пошлина, руб./т</label>
+                      <input type="number" step="0.01" id="routeExcise" class="form-control" />
+                    </div>
+                    <div class="col-md-3 mb-3">
+                      <label class="form-label" for="routeTransportTotal">Трансп. расходы, руб./т</label>
+                      <input type="number" step="0.01" id="routeTransportTotal" class="form-control" />
+                    </div>
+                  </div>
+
+                  <div class="row">
+                    <div class="col-md-4 mb-3">
+                      <label class="form-label" for="routeProductionCost">Себестоимость, руб./т</label>
+                      <input type="number" step="0.01" id="routeProductionCost" class="form-control" />
+                    </div>
+                    <div class="col-md-4 mb-3">
+                      <label class="form-label" for="routeTotalCost">Общие расходы, руб./т</label>
+                      <input type="number" step="0.01" id="routeTotalCost" class="form-control" />
+                    </div>
+                    <div class="col-md-4 mb-3">
+                      <label class="form-label" for="routeMarketPrice">Рыночная цена, руб./т</label>
+                      <input type="number" step="0.01" id="routeMarketPrice" class="form-control" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-link link-secondary" data-bs-dismiss="modal">
+          Отмена
+        </button>
+        <button
+          type="button"
+          class="btn btn-primary"
+          id="routeSubmit"
+          data-action="click->routes#submitRoute"
+        >
+          <i class="ti ti-check"></i>
+          Сохранить
+        </button>
+      </div>
+    </div>
+  </div>
+  </div>
+</div>
+{% endblock %}
+

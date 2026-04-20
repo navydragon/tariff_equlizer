@@ -1,0 +1,760 @@
+{% extends "base.html" %}
+
+{% block title %}Железные дороги · Цифровой тарифный инструментарий{% endblock %}
+
+{% block content %}
+<div class="page-header d-print-none">
+  <div class="row align-items-center">
+    <div class="col">
+      <h2 class="page-title">Железные дороги</h2>
+      <div class="text-muted mt-1">
+        Справочник железных дорог с поиском, фильтрацией и пагинацией
+      </div>
+    </div>
+    <div class="col-auto">
+      <button
+        type="button"
+        class="btn btn-primary"
+        data-bs-toggle="modal"
+        data-bs-target="#railroadCreateModal"
+      >
+        <i class="ti ti-plus"></i>
+        Создать
+      </button>
+    </div>
+  </div>
+</div>
+
+<div class="page-body">
+  <div class="container-xl">
+    <div class="card">
+      <div class="card-body border-bottom py-3">
+        <div class="row">
+          <div class="col-12 col-md-3 mb-2">
+            <label class="form-label" for="railroadSearchInput">Поиск</label>
+            <input
+              type="text"
+              id="railroadSearchInput"
+              class="form-control"
+              placeholder="Код, наименование, страна или направление"
+            />
+          </div>
+          <div class="col-6 col-md-2 mb-2">
+            <label class="form-label" for="railroadCountryFilter">Страна</label>
+            <select id="railroadCountryFilter" class="form-select">
+              <option value="">Все страны</option>
+              {% for c in countries %}
+                <option value="{{ c }}">{{ c }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-6 col-md-2 mb-2">
+            <label class="form-label" for="railroadDirectionFilter">Направление</label>
+            <select id="railroadDirectionFilter" class="form-select">
+              <option value="">Все направления</option>
+              {% for d in directions %}
+                <option value="{{ d }}">{{ d }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-6 col-md-2 mb-2">
+            <label class="form-label" for="railroadPageSize">На странице</label>
+            <select id="railroadPageSize" class="form-select">
+              <option value="10">10</option>
+              <option value="20" selected>20</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+            </select>
+          </div>
+          <div class="col-6 col-md-3 mb-2 d-flex align-items-end justify-content-end">
+            <button id="railroadSearchButton" class="btn btn-outline-primary me-2">
+              <i class="ti ti-search"></i>
+              Найти
+            </button>
+            <button id="railroadResetButton" class="btn btn-outline-secondary">
+              <i class="ti ti-refresh"></i>
+              Сбросить
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div id="railroad-loading" class="text-center py-4" style="display: none;">
+        <div class="spinner-border text-primary" role="status">
+          <span class="visually-hidden">Загрузка...</span>
+        </div>
+      </div>
+
+      <div id="railroad-empty" class="text-center py-5" style="display: none;">
+        <div class="empty">
+          <div class="empty-icon">
+            <i class="ti ti-inbox" style="font-size: 3rem;"></i>
+          </div>
+          <p class="empty-title">Нет данных</p>
+          <p class="empty-text text-muted">
+            Попробуйте изменить условия поиска или создайте первую запись
+          </p>
+        </div>
+      </div>
+
+      <div class="table-responsive">
+        <table class="table table-vcenter card-table">
+          <thead>
+            <tr>
+              <th style="width: 10%;">Код</th>
+              <th>Наименование</th>
+              <th style="width: 20%;">Страна</th>
+              <th style="width: 20%;">Направление</th>
+              <th class="text-end" style="width: 15%;">Действия</th>
+            </tr>
+          </thead>
+          <tbody id="railroad-table-body">
+          </tbody>
+        </table>
+      </div>
+
+      <div class="card-footer d-flex align-items-center">
+        <p class="m-0 text-muted" id="railroad-summary"></p>
+        <ul class="pagination m-0 ms-auto" id="railroad-pagination"></ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div
+  class="modal modal-blur fade"
+  id="railroadCreateModal"
+  tabindex="-1"
+  aria-hidden="true"
+>
+  <div class="modal-dialog modal-dialog-centered" role="document">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Создать железную дорогу</h5>
+        <button
+          type="button"
+          class="btn-close"
+          data-bs-dismiss="modal"
+          aria-label="Close"
+        ></button>
+      </div>
+      <div class="modal-body">
+        <div id="railroadCreateErrors"></div>
+        <form id="railroadCreateForm">
+          <div class="mb-3">
+            <label class="form-label" for="railroadCreateCode">Код</label>
+            <input
+              type="text"
+              maxlength="4"
+              class="form-control"
+              id="railroadCreateCode"
+              required
+            />
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="railroadCreateName">Наименование</label>
+            <input
+              type="text"
+              class="form-control"
+              id="railroadCreateName"
+              required
+            />
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="railroadCreateCountry">Страна</label>
+            <input
+              type="text"
+              class="form-control"
+              id="railroadCreateCountry"
+            />
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="railroadCreateDirection">Направление</label>
+            <input
+              type="text"
+              class="form-control"
+              id="railroadCreateDirection"
+            />
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button
+          type="button"
+          class="btn btn-link link-secondary"
+          data-bs-dismiss="modal"
+        >
+          Отмена
+        </button>
+        <button type="button" class="btn btn-primary" id="railroadCreateSubmit">
+          <i class="ti ti-check"></i>
+          Сохранить
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div
+  class="modal modal-blur fade"
+  id="railroadEditModal"
+  tabindex="-1"
+  aria-hidden="true"
+>
+  <div class="modal-dialog modal-dialog-centered" role="document">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Редактировать железную дорогу</h5>
+        <button
+          type="button"
+          class="btn-close"
+          data-bs-dismiss="modal"
+          aria-label="Close"
+        ></button>
+      </div>
+      <div class="modal-body">
+        <div id="railroadEditErrors"></div>
+        <form id="railroadEditForm">
+          <input type="hidden" id="railroadEditCode" />
+          <div class="mb-3">
+            <label class="form-label" for="railroadEditCodeDisplay">Код</label>
+            <input
+              type="text"
+              class="form-control"
+              id="railroadEditCodeDisplay"
+              disabled
+            />
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="railroadEditName">Наименование</label>
+            <input
+              type="text"
+              class="form-control"
+              id="railroadEditName"
+              required
+            />
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="railroadEditCountry">Страна</label>
+            <input
+              type="text"
+              class="form-control"
+              id="railroadEditCountry"
+            />
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="railroadEditDirection">Направление</label>
+            <input
+              type="text"
+              class="form-control"
+              id="railroadEditDirection"
+            />
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button
+          type="button"
+          class="btn btn-link link-secondary"
+          data-bs-dismiss="modal"
+        >
+          Отмена
+        </button>
+        <button type="button" class="btn btn-primary" id="railroadEditSubmit">
+          <i class="ti ti-check"></i>
+          Сохранить
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  const state = {
+    page: 1,
+    pageSize: 20,
+    totalPages: 1,
+    searchTimeout: null,
+  };
+
+  function getCookie(name) {
+    let cookieValue = null;
+    if (document.cookie && document.cookie !== '') {
+      const cookies = document.cookie.split(';');
+      for (let i = 0; i < cookies.length; i++) {
+        const cookie = cookies[i].trim();
+        if (cookie.substring(0, name.length + 1) === (name + '=')) {
+          cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+          break;
+        }
+      }
+    }
+    return cookieValue;
+  }
+
+  function escapeHtml(text) {
+    if (text == null) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
+  function showLoading(isLoading) {
+    const loading = document.getElementById('railroad-loading');
+    const empty = document.getElementById('railroad-empty');
+    const tbody = document.getElementById('railroad-table-body');
+
+    if (isLoading) {
+      loading.style.display = 'block';
+      empty.style.display = 'none';
+      tbody.innerHTML = '';
+    } else {
+      loading.style.display = 'none';
+    }
+  }
+
+  function loadRailroads(page) {
+    if (page) {
+      state.page = page;
+    }
+
+    const searchInput = document.getElementById('railroadSearchInput');
+    const countrySelect = document.getElementById('railroadCountryFilter');
+    const directionSelect = document.getElementById('railroadDirectionFilter');
+    const pageSizeSelect = document.getElementById('railroadPageSize');
+
+    state.pageSize = parseInt(pageSizeSelect.value || '20', 10);
+
+    const params = new URLSearchParams();
+    params.set('page', state.page.toString());
+    params.set('page_size', state.pageSize.toString());
+
+    const search = searchInput.value.trim();
+    if (search) {
+      params.set('search', search);
+    }
+
+    const country = countrySelect.value;
+    if (country) {
+      params.set('country', country);
+    }
+
+    const direction = directionSelect.value;
+    if (direction) {
+      params.set('direction', direction);
+    }
+
+    showLoading(true);
+
+    fetch('{% url "railroad_list_api" %}?' + params.toString(), {
+      method: 'GET',
+      headers: {
+        'X-CSRFToken': getCookie('csrftoken'),
+      },
+    })
+      .then(response => response.json())
+      .then(data => {
+        showLoading(false);
+        const tbody = document.getElementById('railroad-table-body');
+        const empty = document.getElementById('railroad-empty');
+
+        if (!data.success) {
+          tbody.innerHTML =
+            '<tr><td colspan="5"><div class="alert alert-danger mb-0">' +
+            escapeHtml((data.errors || []).join(', ') || 'Ошибка загрузки') +
+            '</div></td></tr>';
+          return;
+        }
+
+        if (!data.items || data.items.length === 0) {
+          tbody.innerHTML = '';
+          empty.style.display = 'block';
+        } else {
+          empty.style.display = 'none';
+          tbody.innerHTML = data.items.map(createRowHtml).join('');
+        }
+
+        state.page = data.page || 1;
+        state.pageSize = data.page_size || state.pageSize;
+        state.totalPages = data.total_pages || 1;
+
+        updateSummary(data.total);
+        updatePagination();
+        attachRowHandlers();
+      })
+      .catch(error => {
+        console.error('Ошибка загрузки железных дорог:', error);
+        const tbody = document.getElementById('railroad-table-body');
+        tbody.innerHTML =
+          '<tr><td colspan="5"><div class="alert alert-danger mb-0">Ошибка загрузки железных дорог</div></td></tr>';
+      });
+  }
+
+  function createRowHtml(item) {
+    const country = item.country
+      ? escapeHtml(item.country)
+      : '<span class="text-muted">—</span>';
+    const direction = item.direction
+      ? escapeHtml(item.direction)
+      : '<span class="text-muted">—</span>';
+
+    return `
+      <tr data-code="${escapeHtml(item.code)}">
+        <td>${escapeHtml(item.code)}</td>
+        <td>${escapeHtml(item.name)}</td>
+        <td>${country}</td>
+        <td>${direction}</td>
+        <td class="text-end">
+          <div class="btn-group" role="group" aria-label="Действия">
+            <button
+              type="button"
+              class="btn btn-sm btn-outline-primary railroad-edit-btn"
+              data-code="${escapeHtml(item.code)}"
+              title="Редактировать"
+            >
+              <i class="ti ti-edit"></i>
+            </button>
+            <button
+              type="button"
+              class="btn btn-sm btn-outline-danger railroad-delete-btn"
+              data-code="${escapeHtml(item.code)}"
+              title="Удалить"
+            >
+              <i class="ti ti-trash"></i>
+            </button>
+          </div>
+        </td>
+      </tr>
+    `;
+  }
+
+  function updateSummary(total) {
+    const summary = document.getElementById('railroad-summary');
+    if (!summary) return;
+
+    const from = (state.page - 1) * state.pageSize + 1;
+    const to = Math.min(state.page * state.pageSize, total || 0);
+    if (!total) {
+      summary.textContent = 'Нет записей';
+    } else {
+      summary.textContent =
+        'Показаны ' + from + '–' + to + ' из ' + total + ' записей';
+    }
+  }
+
+  function updatePagination() {
+    const container = document.getElementById('railroad-pagination');
+    if (!container) return;
+
+    const page = state.page;
+    const totalPages = state.totalPages || 1;
+    container.innerHTML = '';
+
+    function createPageItem(label, targetPage, disabled, active) {
+      const li = document.createElement('li');
+      li.className = 'page-item';
+      if (disabled) li.classList.add('disabled');
+      if (active) li.classList.add('active');
+
+      const a = document.createElement('a');
+      a.className = 'page-link';
+      a.href = '#';
+      a.textContent = label;
+      if (!disabled) {
+        a.addEventListener('click', function(e) {
+          e.preventDefault();
+          if (targetPage && targetPage !== state.page) {
+            loadRailroads(targetPage);
+          }
+        });
+      }
+
+      li.appendChild(a);
+      container.appendChild(li);
+    }
+
+    createPageItem('‹', page - 1, page <= 1, false);
+
+    const maxButtons = 5;
+    let start = Math.max(1, page - Math.floor(maxButtons / 2));
+    let end = start + maxButtons - 1;
+    if (end > totalPages) {
+      end = totalPages;
+      start = Math.max(1, end - maxButtons + 1);
+    }
+
+    for (let p = start; p <= end; p++) {
+      createPageItem(p.toString(), p, false, p === page);
+    }
+
+    createPageItem('›', page + 1, page >= totalPages, false);
+  }
+
+  function attachRowHandlers() {
+    document.querySelectorAll('.railroad-edit-btn').forEach(btn => {
+      btn.addEventListener('click', function() {
+        const code = this.dataset.code;
+        openEditModal(code);
+      });
+    });
+
+    document.querySelectorAll('.railroad-delete-btn').forEach(btn => {
+      btn.addEventListener('click', function() {
+        const code = this.dataset.code;
+        deleteRailroad(code);
+      });
+    });
+  }
+
+  function openEditModal(code) {
+    fetch('{% url "railroad_detail_api" "CODE_PLACEHOLDER" %}'.replace('CODE_PLACEHOLDER', encodeURIComponent(code)), {
+      method: 'GET',
+      headers: {
+        'X-CSRFToken': getCookie('csrftoken'),
+      },
+    })
+      .then(response => response.json())
+      .then(data => {
+        if (!data.success || !data.item) {
+          alert(
+            'Ошибка загрузки записи: ' +
+              escapeHtml((data.errors || []).join(', ') || 'Неизвестная ошибка')
+          );
+          return;
+        }
+
+        const item = data.item;
+        document.getElementById('railroadEditCode').value = item.code;
+        document.getElementById('railroadEditCodeDisplay').value = item.code;
+        document.getElementById('railroadEditName').value = item.name || '';
+        document.getElementById('railroadEditCountry').value = item.country || '';
+        document.getElementById('railroadEditDirection').value = item.direction || '';
+
+        const modalEl = document.getElementById('railroadEditModal');
+        const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+        modal.show();
+      })
+      .catch(error => {
+        console.error('Ошибка загрузки записи:', error);
+        alert('Ошибка загрузки записи');
+      });
+  }
+
+  function deleteRailroad(code) {
+    if (!confirm('Вы уверены, что хотите удалить железную дорогу ' + code + '?')) {
+      return;
+    }
+
+    fetch(
+      '{% url "railroad_delete_api" "CODE_PLACEHOLDER" %}'.replace('CODE_PLACEHOLDER', encodeURIComponent(code)),
+      {
+        method: 'POST',
+        headers: {
+          'X-CSRFToken': getCookie('csrftoken'),
+        },
+      }
+    )
+      .then(response => response.json())
+      .then(data => {
+        if (!data.success) {
+          alert(
+            'Ошибка удаления: ' +
+              escapeHtml((data.errors || []).join(', ') || 'Неизвестная ошибка')
+          );
+        } else {
+          loadRailroads(state.page);
+        }
+      })
+      .catch(error => {
+        console.error('Ошибка удаления записи:', error);
+        alert('Ошибка удаления записи');
+      });
+  }
+
+  function attachFilters() {
+    const searchInput = document.getElementById('railroadSearchInput');
+    const searchButton = document.getElementById('railroadSearchButton');
+    const resetButton = document.getElementById('railroadResetButton');
+    const countrySelect = document.getElementById('railroadCountryFilter');
+    const directionSelect = document.getElementById('railroadDirectionFilter');
+    const pageSizeSelect = document.getElementById('railroadPageSize');
+
+    searchButton.addEventListener('click', function() {
+      state.page = 1;
+      loadRailroads(1);
+    });
+
+    resetButton.addEventListener('click', function() {
+      searchInput.value = '';
+      countrySelect.value = '';
+      directionSelect.value = '';
+      pageSizeSelect.value = '20';
+      state.page = 1;
+      loadRailroads(1);
+    });
+
+    searchInput.addEventListener('input', function() {
+      clearTimeout(state.searchTimeout);
+      state.searchTimeout = setTimeout(function() {
+        state.page = 1;
+        loadRailroads(1);
+      }, 400);
+    });
+
+    countrySelect.addEventListener('change', function() {
+      state.page = 1;
+      loadRailroads(1);
+    });
+
+    directionSelect.addEventListener('change', function() {
+      state.page = 1;
+      loadRailroads(1);
+    });
+
+    pageSizeSelect.addEventListener('change', function() {
+      state.page = 1;
+      loadRailroads(1);
+    });
+  }
+
+  function attachCreateModal() {
+    const submitBtn = document.getElementById('railroadCreateSubmit');
+    const form = document.getElementById('railroadCreateForm');
+    const errorsContainer = document.getElementById('railroadCreateErrors');
+
+    submitBtn.addEventListener('click', function() {
+      errorsContainer.innerHTML = '';
+      const code = (document.getElementById('railroadCreateCode').value || '').trim();
+      const name = document.getElementById('railroadCreateName').value;
+      const country = document.getElementById('railroadCreateCountry').value;
+      const direction = document.getElementById('railroadCreateDirection').value;
+
+      if (!code || !name.trim()) {
+        errorsContainer.innerHTML =
+          '<div class="alert alert-danger">Заполните код и наименование</div>';
+        return;
+      }
+
+      const payload = {
+        code: code,
+        name: name,
+        country: country || null,
+        direction: direction || null,
+      };
+
+      fetch('{% url "railroad_create_api" %}', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': getCookie('csrftoken'),
+        },
+        body: JSON.stringify(payload),
+      })
+        .then(response => response.json())
+        .then(data => {
+          if (!data.success) {
+            let html =
+              '<div class="alert alert-danger"><ul class="mb-0">';
+            (data.errors || []).forEach(err => {
+              html += '<li>' + escapeHtml(err) + '</li>';
+            });
+            html += '</ul></div>';
+            errorsContainer.innerHTML = html;
+            return;
+          }
+
+          const modalEl = document.getElementById('railroadCreateModal');
+          const modal = bootstrap.Modal.getInstance(modalEl);
+          if (modal) {
+            modal.hide();
+          }
+          form.reset();
+          loadRailroads(state.page);
+        })
+        .catch(error => {
+          console.error('Ошибка создания записи:', error);
+          errorsContainer.innerHTML =
+            '<div class="alert alert-danger">Ошибка создания записи</div>';
+        });
+    });
+  }
+
+  function attachEditModal() {
+    const submitBtn = document.getElementById('railroadEditSubmit');
+    const errorsContainer = document.getElementById('railroadEditErrors');
+
+    submitBtn.addEventListener('click', function() {
+      errorsContainer.innerHTML = '';
+      const code = document.getElementById('railroadEditCode').value;
+      const name = document.getElementById('railroadEditName').value;
+      const country = document.getElementById('railroadEditCountry').value;
+      const direction = document.getElementById('railroadEditDirection').value;
+
+      if (!name.trim()) {
+        errorsContainer.innerHTML =
+          '<div class="alert alert-danger">Наименование обязательно</div>';
+        return;
+      }
+
+      const payload = {
+        name: name,
+        country: country || null,
+        direction: direction || null,
+      };
+
+      fetch(
+        '{% url "railroad_update_api" "CODE_PLACEHOLDER" %}'.replace('CODE_PLACEHOLDER', encodeURIComponent(code)),
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': getCookie('csrftoken'),
+          },
+          body: JSON.stringify(payload),
+        }
+      )
+        .then(response => response.json())
+        .then(data => {
+          if (!data.success) {
+            let html =
+              '<div class="alert alert-danger"><ul class="mb-0">';
+            (data.errors || []).forEach(err => {
+              html += '<li>' + escapeHtml(err) + '</li>';
+            });
+            html += '</ul></div>';
+            errorsContainer.innerHTML = html;
+            return;
+          }
+
+          const modalEl = document.getElementById('railroadEditModal');
+          const modal = bootstrap.Modal.getInstance(modalEl);
+          if (modal) {
+            modal.hide();
+          }
+          loadRailroads(state.page);
+        })
+        .catch(error => {
+          console.error('Ошибка обновления записи:', error);
+          errorsContainer.innerHTML =
+            '<div class="alert alert-danger">Ошибка обновления записи</div>';
+        });
+    });
+  }
+
+  function init() {
+    attachFilters();
+    attachCreateModal();
+    attachEditModal();
+    loadRailroads(1);
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+})();
+</script>
+{% endblock %}
+
