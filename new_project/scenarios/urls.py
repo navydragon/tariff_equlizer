@@ -14,9 +14,17 @@ urlpatterns = [
     path("api/create/", views.scenario_create_api, name="api_create"),
     path("api/<int:scenario_id>/update/", views.scenario_update_api, name="api_update"),
     path("api/<int:scenario_id>/delete/", views.scenario_delete_api, name="api_delete"),
-    path("api/<int:scenario_id>/set-active/", views.scenario_set_active_api, name="api_set_active"),
+    path(
+        "api/<int:scenario_id>/set-active/",
+        views.scenario_set_active_api,
+        name="api_set_active",
+    ),
     path("create-modal/", views.scenario_create_modal_view, name="create_modal"),
-    path("edit-modal/<int:scenario_id>/", views.scenario_edit_modal_view, name="edit_modal"),
+    path(
+        "edit-modal/<int:scenario_id>/",
+        views.scenario_edit_modal_view,
+        name="edit_modal",
+    ),
     path("edit/<int:scenario_id>/", views.scenario_edit_view, name="edit"),
 
     # Tariff rules API
@@ -93,5 +101,32 @@ urlpatterns = [
         "api/btd-values/update/",
         views.btd_value_update_api,
         name="btd_value_update",
+    ),
+
+    # Exchange rates API
+    path(
+        "api/exchange-rate-sets/",
+        views.exchange_rate_set_list_api,
+        name="exchange_rate_set_list",
+    ),
+    path(
+        "api/exchange-rate-sets/create/",
+        views.exchange_rate_set_create_api,
+        name="exchange_rate_set_create",
+    ),
+    path(
+        "api/<int:scenario_id>/exchange-rate-sets/attach/",
+        views.exchange_rate_set_attach_api,
+        name="exchange_rate_set_attach",
+    ),
+    path(
+        "api/<int:scenario_id>/exchange-rates/matrix/",
+        views.exchange_rates_matrix_api,
+        name="exchange_rates_matrix",
+    ),
+    path(
+        "api/exchange-rates/update/",
+        views.exchange_rate_value_update_api,
+        name="exchange_rate_value_update",
     ),
 ]

@@ -21,6 +21,14 @@ class Scenario(models.Model):
         on_delete=models.CASCADE,
         related_name="scenarios",
     )
+    exchange_rate_set = models.ForeignKey(
+        "scenarios.ExchangeRateSet",
+        verbose_name="Набор курсов валют",
+        on_delete=models.PROTECT,
+        related_name="scenarios",
+        null=True,
+        blank=True,
+    )
 
     class Meta:
         verbose_name = "Сценарий"
@@ -30,8 +38,68 @@ class Scenario(models.Model):
         return self.name
 
 
+class ExchangeRateSet(models.Model):
+    """
+    Набор курсов валют (напр. USD/RUB) для переиспользования между сценариями.
+    """
+
+    name = models.CharField("Название набора", max_length=255)
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        verbose_name="Автор",
+        on_delete=models.CASCADE,
+        related_name="exchange_rate_sets",
+    )
+    created_at = models.DateTimeField("Создано", auto_now_add=True)
+    updated_at = models.DateTimeField("Обновлено", auto_now=True)
+
+    class Meta:
+        verbose_name = "Набор курсов валют"
+        verbose_name_plural = "Наборы курсов валют"
+        ordering = ["-updated_at", "-created_at", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["author", "name"],
+                name="uniq_exchange_rate_set_author_name",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class ExchangeRateValue(models.Model):
+    """Значение курса USD/RUB по году для конкретного набора."""
+
+    rate_set = models.ForeignKey(
+        ExchangeRateSet,
+        verbose_name="Набор курсов",
+        on_delete=models.CASCADE,
+        related_name="values",
+    )
+    year = models.IntegerField("Год")
+    usd_rub = models.DecimalField("USD/RUB", max_digits=12, decimal_places=4)
+
+    class Meta:
+        verbose_name = "Курс валюты по году"
+        verbose_name_plural = "Курсы валют по годам"
+        ordering = ["rate_set", "year"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["rate_set", "year"],
+                name="uniq_exchange_rate_value_set_year",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.rate_set} {self.year}: {self.usd_rub}"
+
+
 class BTDCategory(models.Model):
-    """Категория базовых тарифных решений (BTD), упорядоченная по позиции в рамках сценария."""
+    """
+    Категория базовых тарифных решений (BTD), упорядоченная по позиции в рамках
+    сценария.
+    """
 
     name = models.CharField("Название", max_length=255)
     scenario = models.ForeignKey(

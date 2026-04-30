@@ -17,6 +17,7 @@ from scenarios.domain.services import (
     ScenarioService,
     BTDCategoryService,
     BTDCategoryValueService,
+    ExchangeRateService,
     TariffRuleService,
 )
 from scenarios.domain.dto import (
@@ -143,6 +144,7 @@ def scenario_update_api(request, scenario_id):
         start_year=data.get("start_year"),
         end_year=data.get("end_year"),
         route_set_id=data.get("route_set_id"),
+        exchange_rate_set_id=data.get("exchange_rate_set_id"),
     )
     
     service = ScenarioService()
@@ -161,6 +163,8 @@ def scenario_update_api(request, scenario_id):
             "end_year": scenario.end_year,
             "route_set_id": scenario.route_set_id,
             "route_set_name": scenario.route_set_name,
+            "exchange_rate_set_id": scenario.exchange_rate_set_id,
+            "exchange_rate_set_name": scenario.exchange_rate_set_name,
             "author_id": scenario.author_id,
             "author_name": scenario.author_name,
         }
@@ -739,5 +743,168 @@ def btd_value_update_api(request):
         {
             "success": True,
             "value": value_dto.value,
+        }
+    )
+
+
+# ===========================
+# Exchange rates (USD/RUB)
+# ===========================
+
+
+@login_required
+@require_http_methods(["GET"])
+def exchange_rate_set_list_api(request):
+    service = ExchangeRateService()
+    sets, errors = service.list_sets(request.user)
+    if errors:
+        return JsonResponse({"success": False, "errors": errors}, status=400)
+    return JsonResponse(
+        {
+            "success": True,
+            "items": [
+                {
+                    "id": s.id,
+                    "name": s.name,
+                    "author_id": s.author_id,
+                    "author_name": s.author_name,
+                }
+                for s in sets
+            ],
+        }
+    )
+
+
+@login_required
+@require_http_methods(["POST"])
+def exchange_rate_set_create_api(request):
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse(
+            {"success": False, "errors": ["Неверный формат JSON"]},
+            status=400,
+        )
+
+    name = data.get("name") or ""
+    service = ExchangeRateService()
+    created, errors = service.create_set(str(name), request.user)
+    if errors:
+        return JsonResponse({"success": False, "errors": errors}, status=400)
+
+    return JsonResponse(
+        {
+            "success": True,
+            "item": {
+                "id": created.id,
+                "name": created.name,
+                "author_id": created.author_id,
+                "author_name": created.author_name,
+            },
+        },
+        status=201,
+    )
+
+
+@login_required
+@require_http_methods(["POST"])
+def exchange_rate_set_attach_api(request, scenario_id: int):
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse(
+            {"success": False, "errors": ["Неверный формат JSON"]},
+            status=400,
+        )
+
+    try:
+        rate_set_id = int(data.get("rate_set_id"))
+    except (TypeError, ValueError):
+        return JsonResponse(
+            {"success": False, "errors": ["Некорректный rate_set_id"]},
+            status=400,
+        )
+
+    service = ExchangeRateService()
+    scenario_dto, errors = service.attach_set_to_scenario(
+        scenario_id, rate_set_id, request.user
+    )
+    if errors:
+        return JsonResponse({"success": False, "errors": errors}, status=400)
+
+    return JsonResponse(
+        {
+            "success": True,
+            "scenario": {
+                "id": scenario_dto.id,
+                "exchange_rate_set_id": scenario_dto.exchange_rate_set_id,
+                "exchange_rate_set_name": scenario_dto.exchange_rate_set_name,
+            },
+        }
+    )
+
+
+@login_required
+@require_http_methods(["GET"])
+def exchange_rates_matrix_api(request, scenario_id: int):
+    service = ExchangeRateService()
+    payload, errors = service.get_matrix(scenario_id, request.user)
+    if errors:
+        return JsonResponse({"success": False, "errors": errors}, status=400)
+
+    return JsonResponse(
+        {
+            "success": True,
+            "years": payload["years"],
+            "rate_set": payload["rate_set"].__dict__ if payload.get("rate_set") else None,
+            "values": payload.get("values", {}),
+        }
+    )
+
+
+@login_required
+@require_http_methods(["POST"])
+def exchange_rate_value_update_api(request):
+    from scenarios.domain.dto import UpdateExchangeRateValueDTO
+
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse(
+            {"success": False, "errors": ["Неверный формат JSON"]},
+            status=400,
+        )
+
+    try:
+        scenario_id = int(data.get("scenario_id"))
+        rate_set_id = int(data.get("rate_set_id"))
+        year = int(data.get("year"))
+    except (TypeError, ValueError):
+        return JsonResponse(
+            {
+                "success": False,
+                "errors": ["Некорректные идентификаторы сценария/набора/года"],
+            },
+            status=400,
+        )
+
+    usd_rub = data.get("usd_rub")
+
+    dto = UpdateExchangeRateValueDTO(
+        scenario_id=scenario_id,
+        rate_set_id=rate_set_id,
+        year=year,
+        usd_rub=str(usd_rub) if usd_rub is not None else "",
+    )
+
+    service = ExchangeRateService()
+    value_dto, errors = service.update_value(dto, request.user)
+    if errors:
+        return JsonResponse({"success": False, "errors": errors}, status=400)
+
+    return JsonResponse(
+        {
+            "success": True,
+            "usd_rub": value_dto.usd_rub,
         }
     )

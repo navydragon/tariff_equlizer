@@ -9,6 +9,7 @@ urlpatterns = [
     path("logout/", views.logout_view, name="logout"),
     path("home/", views.home, name="home"),
     path("dashboard-1/", views.dashboard_1, name="dashboard_1"),
+    path("route-analysis/", views.route_analysis, name="route_analysis"),
     path("hello/", views.hello_partial, name="hello_partial"),
     # Справочники
     path("references/", views.references_view, name="references"),
@@ -252,6 +253,11 @@ urlpatterns = [
         "references/api/routes/<int:pk>/delete/",
         views.route_delete_api,
         name="route_delete_api",
+    ),
+    path(
+        "analysis/api/calculate-route/",
+        views.calculate_route_api,
+        name="calculate_route_api",
     ),
 ]
 

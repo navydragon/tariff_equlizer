@@ -1,5 +1,5 @@
 [
-  {"position": 1, "title": "Дашборд-1", "icon": "ti-dashboard"},
+  {"position": 1, "title": "Анализ маршрута", "icon": "ti-dashboard"},
   {"position": 2, "title": "Дашборд-2", "icon": "ti-chart-line"},
   {"position": 3, "title": "Аналитика", "icon": "ti-chart-bar"},
   {"position": 4, "title": "Помощь", "icon": "ti-help-circle"},

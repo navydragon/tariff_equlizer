@@ -12,6 +12,8 @@ from django.views.decorators.http import require_http_methods
 
 from core.domain.cargo.dto import CreateCargoDTO, UpdateCargoDTO
 from core.domain.cargo.services import CargoService
+from core.domain.calculate_route.dto import CalculateRouteRequestDTO
+from core.domain.calculate_route.services import CalculateRouteService
 from core.domain.railroad.dto import CreateRailRoadDTO, UpdateRailRoadDTO
 from core.domain.railroad.services import RailRoadService
 from core.models import (
@@ -25,6 +27,7 @@ from core.models import (
     Route,
     Cargo,
 )
+from scenarios.models import Scenario
 
 
 def index(request):
@@ -80,6 +83,16 @@ def dashboard_1(request):
     Заглушка для первого дашборда/сценария.
     """
     return render(request, "core/dashboard_1.html")
+
+
+@login_required
+def route_analysis(request):
+    """
+    Страница «Анализ маршрута».
+
+    Пока только компоновка (без бизнес-логики и данных).
+    """
+    return render(request, "core/route_analysis.html")
 
 
 # === Cargo: HTML-страницы ===
@@ -2185,4 +2198,73 @@ def route_delete_api(request, pk: int):
 
     route.delete()
     return JsonResponse({"success": True})
+
+
+@login_required
+@require_http_methods(["POST"])
+def calculate_route_api(request):
+    """
+    Рассчитать «Структура (табл.)» для выбранного маршрута в рамках сценария.
+    Возвращает ряды по годам в готовом для фронта виде.
+    """
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse(
+            {"success": False, "errors": ["Неверный формат JSON"]},
+            status=400,
+        )
+
+    dto = CalculateRouteRequestDTO(
+        scenario_id=data.get("scenario_id"),
+        route_id=data.get("route_id"),
+    )
+    errors = dto.validate()
+    if errors:
+        return JsonResponse({"success": False, "errors": errors}, status=400)
+
+    try:
+        scenario = Scenario.objects.get(pk=dto.scenario_id, author=request.user)
+    except Scenario.DoesNotExist:
+        return JsonResponse(
+            {"success": False, "errors": ["Сценарий не найден"]},
+            status=404,
+        )
+
+    try:
+        route = Route.objects.get(pk=dto.route_id)
+    except Route.DoesNotExist:
+        return JsonResponse(
+            {"success": False, "errors": ["Маршрут не найден"]},
+            status=404,
+        )
+
+    if route.route_set_id != scenario.route_set_id:
+        return JsonResponse(
+            {"success": False, "errors": ["Маршрут не найден"]},
+            status=404,
+        )
+
+    service = CalculateRouteService()
+    response_dto = service.calculate(
+        request_dto=dto,
+        scenario=scenario,
+        route=route,
+    )
+
+    return JsonResponse(
+        {
+            "success": True,
+            "years": response_dto.years,
+            "rows": [
+                {
+                    "key": row.key,
+                    "label": row.label,
+                    "values": row.values,
+                    "format": row.format,
+                }
+                for row in response_dto.rows
+            ],
+        }
+    )
 

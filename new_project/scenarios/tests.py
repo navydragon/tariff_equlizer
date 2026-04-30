@@ -3,8 +3,17 @@ from decimal import Decimal
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 
-from scenarios.domain.services import BTDCategoryService, BTDCategoryValueService
-from scenarios.domain.dto import CreateBTDCategoryDTO, UpdateBTDCategoryValueDTO
+from core.models import RouteSet
+from scenarios.domain.services import (
+    BTDCategoryService,
+    BTDCategoryValueService,
+    ExchangeRateService,
+)
+from scenarios.domain.dto import (
+    CreateBTDCategoryDTO,
+    UpdateBTDCategoryValueDTO,
+    UpdateExchangeRateValueDTO,
+)
 from scenarios.models import Scenario, BTDCategory, BTDCategoryValue
 
 
@@ -13,18 +22,26 @@ User = get_user_model()
 
 class BTDCategoryServiceTests(TestCase):
     def setUp(self) -> None:
-        self.user = User.objects.create_user(username="test_user", password="test_pass")
+        self.user = User.objects.create_user(
+            login="test_user",
+            password="test_pass",
+        )
+        self.route_set = RouteSet.objects.create(name="RS", code="RS")
         self.scenario = Scenario.objects.create(
             name="Сценарий 1",
             description="Тестовый сценарий",
             start_year=2025,
             end_year=2035,
+            route_set=self.route_set,
             author=self.user,
         )
         self.service = BTDCategoryService()
 
     def test_create_categories_auto_positions(self):
-        """Создание категорий без явной позиции должно проставлять позиции по порядку."""
+        """
+        Создание категорий без явной позиции должно проставлять позиции по
+        порядку.
+        """
         dto1 = CreateBTDCategoryDTO(
             name="Категория 1",
             scenario_id=self.scenario.id,
@@ -45,9 +62,21 @@ class BTDCategoryServiceTests(TestCase):
     def test_delete_category_shifts_positions(self):
         """После удаления категории позиции следующих должны уменьшаться на 1."""
         # Создаем три категории
-        BTDCategory.objects.create(name="Категория 1", scenario=self.scenario, position=1)
-        BTDCategory.objects.create(name="Категория 2", scenario=self.scenario, position=2)
-        BTDCategory.objects.create(name="Категория 3", scenario=self.scenario, position=3)
+        BTDCategory.objects.create(
+            name="Категория 1",
+            scenario=self.scenario,
+            position=1,
+        )
+        BTDCategory.objects.create(
+            name="Категория 2",
+            scenario=self.scenario,
+            position=2,
+        )
+        BTDCategory.objects.create(
+            name="Категория 3",
+            scenario=self.scenario,
+            position=3,
+        )
 
         cat2 = BTDCategory.objects.get(position=2)
 
@@ -65,12 +94,17 @@ class BTDCategoryServiceTests(TestCase):
 
 class BTDCategoryValueServiceTests(TestCase):
     def setUp(self) -> None:
-        self.user = User.objects.create_user(username="matrix_user", password="matrix_pass")
+        self.user = User.objects.create_user(
+            login="matrix_user",
+            password="matrix_pass",
+        )
+        self.route_set = RouteSet.objects.create(name="RS2", code="RS2")
         self.scenario = Scenario.objects.create(
             name="Сценарий 2",
             description="Тест матрицы значений",
             start_year=2024,
             end_year=2026,
+            route_set=self.route_set,
             author=self.user,
         )
         self.category = BTDCategory.objects.create(
@@ -164,7 +198,7 @@ class BTDCategoryValueServiceTests(TestCase):
         self.assertEqual(len(payload["categories"]), 1)
         cat = payload["categories"][0]
         self.assertEqual(cat["name"], self.category.name)
-        self.assertEqual(cat["values"].get("2024"), "1.050")
+        self.assertEqual(cat["values"].get("2024"), "1.0500")
 
     def test_total_coefficient_calculated_for_each_year(self):
         """Итоговый коэффициент рассчитывается по алгоритму для каждого года сценария."""
@@ -305,3 +339,57 @@ class BTDCategoryValueServiceTests(TestCase):
         # Первый год пустой по определению, второй — из-за деления на ноль.
         self.assertEqual(totals.get("2024"), "")
         self.assertEqual(totals.get("2025"), "")
+
+
+class ExchangeRateServiceTests(TestCase):
+    def setUp(self) -> None:
+        self.user = User.objects.create_user(
+            login="fx_user",
+            password="test_pass",
+        )
+        self.route_set = RouteSet.objects.create(name="RS3", code="RS3")
+        self.scenario = Scenario.objects.create(
+            name="FX scenario",
+            description="",
+            start_year=2025,
+            end_year=2027,
+            route_set=self.route_set,
+            author=self.user,
+        )
+        self.service = ExchangeRateService()
+
+    def test_create_set_and_attach_and_matrix(self):
+        rate_set, errors = self.service.create_set("Набор 1", self.user)
+        self.assertFalse(errors)
+        self.assertIsNotNone(rate_set)
+
+        updated, errors = self.service.attach_set_to_scenario(
+            self.scenario.id, rate_set.id, self.user
+        )
+        self.assertFalse(errors)
+        self.assertEqual(updated.exchange_rate_set_id, rate_set.id)
+
+        payload, errors = self.service.get_matrix(self.scenario.id, self.user)
+        self.assertFalse(errors)
+        self.assertEqual(payload["years"], [2025, 2026, 2027])
+        self.assertIsNotNone(payload["rate_set"])
+        self.assertEqual(payload["rate_set"].id, rate_set.id)
+
+    def test_update_value_creates_record(self):
+        rate_set_dto, _ = self.service.create_set("Набор 2", self.user)
+        self.service.attach_set_to_scenario(
+            self.scenario.id,
+            rate_set_dto.id,
+            self.user,
+        )
+
+        dto = UpdateExchangeRateValueDTO(
+            scenario_id=self.scenario.id,
+            rate_set_id=rate_set_dto.id,
+            year=2026,
+            usd_rub="90.1234",
+        )
+        value_dto, errors = self.service.update_value(dto, self.user)
+        self.assertFalse(errors)
+        self.assertIsNotNone(value_dto)
+        self.assertEqual(Decimal(value_dto.usd_rub), Decimal("90.1234"))

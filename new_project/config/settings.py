@@ -10,22 +10,46 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
+import os
+import sys
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
+def _load_env_file(env_path: Path) -> None:
+    """
+    Загружает переменные окружения из .env (без внешних зависимостей).
+    """
+    if not env_path.exists():
+        return
+
+    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip("'").strip('"')
+        if key and value and key not in os.environ:
+            os.environ[key] = value
+
+
+_load_env_file(BASE_DIR / ".env")
+
+
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-urrn^(w5hr9^)au3+=4enaco&1-3rbc23hl)a8-oj0vl_24&h('
+# Для локальной разработки используем env (а если не задано — безопасный dev-вариант).
+SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "dev-secret-key-change-me")
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "127.0.0.1,localhost").split(",")
 
 
 # Application definition
@@ -82,12 +106,39 @@ WSGI_APPLICATION = 'config.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
-    }
+USE_POSTGRES = os.environ.get("USE_POSTGRES", "false").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "y",
 }
+
+# Для тестов по умолчанию используем SQLite, чтобы не требовать прав CREATEDB
+# и внешнего доступа к Postgres.
+if any(arg in {"test", "pytest"} for arg in sys.argv):
+    USE_POSTGRES = False
+
+if USE_POSTGRES:
+    postgres_password = os.environ.get("POSTGRES_PASSWORD")
+    if not postgres_password:
+        raise RuntimeError("POSTGRES_PASSWORD is required when USE_POSTGRES=true")
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': os.environ.get("POSTGRES_DB", "tariff_equlizer"),
+            'USER': os.environ.get("POSTGRES_USER", "tariff_equlizer"),
+            'PASSWORD': postgres_password,
+            'HOST': os.environ.get("POSTGRES_HOST", "127.0.0.1"),
+            'PORT': os.environ.get("POSTGRES_PORT", "5432"),
+        }
+    }
+else:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+        }
+    }
 
 
 # Password validation

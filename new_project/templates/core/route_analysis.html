@@ -1,0 +1,234 @@
+{% extends "base.html" %}
+
+{% block title %}Анализ маршрута · Цифровой тарифный инструментарий{% endblock %}
+
+{% block content %}
+<div
+  data-controller="route-analysis-route-picker"
+  data-route-analysis-route-picker-scenarios-url-value="{% url 'scenarios:api_list' %}"
+  data-route-analysis-route-picker-routes-url-value="{% url 'route_list_api' %}"
+  data-route-analysis-route-picker-calculate-route-url-value="{% url 'calculate_route_api' %}"
+  data-route-analysis-route-picker-active-scenario-id-value="{{ request.user.active_scenario_id|default:'' }}"
+>
+  <div class="page-header d-print-none">
+    <div class="row align-items-center">
+      <div class="col">
+        <h2 class="page-title">Анализ маршрута</h2>
+      </div>
+      <div class="col-auto">
+        <label class="form-label mb-1" for="routeAnalysisPageScenarioSelect">
+          Сценарий
+        </label>
+        <select
+          id="routeAnalysisPageScenarioSelect"
+          class="form-select form-select-sm"
+          style="min-width: 320px;"
+          data-route-analysis-route-picker-target="scenarioSelect"
+          data-action="change->route-analysis-route-picker#onScenarioChange"
+        ></select>
+      </div>
+    </div>
+  </div>
+
+  <div class="row row-cards mt-3 g-3 align-items-stretch">
+  <div class="col-lg-4">
+    <div class="card h-100">
+      <div class="card-header">
+        <ul class="nav nav-tabs card-header-tabs" data-bs-toggle="tabs" role="tablist">
+          <li class="nav-item" role="presentation">
+            <a
+              href="#route-analysis-tab-route"
+              class="nav-link active"
+              data-bs-toggle="tab"
+              aria-selected="true"
+              role="tab"
+            >Маршрут</a>
+          </li>
+          <li class="nav-item" role="presentation">
+            <a
+              href="#route-analysis-tab-equalizer"
+              class="nav-link"
+              data-bs-toggle="tab"
+              aria-selected="false"
+              role="tab"
+              tabindex="-1"
+            >Эквалайзер</a>
+          </li>
+        </ul>
+      </div>
+      <div class="card-body">
+        <div class="tab-content">
+          <div class="tab-pane fade active show" id="route-analysis-tab-route" role="tabpanel">
+            <div class="d-flex align-items-center justify-content-between gap-2 mb-3">
+              <div class="fw-bold">Маршрут</div>
+              <button
+                type="button"
+                class="btn btn-sm btn-outline-primary"
+                data-action="click->route-analysis-route-picker#openModal"
+              >
+                <i class="ti ti-train me-1"></i>
+                Выбрать маршрут
+              </button>
+            </div>
+
+            <div
+              id="routeAnalysisRouteDetails"
+              class="text-muted"
+            >
+              Маршрут не выбран.
+            </div>
+          </div>
+          <div class="tab-pane fade" id="route-analysis-tab-equalizer" role="tabpanel">
+            <div class="text-muted">
+              Заглушка вкладки «Эквалайзер». Здесь будут параметры эквалайзера.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="col-lg-8">
+    <div class="card h-100">
+      <div class="card-header py-2">
+        <div class="d-flex align-items-center justify-content-between w-100">
+          <div class="fw-bold">Диаграммы</div>
+
+          <select
+            class="form-select form-select-sm"
+            style="width: auto;"
+            data-route-analysis-route-picker-target="diagramTypeSelect"
+            data-action="change->route-analysis-route-picker#onDiagramTypeChange"
+          >
+            <option value="trends" selected>Тренды</option>
+            <option value="structure">Структура</option>
+            <option value="structure_table">Структура (табл.)</option>
+            <option value="structure_aggregated">Структура укрупненная</option>
+            <option value="structure_ts">Структура ТС</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="card-body">
+        <div
+          class="text-center text-muted"
+          id="routeAnalysisDiagramPlaceholder"
+          data-route-analysis-route-picker-target="diagramPlaceholder"
+        >
+          <div class="mb-2">
+            <i class="ti ti-info-circle" style="font-size: 2rem;"></i>
+          </div>
+          <div>Выберите маршрут для отображения диаграммы</div>
+        </div>
+
+        <div id="routeAnalysisTrendsChartWrap" class="mt-2" style="display: none; height: 520px;">
+          <canvas id="routeAnalysisTrendsChart" aria-label="График трендов"></canvas>
+        </div>
+
+        <div
+          id="routeAnalysisStructureTableWrap"
+          class="mt-2"
+          style="display: none;"
+        ></div>
+      </div>
+    </div>
+  </div>
+</div>
+  </div>
+  <div
+    class="modal modal-blur fade"
+    id="routeAnalysisRouteModal"
+    tabindex="-1"
+    aria-hidden="true"
+  >
+    <div class="modal-dialog modal-lg modal-dialog-centered" role="document">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Выбор маршрута</h5>
+          <button
+            type="button"
+            class="btn-close"
+            data-bs-dismiss="modal"
+            aria-label="Close"
+          ></button>
+        </div>
+        <div class="modal-body">
+          <div
+            class="alert alert-danger d-none"
+            role="alert"
+            data-route-analysis-route-picker-target="errors"
+          ></div>
+
+          <div class="row g-3">
+            <div class="col-12">
+              <label class="form-label" for="routeAnalysisRouteSearchInput">Поиск</label>
+              <input
+                id="routeAnalysisRouteSearchInput"
+                type="text"
+                class="form-control"
+                placeholder="Груз, станция, код маршрута или вид сообщения…"
+                data-route-analysis-route-picker-target="searchInput"
+                data-action="input->route-analysis-route-picker#onSearchInput"
+              />
+              <div class="form-text">
+                Поиск выполняется в наборе маршрутов выбранного сценария.
+              </div>
+            </div>
+          </div>
+
+          <div
+            class="text-center py-3"
+            style="display: none;"
+            data-route-analysis-route-picker-target="loading"
+          >
+            <div class="spinner-border text-primary" role="status">
+              <span class="visually-hidden">Загрузка...</span>
+            </div>
+          </div>
+
+          <div
+            class="list-group mt-3"
+            style="max-height: 360px; overflow: auto;"
+            data-route-analysis-route-picker-target="routeList"
+          ></div>
+
+          <div
+            class="text-muted text-center py-4"
+            style="display: none;"
+            data-route-analysis-route-picker-target="empty"
+          >
+            Нет маршрутов по текущему поиску.
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button
+            type="button"
+            class="btn btn-link link-secondary"
+            data-bs-dismiss="modal"
+          >
+            Отмена
+          </button>
+          <button
+            type="button"
+            class="btn btn-primary"
+            data-route-analysis-route-picker-target="confirmButton"
+            data-action="click->route-analysis-route-picker#confirmSelection"
+            disabled
+          >
+            <i class="ti ti-check"></i>
+            ОК
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+  {% load static %}
+  <script src="{% static 'core/vendor/chartjs/chart.umd.min.js' %}"></script>
+  <script src="{% static 'core/vendor/chartjs/chartjs-plugin-datalabels.min.js' %}"></script>
+{% endblock %}
+
