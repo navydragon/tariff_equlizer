@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 
@@ -15,11 +15,14 @@ class ScenarioDTO:
     route_set_name: str
     exchange_rate_set_id: int | None
     exchange_rate_set_name: str
+    inflation_set_id: int | None
+    inflation_set_name: str
     author_id: int
     author_name: str
+    price_change_settings: dict[str, str] = field(default_factory=dict)
 
     @classmethod
-    def from_model(cls, scenario):
+    def from_model(cls, scenario, *, price_change_settings: dict[str, str] | None = None):
         return cls(
             id=scenario.id,
             name=scenario.name,
@@ -32,8 +35,13 @@ class ScenarioDTO:
             exchange_rate_set_name=(
                 str(scenario.exchange_rate_set) if scenario.exchange_rate_set_id else ""
             ),
+            inflation_set_id=scenario.inflation_set_id,
+            inflation_set_name=(
+                str(scenario.inflation_set) if scenario.inflation_set_id else ""
+            ),
             author_id=scenario.author.id,
             author_name=str(scenario.author),
+            price_change_settings=price_change_settings or {},
         )
 
 
@@ -70,6 +78,7 @@ class UpdateScenarioDTO:
     end_year: Optional[int] = None
     route_set_id: Optional[int] = None
     exchange_rate_set_id: Optional[int] = None
+    price_change_settings: Optional[dict[str, str]] = None
 
     def validate(self) -> list[str]:
         errors: list[str] = []
@@ -102,6 +111,8 @@ class ScenarioListDTO:
     route_set_name: str
     exchange_rate_set_id: int | None
     exchange_rate_set_name: str
+    inflation_set_id: int | None
+    inflation_set_name: str
     author_id: int
     author_name: str
 
@@ -118,6 +129,10 @@ class ScenarioListDTO:
             exchange_rate_set_id=scenario.exchange_rate_set_id,
             exchange_rate_set_name=(
                 str(scenario.exchange_rate_set) if scenario.exchange_rate_set_id else ""
+            ),
+            inflation_set_id=scenario.inflation_set_id,
+            inflation_set_name=(
+                str(scenario.inflation_set) if scenario.inflation_set_id else ""
             ),
             author_id=scenario.author.id,
             author_name=str(scenario.author),

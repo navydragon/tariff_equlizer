@@ -614,16 +614,7 @@ import { renderPagination } from "../lib/pagination.js";
 
       return `
         <tr data-id="${item.id}">
-          <td>${cargo}</td>
-          <td>${origin}</td>
-          <td>${dest}</td>
-          <td>${escapeHtml(item.message_type_name || "")}</td>
-          <td>${escapeHtml(item.route_code || "")}</td>
-          <td>${escapeHtml(item.wagon_kind_name || "")}</td>
-          <td>${escapeHtml(item.shipment_type_name || "")}</td>
-          <td>${transport}</td>
-          <td>${market}</td>
-          <td class="text-end">
+          <td>
             <div class="btn-group" role="group" aria-label="Действия">
               <button
                 type="button"
@@ -645,6 +636,15 @@ import { renderPagination } from "../lib/pagination.js";
               </button>
             </div>
           </td>
+          <td>${cargo}</td>
+          <td>${origin}</td>
+          <td>${dest}</td>
+          <td>${escapeHtml(item.message_type_name || "")}</td>
+          <td>${escapeHtml(item.route_code || "")}</td>
+          <td>${escapeHtml(item.wagon_kind_name || "")}</td>
+          <td>${escapeHtml(item.shipment_type_name || "")}</td>
+          <td>${transport}</td>
+          <td>${market}</td>
         </tr>
       `;
     }
@@ -859,6 +859,12 @@ import { renderPagination } from "../lib/pagination.js";
         it.total_cost_per_ton ?? "";
       document.getElementById("routeMarketPrice").value =
         it.market_price_per_ton ?? "";
+      document.getElementById("routeTransportVolumeMlnTons").value =
+        it.transport_volume_mln_tons ?? "";
+      document.getElementById("routeFreightTurnoverBlnTkm").value =
+        it.freight_turnover_bln_tkm ?? "";
+      document.getElementById("routeFreightChargeThsRub").value =
+        it.freight_charge_ths_rub ?? "";
 
       // Заполняем summary из данных маршрута
       this.summaryState.origin = it.origin_esr_code
@@ -972,6 +978,15 @@ import { renderPagination } from "../lib/pagination.js";
         document.getElementById("routeTotalCost").value.trim();
       payload.market_price_per_ton =
         document.getElementById("routeMarketPrice").value.trim();
+      payload.transport_volume_mln_tons = document
+        .getElementById("routeTransportVolumeMlnTons")
+        .value.trim();
+      payload.freight_turnover_bln_tkm = document
+        .getElementById("routeFreightTurnoverBlnTkm")
+        .value.trim();
+      payload.freight_charge_ths_rub = document
+        .getElementById("routeFreightChargeThsRub")
+        .value.trim();
 
       return payload;
     }

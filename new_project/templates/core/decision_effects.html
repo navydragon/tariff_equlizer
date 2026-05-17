@@ -1,0 +1,305 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Эффект от решений · Цифровой тарифный инструментарий{% endblock %}
+
+{% block extra_css %}
+  <link rel="stylesheet" href="{% static 'core/css/decision-effects.css' %}" />
+{% endblock %}
+
+{% block content %}
+<div
+  data-controller="decision-effects"
+  data-decision-effects-scenarios-url-value="{% url 'scenarios:api_list' %}"
+  data-decision-effects-compute-url-value="{% url 'calculations:scenario_effects_compute_api' %}"
+  data-decision-effects-compute-pandas-url-value="{% url 'calculations:scenario_effects_compute_pandas_api' %}"
+  data-decision-effects-aggregate-url-value="{% url 'calculations:scenario_effects_aggregate_api' %}"
+  data-decision-effects-revenues-url-value="{% url 'calculations:scenario_absolute_revenues_api' %}"
+  data-decision-effects-volumes-url-value="{% url 'calculations:scenario_absolute_volumes_api' %}"
+  data-decision-effects-revenues-export-url-value="{% url 'calculations:scenario_absolute_revenues_export_api' %}"
+  data-decision-effects-volumes-export-url-value="{% url 'calculations:scenario_absolute_volumes_export_api' %}"
+  data-decision-effects-active-scenario-id-value="{{ request.user.active_scenario_id|default:'' }}"
+>
+  <div class="page-header d-print-none">
+    <div class="row align-items-center">
+      <div class="col">
+        <h2 class="page-title">Эффект от решений</h2>
+        <div class="text-muted mt-1">Эластичность спроса и оценка эффектов тарифных решений по провозной плате</div>
+      </div>
+      <div class="col-auto">
+        <label class="form-label mb-1" for="decisionEffectsScenarioSelect">Сценарий</label>
+        <select
+          id="decisionEffectsScenarioSelect"
+          class="form-select form-select-sm"
+          style="min-width: 320px;"
+          data-decision-effects-target="scenarioSelect"
+          data-action="change->decision-effects#onScenarioChange"
+        ></select>
+      </div>
+      <div class="col-auto">
+        <label class="form-label mb-1" for="decisionEffectsEngineSelect">Движок расчёта</label>
+        <select
+          id="decisionEffectsEngineSelect"
+          class="form-select form-select-sm"
+          style="min-width: 160px;"
+          data-decision-effects-target="engineSelect"
+          data-action="change->decision-effects#onEngineChange"
+        >
+          <option value="python">Python</option>
+          <option value="pandas" selected>Pandas</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <div class="mt-4">
+    <h3 class="h4 mb-3">Оценка мер покрытия дефицита</h3>
+    <div
+      class="decision-effects-kpi-grid"
+      data-decision-effects-target="kpiCards"
+    >
+      <div class="text-muted py-4">Выберите сценарий для расчёта.</div>
+    </div>
+  </div>
+
+  <div class="card mt-4">
+    <div class="card-header">
+      <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+        <h3 class="card-title mb-0">Эффекты от применения индексации и отдельных решений</h3>
+        <span class="badge bg-blue-lt">млрд руб.</span>
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="row g-3 mb-3">
+        <div class="col-md-6 col-lg-2">
+          <label class="form-label" for="decisionEffectsGroupBy">Группировка верхнего уровня</label>
+          <select
+            id="decisionEffectsGroupBy"
+            class="form-select form-select-sm"
+            data-decision-effects-target="groupBySelect"
+            data-action="change->decision-effects#onFilterChange"
+          >
+            <option value="cargo_group">Группа груза</option>
+            <option value="holding">Холдинг</option>
+            <option value="transport_type">Вид перевозки</option>
+          </select>
+        </div>
+        <div class="col-md-6 col-lg-2">
+          <label class="form-label" for="decisionEffectsGroupByInner">Группировка внутри</label>
+          <select
+            id="decisionEffectsGroupByInner"
+            class="form-select form-select-sm"
+            data-decision-effects-target="groupByInnerSelect"
+            data-action="change->decision-effects#onFilterChange"
+          >
+            <option value="none">Нет</option>
+            <option value="cargo_group">Группа груза</option>
+            <option value="holding">Холдинг</option>
+            <option value="transport_type">Вид перевозки</option>
+          </select>
+        </div>
+        <div class="col-md-6 col-lg-3">
+          <label class="form-label" for="decisionEffectsCargoFilter">Фильтр по грузу</label>
+          <select
+            id="decisionEffectsCargoFilter"
+            class="form-select form-select-sm"
+            multiple
+            data-decision-effects-target="cargoFilterSelect"
+            data-action="change->decision-effects#onFilterChange"
+          ></select>
+        </div>
+        <div class="col-md-6 col-lg-3">
+          <label class="form-label" for="decisionEffectsHoldingFilter">Фильтр по холдингу</label>
+          <select
+            id="decisionEffectsHoldingFilter"
+            class="form-select form-select-sm"
+            multiple
+            data-decision-effects-target="holdingFilterSelect"
+            data-action="change->decision-effects#onFilterChange"
+          ></select>
+        </div>
+        <div class="col-md-6 col-lg-2">
+          <label class="form-label" for="decisionEffectsYear">Год</label>
+          <select
+            id="decisionEffectsYear"
+            class="form-select form-select-sm"
+            data-decision-effects-target="yearSelect"
+            data-action="change->decision-effects#onFilterChange"
+          ></select>
+        </div>
+      </div>
+
+      <div class="row g-3">
+        <div class="col-lg-6">
+          <div
+            class="decision-effects-table-wrap"
+            data-decision-effects-target="tableWrap"
+          >
+            <div class="text-muted py-4 text-center">Нет данных.</div>
+          </div>
+        </div>
+        <div class="col-lg-6">
+          <div class="decision-effects-chart-wrap" style="min-height: 420px;">
+            <canvas
+              data-decision-effects-target="chartCanvas"
+              aria-label="Диаграмма эффектов"
+            ></canvas>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card mt-4">
+    <div class="card-header">
+      <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+        <h3 class="card-title mb-0">Доходы всего</h3>
+        <span class="badge bg-blue-lt">млрд руб.</span>
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="row g-3 mb-3 align-items-end">
+        <div class="col-md-4 col-lg-3">
+          <label class="form-label" for="decisionEffectsRevenuesGroupBy">Группировка верхнего уровня</label>
+          <select
+            id="decisionEffectsRevenuesGroupBy"
+            class="form-select form-select-sm"
+            data-decision-effects-target="revenuesGroupBySelect"
+            data-action="change->decision-effects#onRevenuesFilterChange"
+          >
+            <option value="cargo_group">Группа груза</option>
+            <option value="cargo_code">Код груза</option>
+            <option value="direction">Направления</option>
+            <option value="wagon_kind">Род вагона</option>
+            <option value="transport_type">Вид перевозки</option>
+            <option value="shipment_category">Категория отпр.</option>
+            <option value="park_type">Тип парка</option>
+            <option value="holding">Холдинг</option>
+          </select>
+        </div>
+        <div class="col-md-4 col-lg-3">
+          <label class="form-label" for="decisionEffectsRevenuesGroupByInner">Группировка внутри</label>
+          <select
+            id="decisionEffectsRevenuesGroupByInner"
+            class="form-select form-select-sm"
+            data-decision-effects-target="revenuesGroupByInnerSelect"
+            data-action="change->decision-effects#onRevenuesFilterChange"
+          >
+            <option value="none">Нет</option>
+            <option value="cargo_group">Группа груза</option>
+            <option value="cargo_code">Код груза</option>
+            <option value="direction">Направления</option>
+            <option value="wagon_kind">Род вагона</option>
+            <option value="transport_type">Вид перевозки</option>
+            <option value="shipment_category">Категория отпр.</option>
+            <option value="park_type">Тип парка</option>
+            <option value="holding">Холдинг</option>
+          </select>
+        </div>
+        <div class="col-auto ms-lg-auto">
+          <button
+            type="button"
+            class="btn btn-sm btn-outline-primary"
+            data-action="click->decision-effects#onRevenuesExport"
+          >
+            Экспорт
+          </button>
+        </div>
+      </div>
+      <div
+        class="decision-effects-absolute-table-wrap"
+        data-decision-effects-target="revenuesTableWrap"
+      >
+        <div class="text-muted py-4 text-center decision-effects-table-loading">
+          <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+          <div class="mt-2">Загрузка…</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card mt-4">
+    <div class="card-header">
+      <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+        <h3 class="card-title mb-0">Объём перевозок</h3>
+        <span class="badge bg-blue-lt">млн т</span>
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="row g-3 mb-3 align-items-end">
+        <div class="col-md-4 col-lg-3">
+          <label class="form-label" for="decisionEffectsVolumesGroupBy">Группировка верхнего уровня</label>
+          <select
+            id="decisionEffectsVolumesGroupBy"
+            class="form-select form-select-sm"
+            data-decision-effects-target="volumesGroupBySelect"
+            data-action="change->decision-effects#onVolumesFilterChange"
+          >
+            <option value="cargo_group">Группа груза</option>
+            <option value="cargo_code">Код груза</option>
+            <option value="direction">Направления</option>
+            <option value="wagon_kind">Род вагона</option>
+            <option value="transport_type">Вид перевозки</option>
+            <option value="shipment_category">Категория отпр.</option>
+            <option value="park_type">Тип парка</option>
+            <option value="holding">Холдинг</option>
+          </select>
+        </div>
+        <div class="col-md-4 col-lg-3">
+          <label class="form-label" for="decisionEffectsVolumesGroupByInner">Группировка внутри</label>
+          <select
+            id="decisionEffectsVolumesGroupByInner"
+            class="form-select form-select-sm"
+            data-decision-effects-target="volumesGroupByInnerSelect"
+            data-action="change->decision-effects#onVolumesFilterChange"
+          >
+            <option value="none">Нет</option>
+            <option value="cargo_group">Группа груза</option>
+            <option value="cargo_code">Код груза</option>
+            <option value="direction">Направления</option>
+            <option value="wagon_kind">Род вагона</option>
+            <option value="transport_type">Вид перевозки</option>
+            <option value="shipment_category">Категория отпр.</option>
+            <option value="park_type">Тип парка</option>
+            <option value="holding">Холдинг</option>
+          </select>
+        </div>
+        <div class="col-auto ms-lg-auto">
+          <button
+            type="button"
+            class="btn btn-sm btn-outline-primary"
+            data-action="click->decision-effects#onVolumesExport"
+          >
+            Экспорт
+          </button>
+        </div>
+      </div>
+      <div
+        class="decision-effects-absolute-table-wrap"
+        data-decision-effects-target="volumesTableWrap"
+      >
+        <div class="text-muted py-4 text-center decision-effects-table-loading">
+          <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+          <div class="mt-2">Загрузка…</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div
+    class="toast-container position-fixed bottom-0 end-0 p-3 decision-effects-toast-container"
+    data-decision-effects-target="toastContainer"
+    aria-live="polite"
+    aria-atomic="true"
+  ></div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+  {% load static %}
+  <script src="{% static 'core/vendor/chartjs/chart.umd.min.js' %}"></script>
+  <script
+    type="module"
+    src="{% static 'core/js/app/controllers/decision_effects_controller.js' %}"
+  ></script>
+{% endblock %}

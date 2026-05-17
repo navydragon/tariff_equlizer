@@ -1,12 +1,12 @@
-{% extends "base.html" %}
+﻿{% extends "base.html" %}
 
-{% block title %}Главная · Цифровой тарифный инструментарий{% endblock %}
+{% block title %}Экономика грузов · Цифровой тарифный инструментарий{% endblock %}
 
 {% block content %}
 <div class="page-header d-print-none">
   <div class="row align-items-center">
     <div class="col">
-      <h2 class="page-title">Главная</h2>
+      <h2 class="page-title">Экономика грузов</h2>
       <div class="text-muted mt-1">
         Выберите раздел
       </div>
@@ -19,7 +19,7 @@
     <div class="col-md-6 col-lg-3">
       <a
         class="card card-sm card-link"
-        href="{% if item.title == 'Анализ маршрута' %}{% url 'route_analysis' %}{% elif item.title == 'Управление сценариями' %}{% url 'scenarios:management' %}{% elif item.title == 'Справочники' %}{% url 'references' %}{% else %}#{% endif %}"
+        href="{% if item.url_name %}{% url item.url_name %}{% else %}#{% endif %}"
       >
         <div class="card-body">
           <div class="d-flex align-items-center">
@@ -41,4 +41,3 @@
   {% endfor %}
 </div>
 {% endblock %}
-

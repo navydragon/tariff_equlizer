@@ -485,6 +485,27 @@ class Route(models.Model):
         null=True,
         blank=True,
     )
+    transport_volume_mln_tons = models.DecimalField(
+        "Объём перевозок, млн т",
+        max_digits=12,
+        decimal_places=4,
+        null=True,
+        blank=True,
+    )
+    freight_turnover_bln_tkm = models.DecimalField(
+        "Грузооборот, млрд т·км",
+        max_digits=14,
+        decimal_places=4,
+        null=True,
+        blank=True,
+    )
+    freight_charge_ths_rub = models.DecimalField(
+        "Провозная плата, тыс. руб.",
+        max_digits=16,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
 
     class Meta:
         verbose_name = "Маршрут"
@@ -492,6 +513,10 @@ class Route(models.Model):
         ordering = ["route_set", "route_code", "id"]
         indexes = [
             models.Index(fields=["route_set", "route_code"], name="route_set_code_idx"),
+            models.Index(
+                fields=["route_set", "freight_charge_ths_rub"],
+                name="route_set_charge_idx",
+            ),
             models.Index(fields=["cargo"], name="route_cargo_idx"),
             models.Index(
                 fields=["origin_station", "destination_station"],

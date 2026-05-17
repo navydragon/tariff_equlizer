@@ -1,4 +1,4 @@
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from typing import Optional
 
 from django.db import transaction
@@ -17,6 +17,7 @@ from scenarios.domain.repositories import (
     BTDCategoryValueRepository,
     ScenarioRepository,
 )
+from scenarios.domain.services.btd_coefficients import compute_total_coefficient_by_year
 from scenarios.models import BTDCategory, BTDCategoryValue
 
 
@@ -210,71 +211,6 @@ class BTDCategoryValueService:
             return None, ["Нет прав на изменение этого сценария"]
         return scenario, []
 
-    def _compute_total_coefficient(
-        self,
-        years: list[int],
-        categories: list[BTDCategory],
-        value_map: dict[tuple[int, int], str],
-    ) -> dict[str, str]:
-        if not years or not categories:
-            return {}
-
-        first_year = years[0]
-        result: dict[str, str] = {str(first_year): ""}
-        if len(years) == 1:
-            return result
-
-        first_category = categories[0]
-        other_categories = categories[1:]
-
-        for index in range(1, len(years)):
-            year = years[index]
-            prev_year = years[index - 1]
-            computed = self._compute_total_for_year(
-                first_category_id=first_category.id,
-                other_categories=other_categories,
-                year=year,
-                prev_year=prev_year,
-                value_map=value_map,
-            )
-            result[str(year)] = computed
-
-        return result
-
-    @staticmethod
-    def _parse_decimal(value: Optional[str]) -> Optional[Decimal]:
-        if value is None:
-            return None
-        try:
-            return Decimal(value)
-        except InvalidOperation:
-            return None
-
-    def _compute_total_for_year(
-        self,
-        first_category_id: int,
-        other_categories: list[BTDCategory],
-        year: int,
-        prev_year: int,
-        value_map: dict[tuple[int, int], str],
-    ) -> str:
-        base_value = self._parse_decimal(value_map.get((first_category_id, year)))
-        if base_value is None:
-            return ""
-
-        accumulator = base_value
-        for category in other_categories:
-            numerator = self._parse_decimal(value_map.get((category.id, year)))
-            denominator = self._parse_decimal(value_map.get((category.id, prev_year)))
-            if numerator is None or denominator in (None, Decimal("0")):
-                return ""
-            accumulator *= numerator / denominator
-
-        try:
-            return str(accumulator.quantize(Decimal("0.0001")))
-        except InvalidOperation:
-            return ""
-
     def get_matrix(self, scenario_id: int, user: User) -> tuple[dict, list[str]]:
         scenario, errors = self._validate_scenario_access(scenario_id, user)
         if errors:
@@ -304,7 +240,9 @@ class BTDCategoryValueService:
                 }
             )
 
-        total_coefficient = self._compute_total_coefficient(years, categories, value_map)
+        total_coefficient = compute_total_coefficient_by_year(
+            years, categories, value_map
+        )
 
         return {
             "years": years,

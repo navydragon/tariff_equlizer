@@ -125,6 +125,22 @@ import { renderErrors } from "../lib/errors.js";
       }
     }
 
+    collectPriceChangeSettings() {
+      const settings = {};
+      const inputs = this.element.querySelectorAll(
+        'input.btn-check[name^="price_change__"]',
+      );
+      inputs.forEach((input) => {
+        if (!input.checked) return;
+        const name = input.getAttribute("name") || "";
+        const prefix = "price_change__";
+        if (!name.startsWith(prefix)) return;
+        const parameter = name.slice(prefix.length);
+        settings[parameter] = input.value;
+      });
+      return settings;
+    }
+
     // === Form submit ===
     async submit(event) {
       event.preventDefault();
@@ -146,6 +162,7 @@ import { renderErrors } from "../lib/errors.js";
           ? parseInt(this.endYearTarget.value || "0", 10)
           : null,
         route_set_id: routeSetId || null,
+        price_change_settings: this.collectPriceChangeSettings(),
       };
 
       const url = this.updateUrlValue;

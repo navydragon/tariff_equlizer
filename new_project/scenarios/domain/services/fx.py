@@ -15,7 +15,7 @@ from scenarios.domain.repositories import (
     ExchangeRateValueRepository,
     ScenarioRepository,
 )
-from scenarios.models import ExchangeRateSet, ExchangeRateValue
+from scenarios.models import ExchangeRateSet, ExchangeRateValue, Scenario
 
 
 class ExchangeRateService:
@@ -129,4 +129,21 @@ class ExchangeRateService:
             {"rate_set": rate_set, "year": dto.year, "usd_rub": value_obj.usd_rub}
         )
         return ExchangeRateValueDTO.from_model(saved), []
+
+    @transaction.atomic
+    def delete_set(self, rate_set_id: int, user: User) -> tuple[bool, list[str]]:
+        rate_set = self.set_repository.get_by_id(rate_set_id)
+        if not rate_set:
+            return False, ["Набор курсов валют не найден"]
+        if rate_set.author_id != user.id:
+            return False, ["Нет прав на удаление этого набора курсов"]
+
+        Scenario.objects.filter(exchange_rate_set_id=rate_set_id).update(
+            exchange_rate_set=None
+        )
+
+        ok = self.set_repository.delete(rate_set_id)
+        if not ok:
+            return False, ["Ошибка при удалении набора курсов"]
+        return True, []
 

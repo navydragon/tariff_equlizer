@@ -1,19 +1,25 @@
 {% extends "base.html" %}
+{% load static %}
 
-{% block title %}Анализ маршрута · Цифровой тарифный инструментарий{% endblock %}
+{% block title %}Экономика грузов · Цифровой тарифный инструментарий{% endblock %}
+
+{% block extra_css %}
+  <link rel="stylesheet" href="{% static 'core/css/route-analysis-equalizer.css' %}" />
+  <link rel="stylesheet" href="{% static 'core/css/route-analysis-charts.css' %}" />
+{% endblock %}
 
 {% block content %}
 <div
   data-controller="route-analysis-route-picker"
   data-route-analysis-route-picker-scenarios-url-value="{% url 'scenarios:api_list' %}"
   data-route-analysis-route-picker-routes-url-value="{% url 'route_list_api' %}"
-  data-route-analysis-route-picker-calculate-route-url-value="{% url 'calculate_route_api' %}"
+  data-route-analysis-route-picker-route-analysis-url-value="{% url 'route_analysis_api' %}"
   data-route-analysis-route-picker-active-scenario-id-value="{{ request.user.active_scenario_id|default:'' }}"
 >
   <div class="page-header d-print-none">
     <div class="row align-items-center">
       <div class="col">
-        <h2 class="page-title">Анализ маршрута</h2>
+        <h2 class="page-title">Экономика грузов</h2>
       </div>
       <div class="col-auto">
         <label class="form-label mb-1" for="routeAnalysisPageScenarioSelect">
@@ -79,8 +85,34 @@
             </div>
           </div>
           <div class="tab-pane fade" id="route-analysis-tab-equalizer" role="tabpanel">
-            <div class="text-muted">
-              Заглушка вкладки «Эквалайзер». Здесь будут параметры эквалайзера.
+            <div
+              class="text-muted"
+              data-route-analysis-route-picker-target="equalizerEmpty"
+            >
+              Выберите маршрут для настройки эквалайзера.
+            </div>
+
+            <div
+              style="display: none;"
+              data-route-analysis-route-picker-target="equalizerControls"
+            >
+              <label class="form-label mb-1" for="routeAnalysisEqualizerTypeSelect">
+                Вид эквалайзера
+              </label>
+              <select
+                id="routeAnalysisEqualizerTypeSelect"
+                class="form-select form-select-sm mb-1"
+                data-route-analysis-route-picker-target="equalizerTypeSelect"
+                data-action="change->route-analysis-route-picker#onEqualizerTypeChange"
+              ></select>
+              <div
+                class="route-analysis-equalizer__unit text-muted mb-2"
+                data-route-analysis-route-picker-target="equalizerUnitHint"
+              ></div>
+              <div
+                class="route-analysis-equalizer__years"
+                data-route-analysis-route-picker-target="equalizerPanel"
+              ></div>
             </div>
           </div>
         </div>
@@ -106,6 +138,8 @@
             <option value="structure_table">Структура (табл.)</option>
             <option value="structure_aggregated">Структура укрупненная</option>
             <option value="structure_ts">Структура ТС</option>
+            <option value="decision_effects">Эффект от решений</option>
+            <option value="kpi">KPI</option>
           </select>
         </div>
       </div>
@@ -122,13 +156,32 @@
           <div>Выберите маршрут для отображения диаграммы</div>
         </div>
 
-        <div id="routeAnalysisTrendsChartWrap" class="mt-2" style="display: none; height: 520px;">
-          <canvas id="routeAnalysisTrendsChart" aria-label="График трендов"></canvas>
+        <div id="routeAnalysisTrendsChartWrap" class="mt-2" style="display: none;">
+          <div style="height: 480px;">
+            <canvas id="routeAnalysisTrendsChart" aria-label="Диаграмма"></canvas>
+          </div>
+          <div
+            id="routeAnalysisTsAnnotations"
+            class="route-analysis-ts-annotations"
+            style="display: none;"
+          ></div>
         </div>
 
         <div
           id="routeAnalysisStructureTableWrap"
           class="mt-2"
+          style="display: none;"
+        ></div>
+
+        <div
+          id="routeAnalysisEffectsTableWrap"
+          class="mt-2"
+          style="display: none;"
+        ></div>
+
+        <div
+          id="routeAnalysisKpiWrap"
+          class="mt-2 route-analysis-kpi-grid"
           style="display: none;"
         ></div>
       </div>

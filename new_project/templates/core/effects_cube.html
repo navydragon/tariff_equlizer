@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Куб эффектов · Цифровой тарифный инструментарий{% endblock %}
+
+{% block extra_css %}
+  <link rel="stylesheet" href="{% static 'core/css/effects-cube.css' %}" />
+{% endblock %}
+
+{% block content %}
+<div
+  data-controller="effects-cube"
+  data-effects-cube-scenarios-url-value="{% url 'scenarios:api_list' %}"
+  data-effects-cube-compute-url-value="{% url 'calculations:scenario_effects_compute_api' %}"
+  data-effects-cube-compute-pandas-url-value="{% url 'calculations:scenario_effects_compute_pandas_api' %}"
+  data-effects-cube-cube-url-value="{% url 'calculations:scenario_effects_cube_api' %}"
+  data-effects-cube-export-url-value="{% url 'calculations:scenario_effects_cube_export_api' %}"
+  data-effects-cube-active-scenario-id-value="{{ request.user.active_scenario_id|default:'' }}"
+>
+  <div class="page-header d-print-none">
+    <div class="row align-items-center">
+      <div class="col">
+        <h2 class="page-title">Куб эффектов</h2>
+        <div class="text-muted mt-1">
+          Влияние базовой индексации и отдельных тарифных решений по провозной плате, млрд руб.
+        </div>
+      </div>
+      <div class="col-auto">
+        <label class="form-label mb-1" for="effectsCubeScenarioSelect">Сценарий</label>
+        <select
+          id="effectsCubeScenarioSelect"
+          class="form-select form-select-sm"
+          style="min-width: 320px;"
+          data-effects-cube-target="scenarioSelect"
+          data-action="change->effects-cube#onScenarioChange"
+        ></select>
+      </div>
+      <div class="col-auto">
+        <label class="form-label mb-1" for="effectsCubeEngineSelect">Движок расчёта</label>
+        <select
+          id="effectsCubeEngineSelect"
+          class="form-select form-select-sm"
+          style="min-width: 160px;"
+          data-effects-cube-target="engineSelect"
+          data-action="change->effects-cube#onEngineChange"
+        >
+          <option value="python">Python</option>
+          <option value="pandas" selected>Pandas</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <div class="card mt-4">
+    <div class="card-header">
+      <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+        <h3 class="card-title mb-0">Куб эффектов</h3>
+        <span class="badge bg-blue-lt">млрд руб.</span>
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="row g-3 mb-3 align-items-end">
+        <div class="col-md-6 col-lg-3">
+          <label class="form-label" for="effectsCubeGroupBy">Группировка верхнего уровня</label>
+          <select
+            id="effectsCubeGroupBy"
+            class="form-select form-select-sm"
+            data-effects-cube-target="groupBySelect"
+            data-action="change->effects-cube#onFilterChange"
+          >
+            <option value="cargo_group">Группа груза</option>
+            <option value="cargo_code">Код груза</option>
+            <option value="direction">Направления</option>
+            <option value="wagon_kind">Род вагона</option>
+            <option value="transport_type">Вид перевозки</option>
+            <option value="shipment_category">Категория отпр.</option>
+            <option value="park_type">Тип парка</option>
+            <option value="holding">Холдинг</option>
+            <option value="tariff_decision">Тарифные решения</option>
+          </select>
+        </div>
+        <div class="col-md-6 col-lg-3">
+          <label class="form-label" for="effectsCubeGroupByInner">Группировка внутри</label>
+          <select
+            id="effectsCubeGroupByInner"
+            class="form-select form-select-sm"
+            data-effects-cube-target="groupByInnerSelect"
+            data-action="change->effects-cube#onFilterChange"
+          >
+            <option value="none">Нет</option>
+            <option value="cargo_group">Группа груза</option>
+            <option value="cargo_code">Код груза</option>
+            <option value="direction">Направления</option>
+            <option value="wagon_kind">Род вагона</option>
+            <option value="transport_type">Вид перевозки</option>
+            <option value="shipment_category">Категория отпр.</option>
+            <option value="park_type">Тип парка</option>
+            <option value="holding">Холдинг</option>
+          </select>
+        </div>
+        <div class="col-md-6 col-lg-3">
+          <label class="form-label" for="effectsCubeCargoFilter">Фильтр по грузу</label>
+          <select
+            id="effectsCubeCargoFilter"
+            class="form-select form-select-sm"
+            multiple
+            data-effects-cube-target="cargoFilterSelect"
+            data-action="change->effects-cube#onFilterChange"
+          ></select>
+        </div>
+        <div class="col-md-6 col-lg-3">
+          <label class="form-label" for="effectsCubeHoldingFilter">Фильтр по холдингу</label>
+          <select
+            id="effectsCubeHoldingFilter"
+            class="form-select form-select-sm"
+            multiple
+            data-effects-cube-target="holdingFilterSelect"
+            data-action="change->effects-cube#onFilterChange"
+          ></select>
+        </div>
+        <div class="col-auto">
+          <button
+            type="button"
+            class="btn btn-outline-primary btn-sm"
+            data-action="click->effects-cube#onExport"
+          >
+            Выгрузить отчёт
+          </button>
+        </div>
+      </div>
+
+      <div
+        class="effects-cube-table-wrap"
+        data-effects-cube-target="tableWrap"
+      >
+        <div class="text-muted py-4 text-center">Выберите сценарий для расчёта.</div>
+      </div>
+    </div>
+  </div>
+
+  <div
+    class="toast-container position-fixed bottom-0 end-0 p-3 effects-cube-toast-container"
+    data-effects-cube-target="toastContainer"
+    aria-live="polite"
+    aria-atomic="true"
+  ></div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+  {% load static %}
+  <script
+    type="module"
+    src="{% static 'core/js/app/controllers/effects_cube_controller.js' %}"
+  ></script>
+{% endblock %}

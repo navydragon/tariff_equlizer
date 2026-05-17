@@ -66,6 +66,7 @@ INSTALLED_APPS = [
     # Local apps
     'core',
     'scenarios',
+    'calculations',
 ]
 
 AUTH_USER_MODEL = "core.User"

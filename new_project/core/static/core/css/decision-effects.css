@@ -1,0 +1,221 @@
+.decision-effects-toast-container {
+  z-index: 1090;
+  max-width: min(420px, calc(100vw - 1.5rem));
+}
+
+.decision-effects-toast-container .toast {
+  width: 100%;
+}
+
+.decision-effects-kpi-grid {
+  --decision-effects-kpi-accent: #063971;
+  --decision-effects-kpi-shadow:
+    0 7px 14px 0 rgba(65, 69, 88, 0.1),
+    0 3px 6px 0 rgba(0, 0, 0, 0.07);
+  width: 100%;
+  margin-top: 2.5rem;
+  display: grid;
+  gap: 2.5rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+@media (max-width: 1199.98px) {
+  .decision-effects-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 767.98px) {
+  .decision-effects-kpi-grid {
+    grid-template-columns: 1fr;
+    gap: 2rem;
+  }
+}
+
+.decision-effects-kpi-card {
+  position: relative;
+  box-sizing: border-box;
+  width: 100%;
+  margin: 0;
+  padding: 1.5rem 1.25rem 1.25rem;
+  display: flex;
+  background-color: #fff;
+  border-radius: 16px;
+  box-shadow: var(--decision-effects-kpi-shadow);
+}
+
+.decision-effects-kpi-card__year {
+  position: absolute;
+  top: -1rem;
+  left: 1.25rem;
+  margin: 0;
+  padding: 0.25rem 1rem;
+  border-radius: 1rem;
+  background-color: var(--decision-effects-kpi-accent);
+  color: #fff;
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+.decision-effects-kpi-card__body {
+  width: 100%;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+}
+
+.decision-effects-kpi-card__info {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+.decision-effects-kpi-card__count {
+  margin: 0;
+  display: flex;
+  align-items: flex-end;
+}
+
+.decision-effects-kpi-card__total-value {
+  margin: 0;
+  color: #000;
+  font-size: 2.5rem;
+  line-height: 2.75rem;
+  font-weight: 700;
+}
+
+.decision-effects-kpi-card__total-unit {
+  margin: 0 0 0 0.25rem;
+  color: #000;
+  font-size: 1rem;
+  line-height: 1.25rem;
+  font-weight: 700;
+}
+
+.decision-effects-kpi-card__total-caption {
+  margin: 0.25rem 0 0;
+  font-size: 1rem;
+  line-height: 1.25rem;
+  font-weight: 400;
+  color: #2d3748;
+}
+
+.decision-effects-kpi-card__total-caption-pct {
+  color: #6b7280;
+}
+
+.decision-effects-kpi-card__split {
+  margin: 0;
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.decision-effects-kpi-card__split-item {
+  margin: 0 0 0.75rem;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.decision-effects-kpi-card__split-item:last-child {
+  margin-bottom: 0;
+}
+
+.decision-effects-kpi-card__split-value {
+  margin: 0;
+  color: #000;
+  font-size: 1.75rem;
+  line-height: 2rem;
+  font-weight: 700;
+}
+
+.decision-effects-kpi-card__split-unit {
+  margin: 0 0 0 0.25rem;
+  color: #000;
+  font-size: 1rem;
+  line-height: 1.25rem;
+  font-weight: 700;
+}
+
+.decision-effects-kpi-card__split-meta {
+  margin: 0.25rem 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 0.25rem;
+}
+
+.decision-effects-kpi-card__split-label {
+  margin: 0;
+  font-size: 1rem;
+  line-height: 1.25rem;
+  font-weight: 400;
+  color: #2d3748;
+}
+
+.decision-effects-kpi-card__split-pct {
+  margin: 0;
+  font-size: 1rem;
+  line-height: 1.25rem;
+  font-weight: 400;
+  color: #02c94f;
+}
+
+.decision-effects-table-wrap {
+  max-height: 480px;
+  overflow: auto;
+}
+
+.decision-effects-table-wrap .table tbody tr.fw-subtotal td {
+  background-color: #f1f5f9;
+}
+
+.decision-effects-table-wrap .table tbody tr td {
+  vertical-align: middle;
+}
+
+.decision-effects-table-wrap .cell-pct {
+  color: #059669;
+  font-size: 0.8125rem;
+}
+
+.decision-effects-chart-wrap {
+  position: relative;
+  height: 420px;
+}
+
+.decision-effects-absolute-table-wrap {
+  max-height: 520px;
+  overflow: auto;
+}
+
+.decision-effects-absolute-table-wrap--loading {
+  min-height: 140px;
+}
+
+.decision-effects-absolute-table-wrap .decision-effects-table-loading,
+.decision-effects-table-wrap .decision-effects-table-loading {
+  min-height: 120px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.decision-effects-absolute-table-wrap .table thead th {
+  position: sticky;
+  top: 0;
+  background: #fff;
+  z-index: 1;
+}
+
+.decision-effects-absolute-table-wrap .table tbody tr.fw-subtotal td {
+  background-color: #f1f5f9;
+}

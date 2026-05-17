@@ -2,6 +2,7 @@ from typing import Optional
 
 from django.db import transaction
 
+from scenarios.domain.repositories.price_change import PriceChangeSettingRepository
 from scenarios.models import Scenario
 
 
@@ -55,7 +56,9 @@ class ScenarioRepository:
             end_year=source.end_year,
             route_set=source.route_set,
             exchange_rate_set=source.exchange_rate_set,
+            inflation_set=source.inflation_set,
             author=new_author,
         )
+        PriceChangeSettingRepository().copy_from_scenario(source_id, new_scenario)
         return Scenario.objects.select_related("author").get(id=new_scenario.id)
 

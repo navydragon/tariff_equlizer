@@ -29,7 +29,7 @@
       data-scenario-edit-scenario-id-value="{{ scenario.id }}"
       data-scenario-edit-update-url-value="{% url 'scenarios:api_update' scenario.id %}"
       data-scenario-edit-route-set-list-url-value="{% url 'route_set_list_api' %}"
-      data-scenario-edit-tabs-value='["tab-basic","tab-base","tab-fx","tab-tariff"]'
+      data-scenario-edit-tabs-value='["tab-basic","tab-base","tab-fx","tab-inflation","tab-tariff"]'
     >
       <ul class="nav nav-tabs" role="tablist">
         <li class="nav-item" role="presentation">
@@ -88,6 +88,20 @@
             Курсы валют
           </a>
         </li>
+        <li class="nav-item" role="presentation">
+          <a
+            class="nav-link"
+            id="tab-inflation-tab"
+            data-bs-toggle="tab"
+            href="#tab-inflation"
+            role="tab"
+            aria-controls="tab-inflation"
+            aria-selected="false"
+          >
+            <i class="ti ti-trending-up me-2"></i>
+            Инфляция
+          </a>
+        </li>
       </ul>
 
       <div class="tab-content pt-3">
@@ -106,6 +120,10 @@
 
         <div class="tab-pane fade" id="tab-fx" role="tabpanel" aria-labelledby="tab-fx-tab">
           {% include "scenarios/parameters/currencies.html" %}
+        </div>
+
+        <div class="tab-pane fade" id="tab-inflation" role="tabpanel" aria-labelledby="tab-inflation-tab">
+          {% include "scenarios/parameters/inflation.html" %}
         </div>
 
         <div

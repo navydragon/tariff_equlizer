@@ -87,6 +87,47 @@
         </div>
       </div>
 
+      <h4 class="mt-4 mb-3">Изменение цен</h4>
+      <p class="text-muted small mb-3">
+        Параметры экономики маршрута (кроме РЖД): выберите, будет ли значение меняться по инфляции сценария.
+      </p>
+      <div class="table-responsive">
+        <table class="table table-vcenter">
+          <thead>
+            <tr>
+              <th style="min-width: 200px;">Параметр</th>
+              <th>Режим изменения</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in price_change_rows %}
+            <tr>
+              <td>{{ row.label }}</td>
+              <td>
+                <div class="btn-group flex-wrap" role="group" aria-label="{{ row.label }}">
+                  {% for mode_key, mode_label in price_change_modes %}
+                  <input
+                    type="radio"
+                    class="btn-check"
+                    name="price_change__{{ row.key }}"
+                    id="price_change__{{ row.key }}__{{ mode_key }}"
+                    value="{{ mode_key }}"
+                    autocomplete="off"
+                    {% if row.mode == mode_key %}checked{% endif %}
+                  />
+                  <label
+                    class="btn btn-outline-primary"
+                    for="price_change__{{ row.key }}__{{ mode_key }}"
+                  >{{ mode_label }}</label>
+                  {% endfor %}
+                </div>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
       <div class="mt-4">
         <button type="submit" class="btn btn-primary">
           <i class="ti ti-device-floppy"></i>

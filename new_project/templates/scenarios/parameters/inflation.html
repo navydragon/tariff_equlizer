@@ -1,0 +1,414 @@
+<div class="card" id="inflationCard" data-scenario-id="{{ scenario.id }}">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <h3 class="card-title mb-0">Инфляция</h3>
+    <button type="button" class="btn btn-primary btn-sm" id="inflationCreateSetBtn">
+      <i class="ti ti-plus"></i>
+      Создать набор
+    </button>
+  </div>
+
+  <div class="card-body">
+    <div id="inflationErrors"></div>
+
+    <div class="row g-3 align-items-end">
+      <div class="col-md-8">
+        <label for="inflationSetSelect" class="form-label">Набор инфляции *</label>
+        <select id="inflationSetSelect" class="form-select">
+          <option value="">Загрузка...</option>
+        </select>
+        <div class="form-text">
+          Набор можно использовать в нескольких сценариях (в пределах автора).
+        </div>
+      </div>
+      <div class="col-md-4 d-flex gap-2">
+        <button type="button" class="btn btn-secondary flex-fill" id="inflationAttachBtn">
+          <i class="ti ti-link"></i>
+          Применить к сценарию
+        </button>
+        <button type="button" class="btn btn-outline-danger" id="inflationDeleteSetBtn" title="Удалить набор">
+          <i class="ti ti-trash"></i>
+        </button>
+      </div>
+    </div>
+
+    <hr class="my-4" />
+
+    <div id="inflationMatrixWrapper" class="table-responsive" style="overflow-x: auto; overflow-y: visible;">
+      <table class="table table-vcenter" id="inflationMatrixTable">
+        <thead>
+          <tr id="inflationHeaderRow">
+            <th style="min-width: 220px;">Параметр</th>
+          </tr>
+        </thead>
+        <tbody id="inflationBody">
+          <tr>
+            <td class="text-muted">Загрузка...</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <small class="form-hint">
+      Нажмите по ячейке Инфляция, %, чтобы отредактировать значение за год.
+    </small>
+  </div>
+</div>
+
+{# Модалка создания набора инфляции #}
+<div class="modal fade" id="inflationSetCreateModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Новый набор инфляции</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+      </div>
+      <div class="modal-body">
+        <div id="inflationSetCreateErrors"></div>
+        <div class="mb-3">
+          <label for="inflationSetNameInput" class="form-label">Название *</label>
+          <input type="text" class="form-control" id="inflationSetNameInput" placeholder="Например: Базовая инфляция" />
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+        <button type="button" class="btn btn-primary" id="inflationSetCreateSaveBtn">
+          <i class="ti ti-device-floppy"></i>
+          Создать
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# Модалка редактирования инфляции по году #}
+<div class="modal fade" id="inflationValueEditModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-sm modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="inflationValueModalTitle">Редактирование инфляции</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+      </div>
+      <div class="modal-body">
+        <div id="inflationValueErrors"></div>
+        <div class="mb-3">
+          <label for="inflationValueInput" class="form-label">Инфляция, %</label>
+          <input type="number" step="0.0001" class="form-control" id="inflationValueInput" />
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+        <button type="button" class="btn btn-primary" id="inflationValueSaveBtn">
+          <i class="ti ti-device-floppy"></i>
+          Сохранить
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  const card = document.getElementById('inflationCard');
+  if (!card) return;
+
+  const scenarioId = parseInt(card.dataset.scenarioId, 10);
+  const errorsContainer = document.getElementById('inflationErrors');
+  const selectEl = document.getElementById('inflationSetSelect');
+  const attachBtn = document.getElementById('inflationAttachBtn');
+  const deleteBtn = document.getElementById('inflationDeleteSetBtn');
+  const createBtn = document.getElementById('inflationCreateSetBtn');
+
+  const headerRow = document.getElementById('inflationHeaderRow');
+  const bodyEl = document.getElementById('inflationBody');
+
+  const setCreateModalEl = document.getElementById('inflationSetCreateModal');
+  const setCreateModal = setCreateModalEl && typeof bootstrap !== 'undefined'
+    ? new bootstrap.Modal(setCreateModalEl)
+    : null;
+  const setNameInput = document.getElementById('inflationSetNameInput');
+  const setCreateErrors = document.getElementById('inflationSetCreateErrors');
+  const setCreateSaveBtn = document.getElementById('inflationSetCreateSaveBtn');
+
+  const valueModalEl = document.getElementById('inflationValueEditModal');
+  const valueModal = valueModalEl && typeof bootstrap !== 'undefined'
+    ? new bootstrap.Modal(valueModalEl)
+    : null;
+  const valueModalTitle = document.getElementById('inflationValueModalTitle');
+  const valueErrors = document.getElementById('inflationValueErrors');
+  const valueInput = document.getElementById('inflationValueInput');
+  const valueSaveBtn = document.getElementById('inflationValueSaveBtn');
+
+  let currentYear = null;
+  let currentInflationSetId = null;
+
+  function getCookie(name) {
+    let cookieValue = null;
+    if (document.cookie && document.cookie !== '') {
+      const cookies = document.cookie.split(';');
+      for (let i = 0; i < cookies.length; i++) {
+        const cookie = cookies[i].trim();
+        if (cookie.substring(0, name.length + 1) === (name + '=')) {
+          cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+          break;
+        }
+      }
+    }
+    return cookieValue;
+  }
+
+  function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
+  function showErrorMessages(messages, target) {
+    if (!target) return;
+    if (!Array.isArray(messages)) messages = [String(messages)];
+    let html = '<div class="alert alert-danger"><ul class="mb-0">';
+    messages.forEach(m => { html += '<li>' + escapeHtml(m) + '</li>'; });
+    html += '</ul></div>';
+    target.innerHTML = html;
+  }
+
+  function clearErrors(target) {
+    if (target) target.innerHTML = '';
+  }
+
+  function showToast(type, message) {
+    let toastElement;
+    if (type === 'success') {
+      toastElement = document.getElementById('toastSuccess');
+      const timeElement = document.getElementById('toastSuccessTime');
+      if (timeElement) {
+        const now = new Date();
+        const dateStr = now.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+        const timeStr = now.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        timeElement.textContent = dateStr + ' ' + timeStr;
+      }
+    } else {
+      toastElement = document.getElementById('toastError');
+      const toastBody = document.getElementById('toastErrorBody');
+      if (toastBody) toastBody.innerHTML = message;
+    }
+    if (toastElement && typeof bootstrap !== 'undefined') {
+      new bootstrap.Toast(toastElement, { autohide: true, delay: 5000 }).show();
+    }
+  }
+
+  function renderMatrix(years, values) {
+    // header
+    while (headerRow.children.length > 1) headerRow.removeChild(headerRow.lastChild);
+    years.forEach(y => {
+      const th = document.createElement('th');
+      th.textContent = String(y);
+      headerRow.appendChild(th);
+    });
+
+    bodyEl.innerHTML = '';
+    const tr = document.createElement('tr');
+    const nameTd = document.createElement('td');
+    nameTd.textContent = 'Инфляция, %';
+    tr.appendChild(nameTd);
+
+    years.forEach(y => {
+      const td = document.createElement('td');
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'btn btn-link p-0 inflation-value-cell';
+      btn.dataset.year = String(y);
+      const raw = values && Object.prototype.hasOwnProperty.call(values, String(y)) ? values[String(y)] : '';
+      btn.textContent = raw ? String(raw) : 'нет';
+      td.appendChild(btn);
+      tr.appendChild(td);
+    });
+    bodyEl.appendChild(tr);
+  }
+
+  async function loadSets() {
+    clearErrors(errorsContainer);
+    const r = await fetch('/scenarios/api/inflation-sets/', { method: 'GET', headers: { 'Accept': 'application/json' }});
+    const data = await r.json();
+    if (!data.success) {
+      selectEl.innerHTML = '<option value=\"\">Ошибка загрузки</option>';
+      showErrorMessages(data.errors || 'Ошибка загрузки наборов', errorsContainer);
+      return;
+    }
+    const items = data.items || [];
+    if (!items.length) {
+      selectEl.innerHTML = '<option value=\"\">Наборов нет</option>';
+      return;
+    }
+    selectEl.innerHTML = '<option value=\"\">— выберите —</option>' + items.map(it => (
+      `<option value=\"${it.id}\">${escapeHtml(it.name || '')}</option>`
+    )).join('');
+    updateDeleteButtonState();
+  }
+
+  async function loadMatrix() {
+    const r = await fetch(`/scenarios/api/${scenarioId}/inflation/matrix/`, { method: 'GET', headers: { 'Accept': 'application/json' }});
+    const data = await r.json();
+    if (!data.success) {
+      showErrorMessages(data.errors || 'Ошибка загрузки инфляции', errorsContainer);
+      return;
+    }
+    const years = data.years || [];
+    const inflationSet = data.inflation_set;
+    currentInflationSetId = inflationSet ? inflationSet.id : null;
+    if (currentInflationSetId) {
+      selectEl.value = String(currentInflationSetId);
+    }
+    updateDeleteButtonState();
+    renderMatrix(years, data.values || {});
+  }
+
+  function updateDeleteButtonState() {
+    if (!deleteBtn) return;
+    deleteBtn.disabled = !parseInt(selectEl.value || '0', 10);
+  }
+
+  async function deleteSelectedSet() {
+    clearErrors(errorsContainer);
+    const setId = parseInt(selectEl.value || '0', 10);
+    if (!setId) {
+      showErrorMessages('Выберите набор инфляции для удаления', errorsContainer);
+      return;
+    }
+    const option = selectEl.options[selectEl.selectedIndex];
+    const setName = option ? (option.textContent || '').trim() : '';
+    const confirmMsg = setName
+      ? `Удалить набор «${setName}»? Он будет отвязан от всех сценариев.`
+      : 'Удалить выбранный набор инфляции? Он будет отвязан от всех сценариев.';
+    if (!confirm(confirmMsg)) return;
+
+    const r = await fetch(`/scenarios/api/inflation-sets/${setId}/delete/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') },
+    });
+    const data = await r.json();
+    if (!data.success) {
+      showErrorMessages(data.errors || 'Ошибка удаления набора', errorsContainer);
+      showToast('error', Array.isArray(data.errors) ? data.errors.join('<br>') : (data.error || 'Ошибка'));
+      return;
+    }
+    currentInflationSetId = null;
+    showToast('success', 'Набор инфляции удалён');
+    await loadSets();
+    selectEl.value = '';
+    updateDeleteButtonState();
+    await loadMatrix();
+  }
+
+  async function attachSelectedSet() {
+    clearErrors(errorsContainer);
+    const setId = parseInt(selectEl.value || '0', 10);
+    if (!setId) {
+      showErrorMessages('Выберите набор инфляции', errorsContainer);
+      return;
+    }
+    const r = await fetch(`/scenarios/api/${scenarioId}/inflation-sets/attach/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') },
+      body: JSON.stringify({ inflation_set_id: setId }),
+    });
+    const data = await r.json();
+    if (!data.success) {
+      showErrorMessages(data.errors || 'Ошибка привязки набора', errorsContainer);
+      showToast('error', Array.isArray(data.errors) ? data.errors.join('<br>') : (data.error || 'Ошибка'));
+      return;
+    }
+    showToast('success', 'Набор инфляции применён к сценарию');
+    await loadMatrix();
+  }
+
+  function openCreateSetModal() {
+    clearErrors(setCreateErrors);
+    setNameInput.value = '';
+    if (setCreateModal) setCreateModal.show();
+  }
+
+  async function createSet() {
+    clearErrors(setCreateErrors);
+    const name = (setNameInput.value || '').trim();
+    if (!name) {
+      showErrorMessages('Название обязательно', setCreateErrors);
+      return;
+    }
+    const r = await fetch('/scenarios/api/inflation-sets/create/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') },
+      body: JSON.stringify({ name }),
+    });
+    const data = await r.json();
+    if (!data.success) {
+      showErrorMessages(data.errors || 'Ошибка создания', setCreateErrors);
+      return;
+    }
+    if (setCreateModal) setCreateModal.hide();
+    showToast('success', 'Набор инфляции создан');
+    await loadSets();
+    if (data.item && data.item.id) {
+      selectEl.value = String(data.item.id);
+    }
+  }
+
+  function openValueModal(year, currentText) {
+    clearErrors(valueErrors);
+    currentYear = year;
+    if (valueModalTitle) valueModalTitle.textContent = `Инфляция, % (${year} год)`;
+    valueInput.value = (currentText === 'нет') ? '' : currentText;
+    if (valueModal) valueModal.show();
+  }
+
+  async function saveValue() {
+    clearErrors(valueErrors);
+    const year = currentYear;
+    if (!year) {
+      if (valueModal) valueModal.hide();
+      return;
+    }
+    const inflationSetId = currentInflationSetId || parseInt(selectEl.value || '0', 10);
+    if (!inflationSetId) {
+      showErrorMessages('Сначала выберите и примените набор инфляции', valueErrors);
+      return;
+    }
+    const ratePercent = (valueInput.value || '').trim();
+    if (!ratePercent) {
+      showErrorMessages('Значение не может быть пустым', valueErrors);
+      return;
+    }
+    const r = await fetch('/scenarios/api/inflation/update/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') },
+      body: JSON.stringify({ scenario_id: scenarioId, inflation_set_id: inflationSetId, year: year, rate_percent: ratePercent }),
+    });
+    const data = await r.json();
+    if (!data.success) {
+      showErrorMessages(data.errors || 'Ошибка сохранения', valueErrors);
+      return;
+    }
+    if (valueModal) valueModal.hide();
+    showToast('success', 'Инфляция сохранена');
+    await loadMatrix();
+  }
+
+  attachBtn.addEventListener('click', attachSelectedSet);
+  if (deleteBtn) deleteBtn.addEventListener('click', deleteSelectedSet);
+  selectEl.addEventListener('change', updateDeleteButtonState);
+  createBtn.addEventListener('click', openCreateSetModal);
+  setCreateSaveBtn.addEventListener('click', createSet);
+  valueSaveBtn.addEventListener('click', saveValue);
+
+  bodyEl.addEventListener('click', function(e) {
+    const btn = e.target.closest('.inflation-value-cell');
+    if (!btn) return;
+    const year = parseInt(btn.dataset.year, 10);
+    if (!year) return;
+    openValueModal(year, (btn.textContent || '').trim());
+  });
+
+  // init
+  loadSets().then(loadMatrix);
+})();
+</script>
+

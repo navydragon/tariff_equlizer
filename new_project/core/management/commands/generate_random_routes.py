@@ -218,6 +218,21 @@ class Command(BaseCommand):
         shipper_holding = f"Холдинг {random.randint(1, 1000)}"
         shipper = f"Грузоотправитель {random.randint(1, 1000)}"
 
+        transport_volume_mln_tons = None
+        freight_turnover_bln_tkm = None
+        freight_charge_ths_rub = None
+        if random.random() < 0.8:
+            volume = Decimal(str(round(random.uniform(0.1, 30.0), 4)))
+            turnover = (volume * Decimal(str(round(random.uniform(0.1, 2.5), 4)))).quantize(
+                Decimal("0.0001")
+            )
+            charge = (turnover * Decimal(str(round(random.uniform(80, 400), 2)))).quantize(
+                Decimal("0.01")
+            )
+            transport_volume_mln_tons = volume
+            freight_turnover_bln_tkm = turnover
+            freight_charge_ths_rub = charge
+
         return Route(
             route_set=route_set,
             cargo=cargo,
@@ -246,5 +261,8 @@ class Command(BaseCommand):
             production_cost_per_ton=production_cost_per_ton,
             total_cost_per_ton=total_cost_per_ton,
             market_price_per_ton=market_price_per_ton,
+            transport_volume_mln_tons=transport_volume_mln_tons,
+            freight_turnover_bln_tkm=freight_turnover_bln_tkm,
+            freight_charge_ths_rub=freight_charge_ths_rub,
         )
 

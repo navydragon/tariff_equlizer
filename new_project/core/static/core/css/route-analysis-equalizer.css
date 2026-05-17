@@ -1,0 +1,52 @@
+.route-analysis-equalizer__years {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: center;
+  margin-top: 0.75rem;
+}
+
+.route-analysis-equalizer__year-col {
+  flex: 1 1 48px;
+  min-width: 48px;
+  max-width: 72px;
+  text-align: center;
+}
+
+.route-analysis-equalizer__year-label {
+  font-size: 0.875rem;
+  font-weight: 700;
+  line-height: 1.25rem;
+  color: #2d3748;
+  margin-bottom: 0.35rem;
+}
+
+.route-analysis-equalizer__value-input {
+  width: 100%;
+  max-width: 72px;
+  margin: 0 auto 0.35rem;
+  padding: 0.15rem 0.25rem;
+  font-size: 0.75rem;
+  text-align: center;
+}
+
+.route-analysis-equalizer__slider-wrap {
+  display: flex;
+  justify-content: center;
+  height: 200px;
+  margin: 0 auto;
+}
+
+.route-analysis-equalizer__slider {
+  writing-mode: vertical-lr;
+  direction: rtl;
+  width: 28px;
+  height: 200px;
+  margin: 0;
+  accent-color: #206bc4;
+  cursor: pointer;
+}
+
+.route-analysis-equalizer__unit {
+  font-size: 0.75rem;
+}

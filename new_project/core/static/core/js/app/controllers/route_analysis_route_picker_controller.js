@@ -24,12 +24,17 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
       "confirmButton",
       "diagramTypeSelect",
       "diagramPlaceholder",
+      "equalizerTypeSelect",
+      "equalizerPanel",
+      "equalizerEmpty",
+      "equalizerControls",
+      "equalizerUnitHint",
     ];
 
     static values = {
       scenariosUrl: String,
       routesUrl: String,
-      calculateRouteUrl: String,
+      routeAnalysisUrl: String,
       activeScenarioId: String,
       pageSize: { type: Number, default: 20 },
       searchDebounceMs: { type: Number, default: 400 },
@@ -57,7 +62,12 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
         pendingSelectedRoute: null,
         selectedRoute: null,
         trendsChart: null,
-        calculateRouteCache: new Map(),
+        routeAnalysisCache: new Map(),
+        activeCalculateData: null,
+        equalizerBaseline: null,
+        equalizerOverrides: {},
+        equalizerDebounceTimer: null,
+        equalizerRecalcInFlight: false,
       };
 
       this.state.modalEl = document.getElementById("routeAnalysisRouteModal");
@@ -70,6 +80,7 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
 
       this._resetUi();
       this._renderRouteDetails(null);
+      this._updateEqualizerVisibility(false);
 
       // Загружаем сценарии сразу при открытии страницы, чтобы верхний select
       // не был пустым и не зависел от открытия модалки.
@@ -99,10 +110,12 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
         ? this.scenarioSelectTarget.value
         : "";
       const scenarioId = raw ? Number(raw) : null;
+      this.state.routeAnalysisCache.clear();
       this._setScenario(scenarioId);
       this._resetRouteSearch();
       this._renderRouteDetails(null);
       this.state.selectedRoute = null;
+      this._resetEqualizer();
       this._renderDiagram();
     }
 
@@ -122,7 +135,7 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
       }, this.searchDebounceMsValue || 400);
     }
 
-    confirmSelection() {
+    async confirmSelection() {
       // eslint-disable-next-line no-console
       console.info("[route-analysis] confirmSelection", {
         hasPending: !!this.state.pendingSelectedRoute,
@@ -134,7 +147,14 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
         this.state.modal.hide();
       }
 
+      this.state.routeAnalysisCache.clear();
+      this.state.equalizerOverrides = {};
+      await this._loadEqualizerBaseline();
       this._renderDiagram();
+    }
+
+    onEqualizerTypeChange() {
+      this._renderEqualizerPanel();
     }
 
     async _loadScenarios() {
@@ -411,6 +431,8 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
       const tableWrapEl = document.getElementById(
         "routeAnalysisStructureTableWrap",
       );
+      const effectsWrapEl = document.getElementById("routeAnalysisEffectsTableWrap");
+      const kpiWrapEl = document.getElementById("routeAnalysisKpiWrap");
       const placeholderEl =
         this.hasDiagramPlaceholderTarget
           ? this.diagramPlaceholderTarget
@@ -420,22 +442,20 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
         this.hasDiagramTypeSelectTarget ? this.diagramTypeSelectTarget : null;
       const typeValue = typeSelect ? typeSelect.value : "trends";
 
-      const labels = {
-        trends: "Тренды",
-        structure: "Структура",
-        structure_table: "Структура (табл.)",
-        structure_aggregated: "Структура укрупненная",
-        structure_ts: "Структура ТС",
-      };
-      const label = labels[typeValue] || "Диаграмма";
-
       const showPlaceholder = (html) => {
-        if (chartWrapEl) {
-          chartWrapEl.style.display = "none";
-        }
+        this._hideDiagramExtras();
+        if (chartWrapEl) chartWrapEl.style.display = "none";
         if (tableWrapEl) {
           tableWrapEl.style.display = "none";
           tableWrapEl.innerHTML = "";
+        }
+        if (effectsWrapEl) {
+          effectsWrapEl.style.display = "none";
+          effectsWrapEl.innerHTML = "";
+        }
+        if (kpiWrapEl) {
+          kpiWrapEl.style.display = "none";
+          kpiWrapEl.innerHTML = "";
         }
         if (this.state.trendsChart) {
           try {
@@ -452,18 +472,66 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
       };
 
       const showChart = () => {
+        this._hideDiagramExtras();
         if (placeholderEl) placeholderEl.style.display = "none";
         if (tableWrapEl) {
           tableWrapEl.style.display = "none";
           tableWrapEl.innerHTML = "";
         }
+        if (effectsWrapEl) {
+          effectsWrapEl.style.display = "none";
+          effectsWrapEl.innerHTML = "";
+        }
+        if (kpiWrapEl) {
+          kpiWrapEl.style.display = "none";
+          kpiWrapEl.innerHTML = "";
+        }
         if (chartWrapEl) chartWrapEl.style.display = "";
       };
 
       const showTable = () => {
+        this._hideDiagramExtras();
         if (placeholderEl) placeholderEl.style.display = "none";
         if (chartWrapEl) chartWrapEl.style.display = "none";
+        if (effectsWrapEl) {
+          effectsWrapEl.style.display = "none";
+          effectsWrapEl.innerHTML = "";
+        }
+        if (kpiWrapEl) {
+          kpiWrapEl.style.display = "none";
+          kpiWrapEl.innerHTML = "";
+        }
         if (tableWrapEl) tableWrapEl.style.display = "";
+      };
+
+      const showEffects = () => {
+        this._hideDiagramExtras();
+        if (placeholderEl) placeholderEl.style.display = "none";
+        if (chartWrapEl) chartWrapEl.style.display = "none";
+        if (tableWrapEl) {
+          tableWrapEl.style.display = "none";
+          tableWrapEl.innerHTML = "";
+        }
+        if (kpiWrapEl) {
+          kpiWrapEl.style.display = "none";
+          kpiWrapEl.innerHTML = "";
+        }
+        if (effectsWrapEl) effectsWrapEl.style.display = "";
+      };
+
+      const showKpi = () => {
+        this._hideDiagramExtras();
+        if (placeholderEl) placeholderEl.style.display = "none";
+        if (chartWrapEl) chartWrapEl.style.display = "none";
+        if (tableWrapEl) {
+          tableWrapEl.style.display = "none";
+          tableWrapEl.innerHTML = "";
+        }
+        if (effectsWrapEl) {
+          effectsWrapEl.style.display = "none";
+          effectsWrapEl.innerHTML = "";
+        }
+        if (kpiWrapEl) kpiWrapEl.style.display = "";
       };
 
       if (!this.state.selectedRoute) {
@@ -496,6 +564,54 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
           routeId,
           containerEl: tableWrapEl,
         });
+        return;
+      }
+
+      if (typeValue === "decision_effects") {
+        showEffects();
+        if (effectsWrapEl) {
+          effectsWrapEl.innerHTML = `
+            <div class="text-center text-muted py-4">
+              <div class="spinner-border text-primary" role="status" aria-label="Загрузка"></div>
+              <div class="mt-2">Расчёт эффектов…</div>
+            </div>
+          `;
+        }
+        const result = await this._fetchRouteAnalysisData({});
+        if (!result.ok) {
+          showPlaceholder(`
+            <div class="alert alert-danger" role="alert">
+              ${escapeHtml((result.errors || ["Ошибка"]).join("; "))}
+            </div>
+          `);
+          return;
+        }
+        showEffects();
+        this._renderEffectsTable(effectsWrapEl, result.data);
+        return;
+      }
+
+      if (typeValue === "kpi") {
+        showKpi();
+        if (kpiWrapEl) {
+          kpiWrapEl.innerHTML = `
+            <div class="text-center text-muted py-4 w-100">
+              <div class="spinner-border text-primary" role="status" aria-label="Загрузка"></div>
+              <div class="mt-2">Расчёт KPI…</div>
+            </div>
+          `;
+        }
+        const result = await this._fetchRouteAnalysisData({});
+        if (!result.ok) {
+          showPlaceholder(`
+            <div class="alert alert-danger" role="alert">
+              ${escapeHtml((result.errors || ["Ошибка"]).join("; "))}
+            </div>
+          `);
+          return;
+        }
+        showKpi();
+        this._renderKpiCards(kpiWrapEl, result.data);
         return;
       }
 
@@ -578,21 +694,73 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
       };
 
       if (typeValue === "trends") {
+        const scenarioId = this.state.selectedScenarioId;
+        const routeId = this.state.selectedRoute ? this.state.selectedRoute.id : null;
+        let calculateData = null;
+
+        if (scenarioId && routeId) {
+          showPlaceholder(`
+            <div class="text-center text-muted py-4">
+              <div class="spinner-border text-primary" role="status" aria-label="Загрузка"></div>
+              <div class="mt-2">Расчёт трендов…</div>
+            </div>
+          `);
+          let result;
+          try {
+            result = await this._loadRouteAnalysis({
+              scenarioId,
+              routeId,
+              overrides: this._buildOverridesPayload(),
+            });
+          } catch (_e) {
+            showPlaceholder(`
+              <div class="mb-2">
+                <i class="ti ti-alert-triangle" style="font-size: 2rem;"></i>
+              </div>
+              <div>Ошибка расчёта трендов (см. консоль).</div>
+            `);
+            return;
+          }
+          if (!result.ok) {
+            showPlaceholder(`
+              <div class="alert alert-danger" role="alert">
+                ${escapeHtml((result.errors || ["Ошибка"]).join("; "))}
+              </div>
+            `);
+            return;
+          }
+          calculateData = result.data;
+        }
+
+        const rowValuesByKey = (rowKey) => this._rowValuesByKey(calculateData, rowKey);
+
         const series = [
-          { key: "market_price_per_ton", name: "Цена тонны", color: "#1f6feb" },
-          { key: "total_cost_per_ton", name: "Себестоимость", color: "#2da44e" },
-          { key: "rzd_cost_total_per_ton", name: "РЖД (итого), руб./т", color: "#8250df" },
-          { key: "operators_cost_per_ton", name: "Операторы, руб./т", color: "#d29922" },
-          { key: "transshipment_cost_per_ton", name: "Перевалка, руб./т", color: "#bc4c00" },
+          { rowKey: "price_rub", name: "Цена тонны", color: "#1f6feb" },
+          { rowKey: "cost", name: "Себестоимость", color: "#2da44e" },
+          { rowKey: "rzd", name: "РЖД (итого), руб./т", color: "#8250df" },
+          { rowKey: "operators", name: "Операторы, руб./т", color: "#d29922" },
+          { rowKey: "transshipment", name: "Перевалка, руб./т", color: "#bc4c00" },
         ];
 
         const datasets = [];
         for (const s of series) {
-          const v = toNum(this.state.selectedRoute[s.key]);
-          if (v == null) continue;
+          let dataPoints = rowValuesByKey(s.rowKey);
+          if (!dataPoints) {
+            const fallbackKeys = {
+              price_rub: "market_price_per_ton",
+              cost: "production_cost_per_ton",
+              operators: "operators_cost_per_ton",
+              transshipment: "transshipment_cost_per_ton",
+              rzd: "rzd_cost_total_per_ton",
+            };
+            const routeKey = fallbackKeys[s.rowKey];
+            const v = routeKey ? toNum(this.state.selectedRoute[routeKey]) : null;
+            dataPoints = v != null ? years.map(() => v) : null;
+          }
+          if (!dataPoints || dataPoints.every((v) => v == null)) continue;
           datasets.push({
             label: s.name,
-            data: years.map(() => v),
+            data: dataPoints.map((v) => (v != null ? v : 0)),
             borderColor: s.color,
             backgroundColor: s.color,
             borderWidth: 3,
@@ -611,6 +779,8 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
           `);
           return;
         }
+
+        showChart();
 
         this.state.trendsChart = new window.Chart(ctx, {
           type: "line",
@@ -674,15 +844,48 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
       }
 
       if (typeValue === "structure") {
-        const price = toNum(this.state.selectedRoute.market_price_per_ton);
-        const totalCost = toNum(this.state.selectedRoute.total_cost_per_ton);
-        const production = toNum(this.state.selectedRoute.production_cost_per_ton);
-        const rzd = toNum(this.state.selectedRoute.rzd_cost_total_per_ton);
-        const ops = toNum(this.state.selectedRoute.operators_cost_per_ton);
-        const trans = toNum(this.state.selectedRoute.transshipment_cost_per_ton);
+        const scenarioId = this.state.selectedScenarioId;
+        const routeId = this.state.selectedRoute ? this.state.selectedRoute.id : null;
+        let calculateData = this.state.activeCalculateData;
 
-        const base = price && price > 0 ? price : null;
-        if (!base) {
+        if (scenarioId && routeId && !calculateData) {
+          showPlaceholder(`
+            <div class="text-center text-muted py-4">
+              <div class="spinner-border text-primary" role="status" aria-label="Загрузка"></div>
+              <div class="mt-2">Расчёт структуры…</div>
+            </div>
+          `);
+          let result;
+          try {
+            result = await this._loadRouteAnalysis({
+              scenarioId,
+              routeId,
+              overrides: this._buildOverridesPayload(),
+            });
+          } catch (_e) {
+            showPlaceholder(`
+              <div class="mb-2">
+                <i class="ti ti-alert-triangle" style="font-size: 2rem;"></i>
+              </div>
+              <div>Ошибка расчёта структуры (см. консоль).</div>
+            `);
+            return;
+          }
+          if (!result.ok) {
+            showPlaceholder(`
+              <div class="alert alert-danger" role="alert">
+                ${escapeHtml((result.errors || ["Ошибка"]).join("; "))}
+              </div>
+            `);
+            return;
+          }
+          calculateData = result.data;
+        }
+
+        const yearParts = years.map((_y, index) =>
+          this._structurePartsForYearIndex(calculateData, index),
+        );
+        if (yearParts.some((p) => !p)) {
           showPlaceholder(`
             <div class="mb-2">
               <i class="ti ti-info-circle" style="font-size: 2rem;"></i>
@@ -692,71 +895,23 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
           return;
         }
 
-        const sumKnown = [production, rzd, ops, trans].reduce(
-          (acc, v) => (v != null ? acc + v : acc),
-          0,
-        );
-        const costForMargin = totalCost != null ? totalCost : sumKnown;
+        const partNames = yearParts[0].map((p) => p.name);
+        const datasets = partNames.map((name, partIndex) => {
+          const sample = yearParts[0][partIndex];
+          return {
+            label: name,
+            data: yearParts.map((parts) => parts[partIndex].valuePct),
+            borderColor: sample.color,
+            backgroundColor: sample.color,
+            borderWidth: 0,
+            borderRadius: 4,
+            barPercentage: 0.8,
+            categoryPercentage: 0.8,
+            stack: "stack",
+          };
+        });
 
-        // Считаем проценты от цены. Если суммарно > 100% (затраты > цены),
-        // нормализуем сегменты, чтобы сумма всегда была ровно 100%.
-        const percentRaw = (v) => (v != null ? (v / base) * 100 : 0);
-        const clamp0 = (v) => (Number.isFinite(v) ? Math.max(v, 0) : 0);
-        const round2 = (v) => Number(v.toFixed(2));
-
-        const parts = [
-          { name: "Себестоимость производства", valuePct: clamp0(percentRaw(production)), color: "#2da44e" },
-          { name: "Расходы ОАО \"РЖД\"", valuePct: clamp0(percentRaw(rzd)), color: "#8250df" },
-          { name: "Расходы операторов", valuePct: clamp0(percentRaw(ops)), color: "#d29922" },
-          { name: "Расходы на перевалку", valuePct: clamp0(percentRaw(trans)), color: "#bc4c00" },
-        ];
-
-        const marginPctRaw = ((base - costForMargin) / base) * 100;
-        const marginPctNonNeg = clamp0(marginPctRaw);
-
-        const usedRaw = parts.reduce((acc, p) => acc + p.valuePct, 0);
-        const totalRaw = usedRaw + marginPctNonNeg;
-
-        // Если totalRaw == 0 (все нули) — рисовать нечего.
-        if (!totalRaw) {
-          showPlaceholder(`
-            <div class="mb-2">
-              <i class="ti ti-info-circle" style="font-size: 2rem;"></i>
-            </div>
-            <div>Для структуры не хватает данных по компонентам затрат.</div>
-          `);
-          return;
-        }
-
-        const scale = 100 / totalRaw;
-        for (const p of parts) {
-          p.valuePct = round2(p.valuePct * scale);
-        }
-
-        const marginPart = {
-          name: "Маржинальность холдинга",
-          valuePct: round2(marginPctNonNeg * scale),
-          color: "#cf222e",
-        };
-
-        // Финальная подгонка из-за округления: скорректируем маржу, чтобы сумма = 100.00
-        const usedRounded = parts.reduce((acc, p) => acc + p.valuePct, 0);
-        marginPart.valuePct = round2(100 - usedRounded);
-        if (marginPart.valuePct < 0) marginPart.valuePct = 0;
-
-        parts.push(marginPart);
-
-        const datasets = parts.map((p) => ({
-          label: p.name,
-          data: years.map(() => p.valuePct),
-          borderColor: p.color,
-          backgroundColor: p.color,
-          borderWidth: 0,
-          borderRadius: 4,
-          barPercentage: 0.8,
-          categoryPercentage: 0.8,
-          stack: "stack",
-        }));
+        showChart();
 
         this.state.trendsChart = new window.Chart(ctx, {
           type: "bar",
@@ -827,14 +982,269 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
         return;
       }
 
-      // Остальные типы пока заглушка.
-      const routeCode = (this.state.selectedRoute.route_code || "").trim();
-      showPlaceholder(`
-        <div class="mb-2">
-          <i class="ti ti-info-circle" style="font-size: 2rem;"></i>
-        </div>
-        <div>${escapeHtml(label)}: заглушка для маршрута ${escapeHtml(routeCode || "—")}</div>
-      `);
+      if (typeValue === "structure_aggregated" || typeValue === "structure_ts") {
+        showPlaceholder(`
+          <div class="text-center text-muted py-4">
+            <div class="spinner-border text-primary" role="status" aria-label="Загрузка"></div>
+            <div class="mt-2">Расчёт структуры…</div>
+          </div>
+        `);
+        const result = await this._fetchRouteAnalysisData({});
+        if (!result.ok) {
+          showPlaceholder(`
+            <div class="alert alert-danger" role="alert">
+              ${escapeHtml((result.errors || ["Ошибка"]).join("; "))}
+            </div>
+          `);
+          return;
+        }
+        const calculateData = result.data;
+        const apiYears = Array.isArray(calculateData.years) ? calculateData.years : years;
+
+        if (this.state.trendsChart) {
+          try {
+            this.state.trendsChart.destroy();
+          } catch (_e) {
+            // ignore
+          }
+          this.state.trendsChart = null;
+        }
+
+        if (typeValue === "structure_aggregated") {
+          const gdfRows = apiYears.map((_year, index) => {
+            const costsRub = this._rowRubByKey(calculateData, "cost", index);
+            const transportRub = this._rowRubByKey(calculateData, "transport", index);
+            const marginRub = this._rowRubByKey(calculateData, "marginality", index);
+            const sum = costsRub + transportRub + marginRub;
+            if (sum <= 0) {
+              return {
+                costs: 0,
+                transport: 0,
+                marginality: 0,
+                costsRub: 0,
+                transportRub: 0,
+                marginRub: 0,
+              };
+            }
+            return {
+              costs: (costsRub / sum) * 100,
+              transport: (transportRub / sum) * 100,
+              marginality: (marginRub / sum) * 100,
+              costsRub,
+              transportRub,
+              marginRub,
+            };
+          });
+          const fakeRows = this._fakeGdfTr(gdfRows);
+          const segmentDefs = [
+            {
+              key: "costs",
+              label: "Себестоимость производства",
+              color: "#4fb4ff",
+              rubKey: "costsRub",
+            },
+            {
+              key: "transport",
+              label: "Транспортная составляющая",
+              color: "#0091fe",
+              rubKey: "transportRub",
+            },
+            {
+              key: "marginality",
+              label: "Маржинальность холдинга",
+              color: "#003256",
+              rubKey: "marginRub",
+            },
+          ];
+          const datasets = segmentDefs.map((segment) => ({
+            label: segment.label,
+            data: fakeRows.map((row) => row[segment.key]),
+            realPct: gdfRows.map((row) => row[segment.key]),
+            rubValues: gdfRows.map((row) => row[segment.rubKey]),
+            backgroundColor: segment.color,
+            borderColor: segment.color,
+            borderWidth: 0,
+            stack: "stack",
+          }));
+
+          showChart();
+          this.state.trendsChart = new window.Chart(ctx, {
+            type: "bar",
+            data: { labels: apiYears, datasets },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: {
+                ...commonPlugins,
+                title: {
+                  display: true,
+                  text: "Структура укрупнённая",
+                  align: "start",
+                  font: { size: 16, weight: "600" },
+                  padding: { bottom: 12 },
+                },
+                datalabels: {
+                  display: (ctx) => {
+                    const real = ctx.dataset.realPct[ctx.dataIndex];
+                    return real != null && Number(real) >= 4;
+                  },
+                  formatter: (_value, ctx) => {
+                    const real = ctx.dataset.realPct[ctx.dataIndex];
+                    return `${Number(real).toFixed(1)}%`;
+                  },
+                  anchor: "center",
+                  align: "center",
+                  color: "#ffffff",
+                  font: { size: 11, weight: "600" },
+                },
+                tooltip: {
+                  enabled: true,
+                  callbacks: {
+                    label: (ctx) => {
+                      const rub = ctx.dataset.rubValues[ctx.dataIndex];
+                      const pct = ctx.dataset.realPct[ctx.dataIndex];
+                      return `${ctx.dataset.label}: ${formatBox(rub)} руб. (${Number(pct).toFixed(1)}%)`;
+                    },
+                  },
+                },
+              },
+              interaction: commonInteraction,
+              scales: {
+                x: { stacked: true, grid: { display: false } },
+                y: {
+                  stacked: true,
+                  max: 100,
+                  grid: { display: false },
+                  ticks: { display: false },
+                },
+              },
+            },
+          });
+          return;
+        }
+
+        const ts = calculateData.transport_structure;
+        if (!ts) {
+          showPlaceholder(`
+            <div class="mb-2">
+              <i class="ti ti-info-circle" style="font-size: 2rem;"></i>
+            </div>
+            <div>Нет данных транспортной структуры.</div>
+          `);
+          return;
+        }
+
+        const rzdLoaded = this._mapYearValues(ts.rzd_loaded_by_year, apiYears);
+        const rzdEmpty = this._mapYearValues(ts.rzd_empty_by_year, apiYears);
+        const operators = apiYears.map((_y, index) =>
+          this._rowRubByKey(calculateData, "operators", index),
+        );
+        const transshipment = apiYears.map((_y, index) =>
+          this._rowRubByKey(calculateData, "transshipment", index),
+        );
+
+        const tsSegments = [
+          {
+            label: 'Расходы на оплату услуг ОАО "РЖД" (гружёный рейс)',
+            data: rzdLoaded,
+            color: "#0091fe",
+            visible: true,
+          },
+        ];
+        if (ts.show_empty_leg) {
+          tsSegments.push({
+            label: 'Расходы на оплату услуг ОАО "РЖД" (порожний рейс)',
+            data: rzdEmpty,
+            color: "#4fb4ff",
+            visible: true,
+          });
+        }
+        tsSegments.push(
+          {
+            label: "Расходы по оплате услуг операторов",
+            data: operators,
+            color: "#0072c8",
+            visible: operators.some((v) => v > 0),
+          },
+          {
+            label: "Расходы на перевалку",
+            data: transshipment,
+            color: "#005da2",
+            visible: transshipment.some((v) => v > 0),
+          },
+        );
+
+        const datasets = tsSegments
+          .filter((segment) => segment.visible)
+          .map((segment) => ({
+            label: segment.label,
+            data: segment.data,
+            backgroundColor: segment.color,
+            borderColor: segment.color,
+            borderWidth: 0,
+            stack: "stack",
+          }));
+
+        if (datasets.length === 0) {
+          showPlaceholder(`
+            <div class="mb-2">
+              <i class="ti ti-info-circle" style="font-size: 2rem;"></i>
+            </div>
+            <div>Нет данных для структуры ТС.</div>
+          `);
+          return;
+        }
+
+        showChart();
+        this._renderTsAnnotations(apiYears, ts);
+        this.state.trendsChart = new window.Chart(ctx, {
+          type: "bar",
+          data: { labels: apiYears, datasets },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              ...commonPlugins,
+              title: {
+                display: true,
+                text: "Структура ТС",
+                align: "start",
+                font: { size: 16, weight: "600" },
+                padding: { bottom: 12 },
+              },
+              datalabels: {
+                display: (ctx) => {
+                  const v = ctx.dataset.data[ctx.dataIndex];
+                  return v != null && Number(v) > 0;
+                },
+                formatter: (value) => Number(value).toFixed(1),
+                anchor: "center",
+                align: "center",
+                color: "#ffffff",
+                font: { size: 10, weight: "600" },
+              },
+              tooltip: {
+                enabled: true,
+                callbacks: {
+                  label: (ctx) =>
+                    `${ctx.dataset.label}: ${formatBox(ctx.raw)} руб./т`,
+                },
+              },
+            },
+            interaction: commonInteraction,
+            scales: {
+              x: { stacked: true, grid: { display: false } },
+              y: {
+                stacked: true,
+                grid: { display: false },
+                ticks: {
+                  callback: (v) => formatBox(v),
+                },
+              },
+            },
+          },
+        });
+      }
     }
 
 
@@ -936,22 +1346,259 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
       return modal ? modal.querySelector('[data-route-analysis-route-picker-target="confirmButton"]') : null;
     }
 
-    async _loadCalculateRoute({ scenarioId, routeId }) {
-      if (!this.calculateRouteUrlValue) {
-        return { ok: false, errors: ["URL calculate_route не задан"] };
+    _updateEqualizerVisibility(show) {
+      if (this.hasEqualizerEmptyTarget) {
+        setVisible(this.equalizerEmptyTarget, !show);
+      }
+      if (this.hasEqualizerControlsTarget) {
+        setVisible(this.equalizerControlsTarget, show);
+      }
+    }
+
+    _resetEqualizer() {
+      this.state.equalizerBaseline = null;
+      this.state.equalizerOverrides = {};
+      clearTimeout(this.state.equalizerDebounceTimer);
+      this._updateEqualizerVisibility(false);
+      if (this.hasEqualizerPanelTarget) {
+        this.equalizerPanelTarget.innerHTML = "";
+      }
+      if (this.hasEqualizerTypeSelectTarget) {
+        this.equalizerTypeSelectTarget.innerHTML = "";
+      }
+    }
+
+    _getVisibleEqualizerTypes() {
+      const baseline = this.state.equalizerBaseline;
+      if (!baseline || !Array.isArray(baseline.types)) return [];
+      return baseline.types.filter((item) => item.visible !== false);
+    }
+
+    _getEqualizerTypeDef(typeKey) {
+      const types = this._getVisibleEqualizerTypes();
+      return types.find((item) => item.key === typeKey) || null;
+    }
+
+    _getEqualizerValue(typeKey, year) {
+      const yearKey = String(year);
+      const overrides = this.state.equalizerOverrides[typeKey];
+      if (overrides && overrides[year] != null) {
+        return Number(overrides[year]);
+      }
+      const typeDef = this._getEqualizerTypeDef(typeKey);
+      if (!typeDef || !typeDef.values) return 0;
+      const raw = typeDef.values[yearKey];
+      const n = Number(String(raw).replace(",", "."));
+      return Number.isFinite(n) ? n : 0;
+    }
+
+    _buildOverridesPayload() {
+      const payload = {};
+      for (const [typeKey, yearMap] of Object.entries(this.state.equalizerOverrides)) {
+        if (!yearMap || typeof yearMap !== "object") continue;
+        const out = {};
+        for (const [year, value] of Object.entries(yearMap)) {
+          if (value == null || Number.isNaN(Number(value))) continue;
+          out[String(year)] = value;
+        }
+        if (Object.keys(out).length > 0) {
+          payload[typeKey] = out;
+        }
+      }
+      return Object.keys(payload).length > 0 ? payload : null;
+    }
+
+    _buildEqualizerTypeOptions() {
+      if (!this.hasEqualizerTypeSelectTarget) return;
+      const types = this._getVisibleEqualizerTypes();
+      this.equalizerTypeSelectTarget.innerHTML = "";
+      for (const typeDef of types) {
+        const opt = document.createElement("option");
+        opt.value = typeDef.key;
+        opt.textContent = typeDef.label || typeDef.key;
+        this.equalizerTypeSelectTarget.appendChild(opt);
+      }
+    }
+
+    _renderEqualizerPanel() {
+      if (!this.hasEqualizerPanelTarget) return;
+      const scenario = this.state.selectedScenario;
+      const startYear = scenario && scenario.start_year ? Number(scenario.start_year) : null;
+      const endYear = scenario && scenario.end_year ? Number(scenario.end_year) : null;
+      if (!startYear || !endYear) {
+        this.equalizerPanelTarget.innerHTML = "";
+        return;
       }
 
-      const cacheKey = `${scenarioId}:${routeId}`;
-      if (this.state.calculateRouteCache.has(cacheKey)) {
-        return { ok: true, data: this.state.calculateRouteCache.get(cacheKey) };
+      const typeKey = this.hasEqualizerTypeSelectTarget
+        ? this.equalizerTypeSelectTarget.value
+        : null;
+      const typeDef = typeKey ? this._getEqualizerTypeDef(typeKey) : null;
+      if (!typeDef) {
+        this.equalizerPanelTarget.innerHTML = "";
+        return;
       }
 
-      const { data } = await fetchJson(this.calculateRouteUrlValue, {
+      if (this.hasEqualizerUnitHintTarget) {
+        this.equalizerUnitHintTarget.textContent = typeDef.unit
+          ? `Единица: ${typeDef.unit}`
+          : "";
+      }
+
+      const step = Number(typeDef.step) || 1;
+      const years = [];
+      for (let y = startYear; y <= endYear; y += 1) years.push(y);
+
+      const cols = years
+        .map((year) => {
+          const value = this._getEqualizerValue(typeKey, year);
+          const max = value === 0 ? 1000 : value * 2;
+          const min = 0;
+          return `
+            <div class="route-analysis-equalizer__year-col" data-year="${year}">
+              <div class="route-analysis-equalizer__year-label">${escapeHtml(String(year))}</div>
+              <input
+                type="number"
+                class="form-control form-control-sm route-analysis-equalizer__value-input"
+                data-equalizer-input
+                data-equalizer-type="${escapeHtml(typeKey)}"
+                data-equalizer-year="${year}"
+                value="${escapeHtml(String(value))}"
+                step="${escapeHtml(String(step))}"
+                min="${min}"
+              />
+              <div class="route-analysis-equalizer__slider-wrap">
+                <input
+                  type="range"
+                  class="route-analysis-equalizer__slider"
+                  data-equalizer-slider
+                  data-equalizer-type="${escapeHtml(typeKey)}"
+                  data-equalizer-year="${year}"
+                  min="${min}"
+                  max="${max}"
+                  step="${escapeHtml(String(step))}"
+                  value="${escapeHtml(String(value))}"
+                />
+              </div>
+            </div>
+          `;
+        })
+        .join("");
+
+      this.equalizerPanelTarget.innerHTML = cols;
+
+      const onInput = (event) => {
+        const el = event.target;
+        const t = el.getAttribute("data-equalizer-type");
+        const y = Number(el.getAttribute("data-equalizer-year"));
+        if (!t || Number.isNaN(y)) return;
+        const num = Number(String(el.value).replace(",", "."));
+        if (!Number.isFinite(num)) return;
+        this._onEqualizerValueChange(t, y, num, el);
+      };
+
+      this.equalizerPanelTarget
+        .querySelectorAll("[data-equalizer-input], [data-equalizer-slider]")
+        .forEach((el) => {
+          el.addEventListener("input", onInput);
+        });
+    }
+
+    _onEqualizerValueChange(typeKey, year, value, sourceEl) {
+      const col = sourceEl.closest("[data-year]");
+      if (col) {
+        const input = col.querySelector("[data-equalizer-input]");
+        const slider = col.querySelector("[data-equalizer-slider]");
+        if (input && input !== sourceEl) input.value = String(value);
+        if (slider && slider !== sourceEl) {
+          const max = value === 0 ? 1000 : value * 2;
+          slider.max = String(max);
+          slider.value = String(value);
+        }
+      }
+
+      if (!this.state.equalizerOverrides[typeKey]) {
+        this.state.equalizerOverrides[typeKey] = {};
+      }
+      this.state.equalizerOverrides[typeKey][year] = value;
+      this._scheduleEqualizerRecalc();
+    }
+
+    _scheduleEqualizerRecalc() {
+      clearTimeout(this.state.equalizerDebounceTimer);
+      this.state.equalizerDebounceTimer = setTimeout(() => {
+        this._recalculateWithOverrides();
+      }, 250);
+    }
+
+    async _loadEqualizerBaseline() {
+      if (!this.state.selectedRoute || !this.state.selectedScenarioId) {
+        this._resetEqualizer();
+        return;
+      }
+
+      const result = await this._loadRouteAnalysis({
+        scenarioId: this.state.selectedScenarioId,
+        routeId: this.state.selectedRoute.id,
+      });
+      if (!result.ok) {
+        this._resetEqualizer();
+        return;
+      }
+
+      this.state.equalizerBaseline = result.data.equalizer || null;
+      this._buildEqualizerTypeOptions();
+      this._updateEqualizerVisibility(true);
+      this._renderEqualizerPanel();
+    }
+
+    async _recalculateWithOverrides() {
+      if (!this.state.selectedRoute || !this.state.selectedScenarioId) return;
+      if (this.state.equalizerRecalcInFlight) return;
+
+      const overrides = this._buildOverridesPayload();
+      if (!overrides) return;
+
+      this.state.equalizerRecalcInFlight = true;
+      try {
+        const result = await this._loadRouteAnalysis({
+          scenarioId: this.state.selectedScenarioId,
+          routeId: this.state.selectedRoute.id,
+          overrides,
+          useCache: false,
+        });
+        if (result.ok) {
+          await this._renderDiagram();
+        }
+      } finally {
+        this.state.equalizerRecalcInFlight = false;
+      }
+    }
+
+    async _loadRouteAnalysis({ scenarioId, routeId, overrides, useCache = true }) {
+      if (!this.routeAnalysisUrlValue) {
+        return { ok: false, errors: ["URL route_analysis не задан"] };
+      }
+
+      const overridesKey = overrides ? JSON.stringify(overrides) : "";
+      const cacheKey = `${scenarioId}:${routeId}:${overridesKey}`;
+      if (useCache && this.state.routeAnalysisCache.has(cacheKey)) {
+        const cached = this.state.routeAnalysisCache.get(cacheKey);
+        this.state.activeCalculateData = cached;
+        return { ok: true, data: cached };
+      }
+
+      const body = {
+        scenario_id: Number(scenarioId),
+        route_id: Number(routeId),
+      };
+      if (overrides) {
+        body.overrides = overrides;
+      }
+
+      const { data } = await fetchJson(this.routeAnalysisUrlValue, {
         method: "POST",
-        body: JSON.stringify({
-          scenario_id: Number(scenarioId),
-          route_id: Number(routeId),
-        }),
+        body: JSON.stringify(body),
       });
 
       if (!data || !data.success) {
@@ -961,8 +1608,105 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
         };
       }
 
-      this.state.calculateRouteCache.set(cacheKey, data);
+      this.state.routeAnalysisCache.set(cacheKey, data);
+      this.state.activeCalculateData = data;
+      if (!overrides && data.equalizer) {
+        this.state.equalizerBaseline = data.equalizer;
+      }
       return { ok: true, data };
+    }
+
+    _rowValuesByKey(calculateData, rowKey) {
+      if (!calculateData || !Array.isArray(calculateData.rows)) return null;
+      const row = calculateData.rows.find((item) => item.key === rowKey);
+      if (!row || !Array.isArray(row.values)) return null;
+      return row.values.map((value) => {
+        if (value != null && typeof value === "object" && value.rub != null) {
+          return Number(String(value.rub).replace(",", "."));
+        }
+        return Number(String(value).replace(",", "."));
+      });
+    }
+
+    _structurePartsForYearIndex(calculateData, yearIndex) {
+      const toNum = (val) => {
+        if (val == null) return null;
+        const n = Number(String(val).replace(",", "."));
+        return Number.isFinite(n) ? n : null;
+      };
+
+      const rowValuesByKey = (rowKey) => {
+        if (!calculateData || !Array.isArray(calculateData.rows)) return null;
+        const row = calculateData.rows.find((item) => item.key === rowKey);
+        if (!row || !Array.isArray(row.values)) return null;
+        const value = row.values[yearIndex];
+        if (value != null && typeof value === "object" && value.rub != null) {
+          return toNum(value.rub);
+        }
+        return toNum(value);
+      };
+
+      const price = rowValuesByKey("price_rub");
+      const production = rowValuesByKey("cost");
+      const rzd = rowValuesByKey("rzd");
+      const ops = rowValuesByKey("operators");
+      const trans = rowValuesByKey("transshipment");
+
+      const base = price && price > 0 ? price : null;
+      if (!base) return null;
+
+      const clamp0 = (v) => (Number.isFinite(v) ? Math.max(v, 0) : 0);
+      const round2 = (v) => Number(v.toFixed(2));
+      const percentRaw = (v) => (v != null ? (v / base) * 100 : 0);
+
+      const parts = [
+        {
+          name: "Себестоимость производства",
+          valuePct: clamp0(percentRaw(production)),
+          color: "#2da44e",
+        },
+        {
+          name: 'Расходы ОАО "РЖД"',
+          valuePct: clamp0(percentRaw(rzd)),
+          color: "#8250df",
+        },
+        {
+          name: "Расходы операторов",
+          valuePct: clamp0(percentRaw(ops)),
+          color: "#d29922",
+        },
+        {
+          name: "Расходы на перевалку",
+          valuePct: clamp0(percentRaw(trans)),
+          color: "#bc4c00",
+        },
+      ];
+
+      const sumKnown = [production, rzd, ops, trans].reduce(
+        (acc, v) => (v != null ? acc + v : acc),
+        0,
+      );
+      const marginPctRaw = ((base - sumKnown) / base) * 100;
+      const marginPctNonNeg = clamp0(marginPctRaw);
+      const usedRaw = parts.reduce((acc, p) => acc + p.valuePct, 0);
+      const totalRaw = usedRaw + marginPctNonNeg;
+      if (!totalRaw) return null;
+
+      const scale = 100 / totalRaw;
+      for (const p of parts) {
+        p.valuePct = round2(p.valuePct * scale);
+      }
+
+      const marginPart = {
+        name: "Маржинальность холдинга",
+        valuePct: round2(marginPctNonNeg * scale),
+        color: "#cf222e",
+      };
+      const usedRounded = parts.reduce((acc, p) => acc + p.valuePct, 0);
+      marginPart.valuePct = round2(100 - usedRounded);
+      if (marginPart.valuePct < 0) marginPart.valuePct = 0;
+      parts.push(marginPart);
+      return parts;
     }
 
     _formatMoney(val) {
@@ -979,6 +1723,221 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
       return n.toFixed(2);
     }
 
+    _hideDiagramExtras() {
+      const tsEl = document.getElementById("routeAnalysisTsAnnotations");
+      if (tsEl) {
+        tsEl.style.display = "none";
+        tsEl.innerHTML = "";
+      }
+      const effectsEl = document.getElementById("routeAnalysisEffectsTableWrap");
+      if (effectsEl) {
+        effectsEl.style.display = "none";
+        effectsEl.innerHTML = "";
+      }
+      const kpiEl = document.getElementById("routeAnalysisKpiWrap");
+      if (kpiEl) {
+        kpiEl.style.display = "none";
+        kpiEl.innerHTML = "";
+      }
+    }
+
+    _fakeGdfTr(yearRows) {
+      const partCh = 0.2;
+      return yearRows.map((row) => {
+        const next = { ...row };
+        const tail = next.costs * partCh;
+        const keys = ["transport", "marginality"];
+        const nonZero = keys.filter((key) => next[key] !== 0);
+        if (nonZero.length > 0) {
+          const add = Math.round((tail / nonZero.length) * 100) / 100;
+          for (const key of keys) {
+            if (next[key] !== 0) next[key] += add;
+          }
+        }
+        next.costs *= 1 - partCh;
+        return next;
+      });
+    }
+
+    _rowRubByKey(calculateData, rowKey, yearIndex) {
+      if (!calculateData || !Array.isArray(calculateData.rows)) return 0;
+      const row = calculateData.rows.find((item) => item.key === rowKey);
+      if (!row || !Array.isArray(row.values)) return 0;
+      const value = row.values[yearIndex];
+      if (value != null && typeof value === "object" && value.rub != null) {
+        const n = Number(String(value.rub).replace(",", "."));
+        return Number.isFinite(n) ? n : 0;
+      }
+      const n = Number(String(value).replace(",", "."));
+      return Number.isFinite(n) ? n : 0;
+    }
+
+    _mapYearValues(mapByYear, years) {
+      if (!mapByYear) return years.map(() => 0);
+      return years.map((year) => {
+        const raw = mapByYear[String(year)];
+        const n = Number(String(raw).replace(",", "."));
+        return Number.isFinite(n) ? n : 0;
+      });
+    }
+
+    async _fetchRouteAnalysisData({ loadingMessage }) {
+      const scenarioId = this.state.selectedScenarioId;
+      const routeId = this.state.selectedRoute ? this.state.selectedRoute.id : null;
+      if (!scenarioId || !routeId) {
+        return { ok: false, errors: ["Не удалось определить сценарий и маршрут"] };
+      }
+      try {
+        const result = await this._loadRouteAnalysis({
+          scenarioId,
+          routeId,
+          overrides: this._buildOverridesPayload(),
+        });
+        return result;
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.error("[route-analysis] route_analysis failed", e);
+        return { ok: false, errors: ["Ошибка расчёта (см. консоль)"] };
+      }
+    }
+
+    _renderTsAnnotations(years, transportStructure) {
+      const el = document.getElementById("routeAnalysisTsAnnotations");
+      if (!el || !transportStructure) return;
+      const transportPct = transportStructure.transport_pct_by_year || {};
+      const marginPct = transportStructure.marginality_pct_by_year || {};
+      el.innerHTML = years
+        .map((year) => {
+          const transport = transportPct[String(year)] ?? "0";
+          const margin = marginPct[String(year)] ?? "0";
+          return `
+            <div class="route-analysis-ts-annotations__year">
+              <div class="route-analysis-ts-annotations__year-label">${escapeHtml(String(year))}</div>
+              <span class="route-analysis-ts-annotations__badge route-analysis-ts-annotations__badge--transport">
+                ${escapeHtml(transport)}%
+              </span>
+              <span class="route-analysis-ts-annotations__badge route-analysis-ts-annotations__badge--margin">
+                ${escapeHtml(margin)}%
+              </span>
+            </div>
+          `;
+        })
+        .join("");
+      el.style.display = years.length ? "" : "none";
+    }
+
+    _renderEffectsTable(containerEl, data) {
+      if (!containerEl) return;
+      const years = Array.isArray(data.years) ? data.years : [];
+      const rows = data.effects && Array.isArray(data.effects.rows) ? data.effects.rows : [];
+      if (!years.length || !rows.length) {
+        containerEl.innerHTML = `
+          <div class="text-center text-muted py-4">Нет данных для таблицы эффектов.</div>
+        `;
+        return;
+      }
+
+      const thYears = years
+        .map((y) => `<th class="text-end">${escapeHtml(String(y))}</th>`)
+        .join("");
+
+      const renderCell = (cell) => {
+        if (!cell) return `<td class="text-end">—</td>`;
+        const rub = cell.rub != null ? cell.rub : "0";
+        const pctNum = Number(String(cell.pct).replace(",", "."));
+        const pctStr = this._formatPct(cell.pct);
+        const pctClass =
+          Number.isFinite(pctNum) && pctNum < 0 ? "text-danger" : "";
+        const pctPrefix = Number.isFinite(pctNum) && pctNum > 0 ? "+" : "";
+        return `
+          <td class="text-end ${pctClass}">
+            ${escapeHtml(rub)}<br />
+            <span class="${pctClass}">(${escapeHtml(pctPrefix + pctStr)}%)</span>
+          </td>
+        `;
+      };
+
+      const tbody = rows
+        .map((row) => {
+          const values = row.values || {};
+          const cells = years.map((y) => renderCell(values[String(y)])).join("");
+          return `
+            <tr>
+              <td class="text-muted">${escapeHtml(row.label || row.key || "")}</td>
+              ${cells}
+            </tr>
+          `;
+        })
+        .join("");
+
+      containerEl.innerHTML = `
+        <div class="table-responsive">
+          <table class="table table-sm table-vcenter">
+            <thead>
+              <tr>
+                <th>Показатель</th>
+                ${thYears}
+              </tr>
+            </thead>
+            <tbody>${tbody}</tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    _renderKpiMetric(metric) {
+      if (!metric) return "";
+      const rub =
+        metric.rub != null && metric.rub !== ""
+          ? `${this._formatMoney(metric.rub)} руб.`
+          : "—";
+      const pct =
+        metric.pct != null && metric.pct !== ""
+          ? `${this._formatPct(metric.pct)}%`
+          : "—";
+      return `
+        <div class="route-analysis-kpi-metric">
+          <div class="route-analysis-kpi-metric__row">
+            <span class="route-analysis-kpi-metric__pct">${escapeHtml(pct)}</span>
+            <span class="route-analysis-kpi-metric__rub">${escapeHtml(rub)}</span>
+          </div>
+          <div class="route-analysis-kpi-metric__label">${escapeHtml(metric.label || "")}</div>
+        </div>
+      `;
+    }
+
+    _renderKpiCards(containerEl, data) {
+      if (!containerEl) return;
+      const items = data.kpi && Array.isArray(data.kpi.by_year) ? data.kpi.by_year : [];
+      if (!items.length) {
+        containerEl.innerHTML = `
+          <div class="text-center text-muted py-4 w-100">Нет KPI для отображения.</div>
+        `;
+        return;
+      }
+
+      containerEl.innerHTML = items
+        .map((item) => {
+          const metrics = [
+            item.transport,
+            item.rzd,
+            item.marginality,
+            item.volume_share,
+            item.elasticity,
+          ]
+            .filter(Boolean)
+            .map((metric) => this._renderKpiMetric(metric))
+            .join("");
+          return `
+            <div class="route-analysis-kpi-card">
+              <div class="route-analysis-kpi-card__title">${escapeHtml(String(item.year))} год</div>
+              ${metrics}
+            </div>
+          `;
+        })
+        .join("");
+    }
+
     async _renderStructureTable({ scenarioId, routeId, containerEl }) {
       if (!containerEl) return;
 
@@ -991,10 +1950,14 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
 
       let result;
       try {
-        result = await this._loadCalculateRoute({ scenarioId, routeId });
+        result = await this._loadRouteAnalysis({
+          scenarioId,
+          routeId,
+          overrides: this._buildOverridesPayload(),
+        });
       } catch (e) {
         // eslint-disable-next-line no-console
-        console.error("[route-analysis] calculate_route failed", e);
+        console.error("[route-analysis] route_analysis failed", e);
         containerEl.innerHTML = `
           <div class="alert alert-danger" role="alert">
             Ошибка расчёта таблицы (см. консоль).

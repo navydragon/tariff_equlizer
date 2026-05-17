@@ -21,9 +21,12 @@
         </div>
       </div>
       <div class="col-md-4 d-flex gap-2">
-        <button type="button" class="btn btn-secondary w-100" id="fxAttachBtn">
+        <button type="button" class="btn btn-secondary flex-fill" id="fxAttachBtn">
           <i class="ti ti-link"></i>
           Применить к сценарию
+        </button>
+        <button type="button" class="btn btn-outline-danger" id="fxDeleteSetBtn" title="Удалить набор">
+          <i class="ti ti-trash"></i>
         </button>
       </div>
     </div>
@@ -112,6 +115,7 @@
   const errorsContainer = document.getElementById('fxErrors');
   const selectEl = document.getElementById('fxRateSetSelect');
   const attachBtn = document.getElementById('fxAttachBtn');
+  const deleteBtn = document.getElementById('fxDeleteSetBtn');
   const createBtn = document.getElementById('fxCreateSetBtn');
 
   const headerRow = document.getElementById('fxHeaderRow');
@@ -238,6 +242,7 @@
     selectEl.innerHTML = '<option value=\"\">— выберите —</option>' + items.map(it => (
       `<option value=\"${it.id}\">${escapeHtml(it.name || '')}</option>`
     )).join('');
+    updateDeleteButtonState();
   }
 
   async function loadMatrix() {
@@ -253,7 +258,45 @@
     if (currentRateSetId) {
       selectEl.value = String(currentRateSetId);
     }
+    updateDeleteButtonState();
     renderMatrix(years, data.values || {});
+  }
+
+  function updateDeleteButtonState() {
+    if (!deleteBtn) return;
+    deleteBtn.disabled = !parseInt(selectEl.value || '0', 10);
+  }
+
+  async function deleteSelectedSet() {
+    clearErrors(errorsContainer);
+    const setId = parseInt(selectEl.value || '0', 10);
+    if (!setId) {
+      showErrorMessages('Выберите набор курсов для удаления', errorsContainer);
+      return;
+    }
+    const option = selectEl.options[selectEl.selectedIndex];
+    const setName = option ? (option.textContent || '').trim() : '';
+    const confirmMsg = setName
+      ? `Удалить набор «${setName}»? Он будет отвязан от всех сценариев.`
+      : 'Удалить выбранный набор курсов? Он будет отвязан от всех сценариев.';
+    if (!confirm(confirmMsg)) return;
+
+    const r = await fetch(`/scenarios/api/exchange-rate-sets/${setId}/delete/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') },
+    });
+    const data = await r.json();
+    if (!data.success) {
+      showErrorMessages(data.errors || 'Ошибка удаления набора', errorsContainer);
+      showToast('error', Array.isArray(data.errors) ? data.errors.join('<br>') : (data.error || 'Ошибка'));
+      return;
+    }
+    currentRateSetId = null;
+    showToast('success', 'Набор курсов удалён');
+    await loadSets();
+    selectEl.value = '';
+    updateDeleteButtonState();
+    await loadMatrix();
   }
 
   async function attachSelectedSet() {
@@ -350,6 +393,8 @@
   }
 
   attachBtn.addEventListener('click', attachSelectedSet);
+  if (deleteBtn) deleteBtn.addEventListener('click', deleteSelectedSet);
+  selectEl.addEventListener('change', updateDeleteButtonState);
   createBtn.addEventListener('click', openCreateSetModal);
   setCreateSaveBtn.addEventListener('click', createSet);
   valueSaveBtn.addEventListener('click', saveValue);

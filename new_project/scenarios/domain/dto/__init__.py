@@ -6,6 +6,7 @@ DTO (Data Transfer Objects) для сценариев.
 - btd: базовые тарифные решения
 - tariff: отдельные тарифные решения
 - fx: курсы валют
+- inflation: инфляция
 """
 
 from .btd import (
@@ -19,6 +20,11 @@ from .fx import (
     ExchangeRateSetDTO,
     ExchangeRateValueDTO,
     UpdateExchangeRateValueDTO,
+)
+from .inflation import (
+    InflationSetDTO,
+    InflationValueDTO,
+    UpdateInflationValueDTO,
 )
 from .scenario import (
     CreateScenarioDTO,
@@ -50,6 +56,10 @@ __all__ = [
     "ExchangeRateSetDTO",
     "ExchangeRateValueDTO",
     "UpdateExchangeRateValueDTO",
+    # Inflation
+    "InflationSetDTO",
+    "InflationValueDTO",
+    "UpdateInflationValueDTO",
     # Tariff rules
     "TariffRuleConditionDTO",
     "TariffRuleYearValueDTO",

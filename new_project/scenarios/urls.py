@@ -115,6 +115,11 @@ urlpatterns = [
         name="exchange_rate_set_create",
     ),
     path(
+        "api/exchange-rate-sets/<int:rate_set_id>/delete/",
+        views.exchange_rate_set_delete_api,
+        name="exchange_rate_set_delete",
+    ),
+    path(
         "api/<int:scenario_id>/exchange-rate-sets/attach/",
         views.exchange_rate_set_attach_api,
         name="exchange_rate_set_attach",
@@ -128,5 +133,37 @@ urlpatterns = [
         "api/exchange-rates/update/",
         views.exchange_rate_value_update_api,
         name="exchange_rate_value_update",
+    ),
+
+    # Inflation API
+    path(
+        "api/inflation-sets/",
+        views.inflation_set_list_api,
+        name="inflation_set_list",
+    ),
+    path(
+        "api/inflation-sets/create/",
+        views.inflation_set_create_api,
+        name="inflation_set_create",
+    ),
+    path(
+        "api/inflation-sets/<int:inflation_set_id>/delete/",
+        views.inflation_set_delete_api,
+        name="inflation_set_delete",
+    ),
+    path(
+        "api/<int:scenario_id>/inflation-sets/attach/",
+        views.inflation_set_attach_api,
+        name="inflation_set_attach",
+    ),
+    path(
+        "api/<int:scenario_id>/inflation/matrix/",
+        views.inflation_matrix_api,
+        name="inflation_matrix",
+    ),
+    path(
+        "api/inflation/update/",
+        views.inflation_value_update_api,
+        name="inflation_value_update",
     ),
 ]

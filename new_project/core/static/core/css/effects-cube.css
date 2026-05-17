@@ -1,0 +1,38 @@
+.effects-cube-toast-container {
+  z-index: 1090;
+  max-width: min(420px, calc(100vw - 1.5rem));
+}
+
+.effects-cube-toast-container .toast {
+  width: 100%;
+}
+
+.effects-cube-table-wrap {
+  max-height: min(70vh, 900px);
+  overflow: auto;
+}
+
+.effects-cube-table-wrap--loading {
+  opacity: 0.65;
+  pointer-events: none;
+}
+
+.effects-cube-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--tblr-bg-surface, #fff);
+  white-space: nowrap;
+}
+
+.effects-cube-table tbody td {
+  white-space: nowrap;
+}
+
+.effects-cube-table .effect-label-cell {
+  min-width: 220px;
+}
+
+.effects-cube-table .group-label-cell {
+  min-width: 160px;
+}

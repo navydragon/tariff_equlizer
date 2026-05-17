@@ -32,6 +32,38 @@ export async function fetchJson(url, options = {}) {
   return { response, data };
 }
 
+export async function fetchBlob(url, options = {}) {
+  const { method = "GET", body, csrf = true, headers = {} } = options;
+
+  const finalHeaders = {
+    Accept: "*/*",
+    ...headers,
+  };
+
+  let finalBody = body;
+  if (body && typeof body === "object" && !(body instanceof FormData)) {
+    finalHeaders["Content-Type"] =
+      finalHeaders["Content-Type"] || "application/json";
+    finalBody = JSON.stringify(body);
+  }
+
+  if (csrf) {
+    const token = getCookie("csrftoken");
+    if (token) {
+      finalHeaders["X-CSRFToken"] = token;
+    }
+  }
+
+  const response = await fetch(url, {
+    method,
+    headers: finalHeaders,
+    body: finalBody,
+  });
+
+  const blob = await response.blob();
+  return { response, blob };
+}
+
 export function getCookie(name) {
   let cookieValue = null;
   if (document.cookie && document.cookie !== "") {

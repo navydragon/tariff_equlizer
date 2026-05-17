@@ -6,10 +6,13 @@
 - btd: базовые тарифные решения
 - tariff: отдельные тарифные решения
 - fx: курсы валют
+- inflation: инфляция
 """
 
 from .btd import BTDCategoryRepository, BTDCategoryValueRepository
 from .fx import ExchangeRateSetRepository, ExchangeRateValueRepository
+from .inflation import InflationSetRepository, InflationValueRepository
+from .price_change import PriceChangeSettingRepository
 from .scenario import ScenarioRepository
 from .tariff import TariffRuleRepository
 
@@ -19,5 +22,8 @@ __all__ = [
     "BTDCategoryValueRepository",
     "ExchangeRateSetRepository",
     "ExchangeRateValueRepository",
+    "InflationSetRepository",
+    "InflationValueRepository",
+    "PriceChangeSettingRepository",
     "TariffRuleRepository",
 ]

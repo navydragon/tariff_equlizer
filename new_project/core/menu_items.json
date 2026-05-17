@@ -1,9 +1,20 @@
 [
-  {"position": 1, "title": "Анализ маршрута", "icon": "ti-dashboard"},
-  {"position": 2, "title": "Дашборд-2", "icon": "ti-chart-line"},
-  {"position": 3, "title": "Аналитика", "icon": "ti-chart-bar"},
-  {"position": 4, "title": "Помощь", "icon": "ti-help-circle"},
-  {"position": 5, "title": "Управление сценариями", "icon": "ti-settings"},
-  {"position": 6, "title": "Справочники", "icon": "ti-book"}
+
+  {"position": 1, "title": "Экономика грузов", "icon": "ti-dashboard", "url_name": "route_analysis"},
+
+  {"position": 2, "title": "Эффект от решений", "icon": "ti-chart-line", "url_name": "decision_effects"},
+
+  {"position": 3, "title": "Куб эффектов", "icon": "ti-box", "url_name": "effects_cube"},
+
+  {"position": 4, "title": "Аналитика", "icon": "ti-chart-bar"},
+
+  {"position": 5, "title": "Помощь", "icon": "ti-help-circle"},
+
+  {"position": 6, "title": "Управление сценариями", "icon": "ti-settings", "url_name": "scenarios:management"},
+
+  {"position": 7, "title": "Справочники", "icon": "ti-book", "url_name": "references"}
+
 ]
+
+
 

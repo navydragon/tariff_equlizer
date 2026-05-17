@@ -34,6 +34,10 @@ class ExchangeRateSetRepository:
         rate_set.save()
         return ExchangeRateSet.objects.select_related("author").get(id=rate_set.id)
 
+    def delete(self, rate_set_id: int) -> bool:
+        deleted, _ = ExchangeRateSet.objects.filter(id=rate_set_id).delete()
+        return deleted > 0
+
 
 class ExchangeRateValueRepository:
     """Репозиторий значений курса USD/RUB по годам для набора."""

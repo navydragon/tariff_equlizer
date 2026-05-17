@@ -171,6 +171,7 @@
         <table class="table table-vcenter card-table">
           <thead>
             <tr>
+              <th class="w-1">Действия</th>
               <th>Груз</th>
               <th>Отправление</th>
               <th>Назначение</th>
@@ -180,7 +181,6 @@
               <th>Тип отправки</th>
               <th>Трансп. расходы, руб./т</th>
               <th>Рыночная цена, руб./т</th>
-              <th class="text-end">Действия</th>
             </tr>
           </thead>
           <tbody
@@ -419,13 +419,78 @@
                   aria-expanded="false"
                   aria-controls="routeAccCollapse2"
                 >
-                  Операционные параметры
+                  Показатели перевозочной работы
                 </button>
               </h2>
               <div
                 id="routeAccCollapse2"
                 class="accordion-collapse collapse"
                 aria-labelledby="routeAccHeading2"
+                data-bs-parent="#routeAccordion"
+              >
+                <div class="accordion-body">
+                  <div class="text-muted mb-3">
+                    Факт за последний отчётный год. Необязательные поля.
+                  </div>
+                  <div class="row">
+                    <div class="col-md-4 mb-3">
+                      <label class="form-label" for="routeTransportVolumeMlnTons">
+                        Объём перевозок
+                      </label>
+                      <input
+                        type="number"
+                        step="0.0001"
+                        id="routeTransportVolumeMlnTons"
+                        class="form-control"
+                      />
+                      <div class="form-text">млн т</div>
+                    </div>
+                    <div class="col-md-4 mb-3">
+                      <label class="form-label" for="routeFreightTurnoverBlnTkm">
+                        Грузооборот
+                      </label>
+                      <input
+                        type="number"
+                        step="0.0001"
+                        id="routeFreightTurnoverBlnTkm"
+                        class="form-control"
+                      />
+                      <div class="form-text">млрд т·км</div>
+                    </div>
+                    <div class="col-md-4 mb-3">
+                      <label class="form-label" for="routeFreightChargeThsRub">
+                        Провозная плата
+                      </label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        id="routeFreightChargeThsRub"
+                        class="form-control"
+                      />
+                      <div class="form-text">тыс. руб.</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="accordion-item">
+              <h2 class="accordion-header" id="routeAccHeading3">
+                <button
+                  class="accordion-button collapsed"
+                  type="button"
+                  data-bs-toggle="collapse"
+                  data-bs-target="#routeAccCollapse3"
+                  aria-expanded="false"
+                  aria-controls="routeAccCollapse3"
+                >
+                  Операционные параметры
+                </button>
+              </h2>
+              <div
+                id="routeAccCollapse3"
+                class="accordion-collapse collapse"
+                aria-labelledby="routeAccHeading3"
                 data-bs-parent="#routeAccordion"
               >
                 <div class="accordion-body">
@@ -471,22 +536,22 @@
             </div>
 
             <div class="accordion-item">
-              <h2 class="accordion-header" id="routeAccHeading3">
+              <h2 class="accordion-header" id="routeAccHeading4">
                 <button
                   class="accordion-button collapsed"
                   type="button"
                   data-bs-toggle="collapse"
-                  data-bs-target="#routeAccCollapse3"
+                  data-bs-target="#routeAccCollapse4"
                   aria-expanded="false"
-                  aria-controls="routeAccCollapse3"
+                  aria-controls="routeAccCollapse4"
                 >
                   Тарифы и ставки
                 </button>
               </h2>
               <div
-                id="routeAccCollapse3"
+                id="routeAccCollapse4"
                 class="accordion-collapse collapse"
-                aria-labelledby="routeAccHeading3"
+                aria-labelledby="routeAccHeading4"
                 data-bs-parent="#routeAccordion"
               >
                 <div class="accordion-body">
@@ -517,22 +582,22 @@
             </div>
 
             <div class="accordion-item">
-              <h2 class="accordion-header" id="routeAccHeading4">
+              <h2 class="accordion-header" id="routeAccHeading5">
                 <button
                   class="accordion-button collapsed"
                   type="button"
                   data-bs-toggle="collapse"
-                  data-bs-target="#routeAccCollapse4"
+                  data-bs-target="#routeAccCollapse5"
                   aria-expanded="false"
-                  aria-controls="routeAccCollapse4"
+                  aria-controls="routeAccCollapse5"
                 >
                   Экономика
                 </button>
               </h2>
               <div
-                id="routeAccCollapse4"
+                id="routeAccCollapse5"
                 class="accordion-collapse collapse"
-                aria-labelledby="routeAccHeading4"
+                aria-labelledby="routeAccHeading5"
                 data-bs-parent="#routeAccordion"
               >
                 <div class="accordion-body">

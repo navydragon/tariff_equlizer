@@ -29,6 +29,14 @@ class Scenario(models.Model):
         null=True,
         blank=True,
     )
+    inflation_set = models.ForeignKey(
+        "scenarios.InflationSet",
+        verbose_name="Набор инфляции",
+        on_delete=models.PROTECT,
+        related_name="scenarios",
+        null=True,
+        blank=True,
+    )
 
     class Meta:
         verbose_name = "Сценарий"
@@ -93,6 +101,110 @@ class ExchangeRateValue(models.Model):
 
     def __str__(self) -> str:
         return f"{self.rate_set} {self.year}: {self.usd_rub}"
+
+
+class InflationSet(models.Model):
+    """
+    Набор значений годовой инфляции (%) для переиспользования между сценариями.
+    """
+
+    name = models.CharField("Название набора", max_length=255)
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        verbose_name="Автор",
+        on_delete=models.CASCADE,
+        related_name="inflation_sets",
+    )
+    created_at = models.DateTimeField("Создано", auto_now_add=True)
+    updated_at = models.DateTimeField("Обновлено", auto_now=True)
+
+    class Meta:
+        verbose_name = "Набор инфляции"
+        verbose_name_plural = "Наборы инфляции"
+        ordering = ["-updated_at", "-created_at", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["author", "name"],
+                name="uniq_inflation_set_author_name",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class InflationValue(models.Model):
+    """Значение годовой инфляции (%) по году для конкретного набора."""
+
+    inflation_set = models.ForeignKey(
+        InflationSet,
+        verbose_name="Набор инфляции",
+        on_delete=models.CASCADE,
+        related_name="values",
+    )
+    year = models.IntegerField("Год")
+    rate_percent = models.DecimalField("Инфляция, %", max_digits=10, decimal_places=4)
+
+    class Meta:
+        verbose_name = "Инфляция по году"
+        verbose_name_plural = "Инфляция по годам"
+        ordering = ["inflation_set", "year"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["inflation_set", "year"],
+                name="uniq_inflation_value_set_year",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.inflation_set} {self.year}: {self.rate_percent}%"
+
+
+class ScenarioPriceChangeSetting(models.Model):
+    """Режим изменения цены по параметру экономики маршрута (не РЖД) для сценария."""
+
+    class Parameter(models.TextChoices):
+        OPERATORS = "operators", "Операторы"
+        TRANSSHIPMENT = "transshipment", "Перевалка"
+        COST = "cost", "Себестоимость"
+        MARKET_PRICE = "market_price", "Рыночная цена"
+        EXCISE_DUTY = "excise_duty", "Акциз/пошлина"
+
+    class Mode(models.TextChoices):
+        FIXED = "fixed", "Без изменений"
+        INFLATION = "inflation", "По инфляции"
+
+    scenario = models.ForeignKey(
+        Scenario,
+        verbose_name="Сценарий",
+        on_delete=models.CASCADE,
+        related_name="price_change_settings",
+    )
+    parameter = models.CharField(
+        "Параметр",
+        max_length=32,
+        choices=Parameter.choices,
+    )
+    mode = models.CharField(
+        "Режим изменения",
+        max_length=32,
+        choices=Mode.choices,
+        default=Mode.FIXED,
+    )
+
+    class Meta:
+        verbose_name = "Настройка изменения цены"
+        verbose_name_plural = "Настройки изменения цен"
+        ordering = ["scenario", "parameter"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["scenario", "parameter"],
+                name="uniq_scenario_price_change_parameter",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.scenario} {self.parameter}: {self.mode}"
 
 
 class BTDCategory(models.Model):

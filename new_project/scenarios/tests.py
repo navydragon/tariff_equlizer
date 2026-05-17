@@ -4,15 +4,21 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 
 from core.models import RouteSet
+from scenarios.domain.constants import PRICE_CHANGE_PARAMETER_KEYS
 from scenarios.domain.services import (
     BTDCategoryService,
     BTDCategoryValueService,
     ExchangeRateService,
+    InflationService,
+    PriceChangeSettingService,
+    ScenarioService,
 )
+from scenarios.domain.repositories import ScenarioRepository
 from scenarios.domain.dto import (
     CreateBTDCategoryDTO,
     UpdateBTDCategoryValueDTO,
     UpdateExchangeRateValueDTO,
+    UpdateInflationValueDTO,
 )
 from scenarios.models import Scenario, BTDCategory, BTDCategoryValue
 
@@ -393,3 +399,184 @@ class ExchangeRateServiceTests(TestCase):
         self.assertFalse(errors)
         self.assertIsNotNone(value_dto)
         self.assertEqual(Decimal(value_dto.usd_rub), Decimal("90.1234"))
+
+    def test_delete_set_detaches_scenario(self):
+        rate_set, _ = self.service.create_set("К удалению", self.user)
+        self.service.attach_set_to_scenario(
+            self.scenario.id,
+            rate_set.id,
+            self.user,
+        )
+
+        ok, errors = self.service.delete_set(rate_set.id, self.user)
+        self.assertTrue(ok)
+        self.assertFalse(errors)
+
+        self.scenario.refresh_from_db()
+        self.assertIsNone(self.scenario.exchange_rate_set_id)
+        self.assertIsNone(self.service.set_repository.get_by_id(rate_set.id))
+
+    def test_delete_set_denied_for_other_user(self):
+        rate_set, _ = self.service.create_set("Чужой набор", self.user)
+        other = User.objects.create_user(login="fx_other", password="test_pass")
+
+        ok, errors = self.service.delete_set(rate_set.id, other)
+        self.assertFalse(ok)
+        self.assertIn("Нет прав", errors[0])
+
+
+class InflationServiceTests(TestCase):
+    def setUp(self) -> None:
+        self.user = User.objects.create_user(
+            login="inflation_user",
+            password="test_pass",
+        )
+        self.route_set = RouteSet.objects.create(name="RS4", code="RS4")
+        self.scenario = Scenario.objects.create(
+            name="Inflation scenario",
+            description="",
+            start_year=2025,
+            end_year=2027,
+            route_set=self.route_set,
+            author=self.user,
+        )
+        self.service = InflationService()
+
+    def test_create_set_and_attach_and_matrix(self):
+        inflation_set, errors = self.service.create_set("Набор 1", self.user)
+        self.assertFalse(errors)
+        self.assertIsNotNone(inflation_set)
+
+        updated, errors = self.service.attach_set_to_scenario(
+            self.scenario.id, inflation_set.id, self.user
+        )
+        self.assertFalse(errors)
+        self.assertEqual(updated.inflation_set_id, inflation_set.id)
+
+        payload, errors = self.service.get_matrix(self.scenario.id, self.user)
+        self.assertFalse(errors)
+        self.assertEqual(payload["years"], [2025, 2026, 2027])
+        self.assertIsNotNone(payload["inflation_set"])
+        self.assertEqual(payload["inflation_set"].id, inflation_set.id)
+
+    def test_update_value_creates_record(self):
+        inflation_set_dto, _ = self.service.create_set("Набор 2", self.user)
+        self.service.attach_set_to_scenario(
+            self.scenario.id,
+            inflation_set_dto.id,
+            self.user,
+        )
+
+        dto = UpdateInflationValueDTO(
+            scenario_id=self.scenario.id,
+            inflation_set_id=inflation_set_dto.id,
+            year=2026,
+            rate_percent="4.5000",
+        )
+        value_dto, errors = self.service.update_value(dto, self.user)
+        self.assertFalse(errors)
+        self.assertIsNotNone(value_dto)
+        self.assertEqual(Decimal(value_dto.rate_percent), Decimal("4.5000"))
+
+    def test_delete_set_detaches_scenario(self):
+        inflation_set, _ = self.service.create_set("К удалению", self.user)
+        self.service.attach_set_to_scenario(
+            self.scenario.id,
+            inflation_set.id,
+            self.user,
+        )
+
+        ok, errors = self.service.delete_set(inflation_set.id, self.user)
+        self.assertTrue(ok)
+        self.assertFalse(errors)
+
+        self.scenario.refresh_from_db()
+        self.assertIsNone(self.scenario.inflation_set_id)
+        self.assertIsNone(self.service.set_repository.get_by_id(inflation_set.id))
+
+    def test_delete_set_denied_for_other_user(self):
+        inflation_set, _ = self.service.create_set("Чужой набор", self.user)
+        other = User.objects.create_user(login="inflation_other", password="test_pass")
+
+        ok, errors = self.service.delete_set(inflation_set.id, other)
+        self.assertFalse(ok)
+        self.assertIn("Нет прав", errors[0])
+
+
+class PriceChangeSettingServiceTests(TestCase):
+    def setUp(self) -> None:
+        self.user = User.objects.create_user(
+            login="price_change_user",
+            password="test_pass",
+        )
+        self.route_set = RouteSet.objects.create(name="RS5", code="RS5")
+        self.scenario = Scenario.objects.create(
+            name="Price change scenario",
+            description="",
+            start_year=2025,
+            end_year=2027,
+            route_set=self.route_set,
+            author=self.user,
+        )
+        self.service = PriceChangeSettingService()
+        self.scenario_repository = ScenarioRepository()
+
+    def test_empty_scenario_returns_all_fixed(self):
+        settings = self.service.get_settings(self.scenario.id)
+        self.assertEqual(len(settings), len(PRICE_CHANGE_PARAMETER_KEYS))
+        self.assertTrue(all(mode == "fixed" for mode in settings.values()))
+
+    def test_save_and_get_round_trip(self):
+        payload = {key: "inflation" if key == "operators" else "fixed" for key in PRICE_CHANGE_PARAMETER_KEYS}
+        errors = self.service.save_settings(self.scenario.id, payload, self.user)
+        self.assertEqual(errors, [])
+
+        settings = self.service.get_settings(self.scenario.id)
+        self.assertEqual(settings["operators"], "inflation")
+        self.assertEqual(settings["cost"], "fixed")
+
+    def test_invalid_parameter_rejected(self):
+        errors = self.service.save_settings(
+            self.scenario.id,
+            {"operators": "inflation", "unknown": "fixed"},
+            self.user,
+        )
+        self.assertTrue(errors)
+
+    def test_invalid_mode_rejected(self):
+        payload = {key: "fixed" for key in PRICE_CHANGE_PARAMETER_KEYS}
+        payload["operators"] = "other"
+        errors = self.service.save_settings(self.scenario.id, payload, self.user)
+        self.assertTrue(errors)
+
+    def test_save_denied_for_other_user(self):
+        other = User.objects.create_user(login="price_other", password="test_pass")
+        payload = {key: "fixed" for key in PRICE_CHANGE_PARAMETER_KEYS}
+        errors = self.service.save_settings(self.scenario.id, payload, other)
+        self.assertIn("Нет прав", errors[0])
+
+    def test_copy_scenario_copies_price_settings(self):
+        payload = {key: "inflation" if key in {"cost", "market_price"} else "fixed" for key in PRICE_CHANGE_PARAMETER_KEYS}
+        self.service.save_settings(self.scenario.id, payload, self.user)
+
+        copied = self.scenario_repository.copy_scenario(
+            source_id=self.scenario.id,
+            new_name="Копия",
+            new_author=self.user,
+        )
+        self.assertIsNotNone(copied)
+
+        copied_settings = self.service.get_settings(copied.id)
+        self.assertEqual(copied_settings["cost"], "inflation")
+        self.assertEqual(copied_settings["operators"], "fixed")
+
+    def test_update_scenario_via_service_saves_price_settings(self):
+        scenario_service = ScenarioService()
+        from scenarios.domain.dto import UpdateScenarioDTO
+
+        payload = {key: "inflation" for key in PRICE_CHANGE_PARAMETER_KEYS}
+        dto = UpdateScenarioDTO(price_change_settings=payload)
+        updated, errors = scenario_service.update_scenario(self.scenario.id, dto, self.user)
+        self.assertFalse(errors)
+        self.assertIsNotNone(updated)
+        self.assertEqual(updated.price_change_settings["transshipment"], "inflation")

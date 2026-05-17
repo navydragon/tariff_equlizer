@@ -10,6 +10,7 @@ from scenarios.domain.dto import (
     UpdateScenarioDTO,
 )
 from scenarios.domain.repositories import ScenarioRepository
+from scenarios.domain.services.price_change import PriceChangeSettingService
 from scenarios.models import ExchangeRateSet
 
 
@@ -21,6 +22,7 @@ class ScenarioService:
 
     def __init__(self):
         self.repository = ScenarioRepository()
+        self.price_change_service = PriceChangeSettingService()
 
     def get_user_scenarios(self) -> list[ScenarioListDTO]:
         all_scenarios = self.repository.get_all()
@@ -30,7 +32,12 @@ class ScenarioService:
         scenario = self.repository.get_by_id(scenario_id)
         if not scenario:
             return None
-        return ScenarioDTO.from_model(scenario)
+        settings = self.price_change_service.get_settings(scenario_id)
+        return ScenarioDTO.from_model(scenario, price_change_settings=settings)
+
+    def _scenario_dto(self, scenario) -> ScenarioDTO:
+        settings = self.price_change_service.get_settings(scenario.id)
+        return ScenarioDTO.from_model(scenario, price_change_settings=settings)
 
     @transaction.atomic
     def create_scenario(
@@ -49,7 +56,7 @@ class ScenarioService:
                 "author": user,
             }
         )
-        return ScenarioDTO.from_model(scenario), []
+        return self._scenario_dto(scenario), []
 
     @transaction.atomic
     def create_scenario_from_base(
@@ -85,7 +92,7 @@ class ScenarioService:
             if updated_scenario:
                 scenario = updated_scenario
 
-        return ScenarioDTO.from_model(scenario), []
+        return self._scenario_dto(scenario), []
 
     def update_scenario(
         self, scenario_id: int, dto: UpdateScenarioDTO, user: User
@@ -130,7 +137,16 @@ class ScenarioService:
         if not updated_scenario:
             return None, ["Ошибка при обновлении сценария"]
 
-        return ScenarioDTO.from_model(updated_scenario), []
+        if dto.price_change_settings is not None:
+            price_errors = self.price_change_service.save_settings(
+                scenario_id,
+                dto.price_change_settings,
+                user,
+            )
+            if price_errors:
+                return None, price_errors
+
+        return self._scenario_dto(updated_scenario), []
 
     @staticmethod
     def _get_route_set(route_set_id: Optional[int]) -> tuple[Optional[RouteSet], list[str]]:

@@ -116,6 +116,9 @@ class RouteAdmin(admin.ModelAdmin):
         "cargo",
         "origin_station",
         "destination_station",
+        "transport_volume_mln_tons",
+        "freight_turnover_bln_tkm",
+        "freight_charge_ths_rub",
     )
     list_filter = (
         "route_set",

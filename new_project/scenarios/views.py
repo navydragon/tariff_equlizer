@@ -13,11 +13,13 @@ from django.views.decorators.http import require_http_methods
 
 from core.models import Route
 from scenarios.models import Scenario
+from scenarios.domain.constants import PRICE_CHANGE_MODES, PRICE_CHANGE_PARAMETERS
 from scenarios.domain.services import (
     ScenarioService,
     BTDCategoryService,
     BTDCategoryValueService,
     ExchangeRateService,
+    InflationService,
     TariffRuleService,
 )
 from scenarios.domain.dto import (
@@ -26,6 +28,7 @@ from scenarios.domain.dto import (
     CreateTariffRuleDTO,
     UpdateTariffRuleDTO,
 )
+from scenarios.domain.utils.tariff_conditions import apply_tariff_conditions
 
 
 @login_required
@@ -145,6 +148,7 @@ def scenario_update_api(request, scenario_id):
         end_year=data.get("end_year"),
         route_set_id=data.get("route_set_id"),
         exchange_rate_set_id=data.get("exchange_rate_set_id"),
+        price_change_settings=data.get("price_change_settings"),
     )
     
     service = ScenarioService()
@@ -165,6 +169,9 @@ def scenario_update_api(request, scenario_id):
             "route_set_name": scenario.route_set_name,
             "exchange_rate_set_id": scenario.exchange_rate_set_id,
             "exchange_rate_set_name": scenario.exchange_rate_set_name,
+            "inflation_set_id": scenario.inflation_set_id,
+            "inflation_set_name": scenario.inflation_set_name,
+            "price_change_settings": scenario.price_change_settings,
             "author_id": scenario.author_id,
             "author_name": scenario.author_name,
         }
@@ -247,10 +254,19 @@ def scenario_edit_view(request, scenario_id):
         return HttpResponse("Нет прав на редактирование этого сценария", status=403)
     
     breadcrumbs = [
-        {"title": "Главная", "url": reverse("home")},
+        {"title": "Экономика грузов", "url": reverse("home")},
         {"title": "Сценарии", "url": reverse("scenarios:management")},
         {"title": "Управление сценариями", "url": reverse("scenarios:management")},
         {"title": f"Редактирование: {scenario.name}", "url": None},
+    ]
+
+    price_change_rows = [
+        {
+            "key": key,
+            "label": label,
+            "mode": scenario.price_change_settings.get(key, "fixed"),
+        }
+        for key, label in PRICE_CHANGE_PARAMETERS
     ]
 
     return render(
@@ -259,6 +275,8 @@ def scenario_edit_view(request, scenario_id):
         {
             "scenario": scenario,
             "breadcrumbs": breadcrumbs,
+            "price_change_rows": price_change_rows,
+            "price_change_modes": PRICE_CHANGE_MODES,
         },
     )
 
@@ -432,65 +450,6 @@ def tariff_rule_options_api(request, scenario_id):
     return JsonResponse({"success": True, "items": items})
 
 
-def _apply_tariff_conditions(qs, conditions: list[dict]):
-    def as_list(v):
-        if v is None:
-            return []
-        if isinstance(v, list):
-            return v
-        return [v]
-
-    FIELD_MAP = {
-        "cargo_group": "cargo__cargo_group__code",
-        "cargo_code": "cargo__code",
-        "origin_railroad": "origin_station__railroad__code",
-        "destination_railroad": "destination_station__railroad__code",
-        "wagon_kind": "wagon_kind__id",
-        "shipment_type": "shipment_type__id",
-        "message_type": "message_type__id",
-        "shipper_holding": "shipper_holding",
-        "distance_loaded_km": "distance_loaded_km",
-    }
-
-    filtered = qs
-    for c in conditions or []:
-        parameter = (c.get("parameter") or "").strip()
-        operator = (c.get("operator") or "").strip()
-        values = c.get("values")
-
-        field = FIELD_MAP.get(parameter)
-        if not field or not operator:
-            continue
-
-        if parameter == "distance_loaded_km":
-            try:
-                num = int(values)
-            except (TypeError, ValueError):
-                continue
-            if operator == "lt":
-                filtered = filtered.filter(**{f"{field}__lt": num})
-            elif operator == "gt":
-                filtered = filtered.filter(**{f"{field}__gt": num})
-            else:
-                # include/exclude не поддерживаем для числового
-                continue
-            continue
-
-        vals = [v for v in as_list(values) if v is not None and str(v) != ""]
-        if not vals:
-            continue
-
-        if operator == "include":
-            filtered = filtered.filter(**{f"{field}__in": vals})
-        elif operator == "exclude":
-            filtered = filtered.exclude(**{f"{field}__in": vals})
-        else:
-            # lt/gt не поддерживаем для choice
-            continue
-
-    return filtered
-
-
 @login_required
 @require_http_methods(["POST"])
 def tariff_rule_stats_api(request, scenario_id):
@@ -510,7 +469,7 @@ def tariff_rule_stats_api(request, scenario_id):
     conditions = data.get("conditions") or []
     qs = Route.objects.filter(route_set_id=scenario.route_set_id)
     total = qs.count()
-    matched = _apply_tariff_conditions(qs, conditions).count()
+    matched = apply_tariff_conditions(qs, conditions).count()
     percent = 0.0 if total <= 0 else round((matched * 100.0) / total, 2)
 
     return JsonResponse(
@@ -756,9 +715,7 @@ def btd_value_update_api(request):
 @require_http_methods(["GET"])
 def exchange_rate_set_list_api(request):
     service = ExchangeRateService()
-    sets, errors = service.list_sets(request.user)
-    if errors:
-        return JsonResponse({"success": False, "errors": errors}, status=400)
+    sets = service.list_sets(request.user)
     return JsonResponse(
         {
             "success": True,
@@ -804,6 +761,16 @@ def exchange_rate_set_create_api(request):
         },
         status=201,
     )
+
+
+@login_required
+@require_http_methods(["POST"])
+def exchange_rate_set_delete_api(request, rate_set_id: int):
+    service = ExchangeRateService()
+    ok, errors = service.delete_set(rate_set_id, request.user)
+    if errors:
+        return JsonResponse({"success": False, "errors": errors}, status=400)
+    return JsonResponse({"success": True, "deleted": ok})
 
 
 @login_required
@@ -906,5 +873,172 @@ def exchange_rate_value_update_api(request):
         {
             "success": True,
             "usd_rub": value_dto.usd_rub,
+        }
+    )
+
+
+@login_required
+@require_http_methods(["GET"])
+def inflation_set_list_api(request):
+    service = InflationService()
+    sets = service.list_sets(request.user)
+    return JsonResponse(
+        {
+            "success": True,
+            "items": [
+                {
+                    "id": s.id,
+                    "name": s.name,
+                    "author_id": s.author_id,
+                    "author_name": s.author_name,
+                }
+                for s in sets
+            ],
+        }
+    )
+
+
+@login_required
+@require_http_methods(["POST"])
+def inflation_set_create_api(request):
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse(
+            {"success": False, "errors": ["Неверный формат JSON"]},
+            status=400,
+        )
+
+    name = data.get("name") or ""
+    service = InflationService()
+    created, errors = service.create_set(str(name), request.user)
+    if errors:
+        return JsonResponse({"success": False, "errors": errors}, status=400)
+
+    return JsonResponse(
+        {
+            "success": True,
+            "item": {
+                "id": created.id,
+                "name": created.name,
+                "author_id": created.author_id,
+                "author_name": created.author_name,
+            },
+        },
+        status=201,
+    )
+
+
+@login_required
+@require_http_methods(["POST"])
+def inflation_set_delete_api(request, inflation_set_id: int):
+    service = InflationService()
+    ok, errors = service.delete_set(inflation_set_id, request.user)
+    if errors:
+        return JsonResponse({"success": False, "errors": errors}, status=400)
+    return JsonResponse({"success": True, "deleted": ok})
+
+
+@login_required
+@require_http_methods(["POST"])
+def inflation_set_attach_api(request, scenario_id: int):
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse(
+            {"success": False, "errors": ["Неверный формат JSON"]},
+            status=400,
+        )
+
+    try:
+        inflation_set_id = int(data.get("inflation_set_id"))
+    except (TypeError, ValueError):
+        return JsonResponse(
+            {"success": False, "errors": ["Некорректный inflation_set_id"]},
+            status=400,
+        )
+
+    service = InflationService()
+    scenario_dto, errors = service.attach_set_to_scenario(
+        scenario_id, inflation_set_id, request.user
+    )
+    if errors:
+        return JsonResponse({"success": False, "errors": errors}, status=400)
+
+    return JsonResponse(
+        {
+            "success": True,
+            "scenario": {
+                "id": scenario_dto.id,
+                "inflation_set_id": scenario_dto.inflation_set_id,
+                "inflation_set_name": scenario_dto.inflation_set_name,
+            },
+        }
+    )
+
+
+@login_required
+@require_http_methods(["GET"])
+def inflation_matrix_api(request, scenario_id: int):
+    service = InflationService()
+    payload, errors = service.get_matrix(scenario_id, request.user)
+    if errors:
+        return JsonResponse({"success": False, "errors": errors}, status=400)
+
+    inflation_set = payload.get("inflation_set")
+    return JsonResponse(
+        {
+            "success": True,
+            "years": payload["years"],
+            "inflation_set": inflation_set.__dict__ if inflation_set else None,
+            "values": payload.get("values", {}),
+        }
+    )
+
+
+@login_required
+@require_http_methods(["POST"])
+def inflation_value_update_api(request):
+    from scenarios.domain.dto import UpdateInflationValueDTO
+
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse(
+            {"success": False, "errors": ["Неверный формат JSON"]},
+            status=400,
+        )
+
+    try:
+        scenario_id = int(data.get("scenario_id"))
+        inflation_set_id = int(data.get("inflation_set_id"))
+        year = int(data.get("year"))
+    except (TypeError, ValueError):
+        return JsonResponse(
+            {
+                "success": False,
+                "errors": ["Некорректные идентификаторы сценария/набора/года"],
+            },
+            status=400,
+        )
+
+    rate_percent = data.get("rate_percent")
+
+    dto = UpdateInflationValueDTO(
+        scenario_id=scenario_id,
+        inflation_set_id=inflation_set_id,
+        year=year,
+        rate_percent=str(rate_percent) if rate_percent is not None else "",
+    )
+
+    service = InflationService()
+    value_dto, errors = service.update_value(dto, request.user)
+    if errors:
+        return JsonResponse({"success": False, "errors": errors}, status=400)
+
+    return JsonResponse(
+        {
+            "success": True,
+            "rate_percent": value_dto.rate_percent,
         }
     )

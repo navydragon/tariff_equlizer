@@ -1,0 +1,85 @@
+.route-analysis-ts-annotations {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: center;
+  margin-top: 0.75rem;
+}
+
+.route-analysis-ts-annotations__year {
+  min-width: 72px;
+  text-align: center;
+}
+
+.route-analysis-ts-annotations__year-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #6b7280;
+  margin-bottom: 0.25rem;
+}
+
+.route-analysis-ts-annotations__badge {
+  display: block;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #fff;
+  border-radius: 4px;
+  padding: 0.15rem 0.35rem;
+  margin-top: 0.15rem;
+}
+
+.route-analysis-ts-annotations__badge--transport {
+  background-color: #003256;
+}
+
+.route-analysis-ts-annotations__badge--margin {
+  background-color: #000000;
+}
+
+.route-analysis-kpi-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.route-analysis-kpi-card {
+  flex: 1 1 280px;
+  background-color: #f4f7fe;
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+.route-analysis-kpi-card__title {
+  font-weight: 700;
+  margin-bottom: 0.75rem;
+}
+
+.route-analysis-kpi-metric {
+  margin-bottom: 0.75rem;
+}
+
+.route-analysis-kpi-metric:last-child {
+  margin-bottom: 0;
+}
+
+.route-analysis-kpi-metric__row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.route-analysis-kpi-metric__pct {
+  font-weight: 700;
+  font-size: 1.1rem;
+}
+
+.route-analysis-kpi-metric__rub {
+  color: #4b5563;
+  font-size: 0.875rem;
+}
+
+.route-analysis-kpi-metric__label {
+  font-size: 0.8rem;
+  color: #6b7280;
+  margin-top: 0.15rem;
+}

@@ -1,4 +1,5 @@
 from django.urls import path
+from django.views.generic import RedirectView
 
 from . import views
 
@@ -9,6 +10,26 @@ urlpatterns = [
     path("logout/", views.logout_view, name="logout"),
     path("home/", views.home, name="home"),
     path("dashboard-1/", views.dashboard_1, name="dashboard_1"),
+    path(
+        "decision-effects/",
+        views.decision_effects,
+        name="decision_effects",
+    ),
+    path(
+        "effects-cube/",
+        views.effects_cube,
+        name="effects_cube",
+    ),
+    path(
+        "cube/",
+        RedirectView.as_view(pattern_name="effects_cube", permanent=True),
+        name="effects_cube_legacy",
+    ),
+    path(
+        "dashboard-2/",
+        RedirectView.as_view(pattern_name="decision_effects", permanent=True),
+        name="dashboard_2",
+    ),
     path("route-analysis/", views.route_analysis, name="route_analysis"),
     path("hello/", views.hello_partial, name="hello_partial"),
     # Справочники
@@ -255,9 +276,9 @@ urlpatterns = [
         name="route_delete_api",
     ),
     path(
-        "analysis/api/calculate-route/",
-        views.calculate_route_api,
-        name="calculate_route_api",
+        "analysis/api/route-analysis/",
+        views.route_analysis_api,
+        name="route_analysis_api",
     ),
 ]
 

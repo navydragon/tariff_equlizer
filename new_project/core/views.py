@@ -12,10 +12,16 @@ from django.views.decorators.http import require_http_methods
 
 from core.domain.cargo.dto import CreateCargoDTO, UpdateCargoDTO
 from core.domain.cargo.services import CargoService
-from core.domain.calculate_route.dto import CalculateRouteRequestDTO
-from core.domain.calculate_route.services import CalculateRouteService
+from core.domain.route_analysis.dto import RouteAnalysisRequestDTO
+from core.domain.route_analysis.services import RouteAnalysisService
 from core.domain.railroad.dto import CreateRailRoadDTO, UpdateRailRoadDTO
 from core.domain.railroad.services import RailRoadService
+from core.domain.route.dto import (
+    CreateRouteSetDTO,
+    RouteListFiltersDTO,
+    UpdateRouteSetDTO,
+)
+from core.domain.route.services import RouteService, RouteSetService
 from core.models import (
     Region,
     Station,
@@ -23,7 +29,6 @@ from core.models import (
     WagonKind,
     ShipmentType,
     MessageType,
-    RouteSet,
     Route,
     Cargo,
 )
@@ -86,11 +91,25 @@ def dashboard_1(request):
 
 
 @login_required
+def decision_effects(request):
+    """
+    Эффект от решений: эластичность спроса и оценка тарифных решений по сценарию.
+    """
+    return render(request, "core/decision_effects.html")
+
+
+@login_required
+def effects_cube(request):
+    """
+    Куб эффектов: влияние базовой индексации и отдельных решений по провозной плате.
+    """
+    return render(request, "core/effects_cube.html")
+
+
+@login_required
 def route_analysis(request):
     """
-    Страница «Анализ маршрута».
-
-    Пока только компоновка (без бизнес-логики и данных).
+    Страница «Экономика грузов».
     """
     return render(request, "core/route_analysis.html")
 
@@ -1554,67 +1573,25 @@ def route_set_list_api(request):
     except (TypeError, ValueError):
         page_size = 50
 
-    search = (request.GET.get("search") or "").strip()
+    search = (request.GET.get("search") or "").strip() or None
 
-    qs = RouteSet.objects.all()
-    if search:
-        qs = qs.filter(Q(name__icontains=search) | Q(code__icontains=search))
+    service = RouteSetService()
+    result, errors = service.list_sets(page=page, page_size=page_size, search=search)
+    if errors:
+        return JsonResponse({"success": False, "errors": errors}, status=400)
 
-    paginator = Paginator(qs.order_by("name"), page_size)
-    try:
-        page_obj = paginator.page(page)
-    except EmptyPage:
-        page_obj = paginator.page(paginator.num_pages or 1)
-
-    items = []
-    for rs in page_obj.object_list:
-        items.append(
-            {
-                "id": rs.id,
-                "name": rs.name,
-                "code": rs.code,
-                "routes_count": rs.routes.count(),
-                "created_at": rs.created_at.isoformat() if rs.created_at else None,
-                "updated_at": rs.updated_at.isoformat() if rs.updated_at else None,
-            }
-        )
-
-    return JsonResponse(
-        {
-            "success": True,
-            "items": items,
-            "total": paginator.count,
-            "page": page_obj.number,
-            "page_size": page_obj.paginator.per_page,
-            "total_pages": paginator.num_pages,
-        }
-    )
+    return JsonResponse({"success": True, **result.to_api_dict()})
 
 
 @login_required
 @require_http_methods(["GET"])
 def route_set_detail_api(request, pk: int):
-    try:
-        rs = RouteSet.objects.get(pk=pk)
-    except RouteSet.DoesNotExist:
-        return JsonResponse(
-            {"success": False, "errors": ["Набор маршрутов не найден"]},
-            status=404,
-        )
+    service = RouteSetService()
+    item, errors = service.get_set(pk)
+    if errors:
+        return JsonResponse({"success": False, "errors": errors}, status=404)
 
-    return JsonResponse(
-        {
-            "success": True,
-            "item": {
-                "id": rs.id,
-                "name": rs.name,
-                "code": rs.code,
-                "routes_count": rs.routes.count(),
-                "created_at": rs.created_at.isoformat() if rs.created_at else None,
-                "updated_at": rs.updated_at.isoformat() if rs.updated_at else None,
-            },
-        }
-    )
+    return JsonResponse({"success": True, "item": item.to_api_dict()})
 
 
 @login_required
@@ -1628,37 +1605,17 @@ def route_set_create_api(request):
             status=400,
         )
 
-    name = (data.get("name") or "").strip()
-    code = (data.get("code") or "").strip()
-
-    errors: list[str] = []
-    if not name:
-        errors.append("Название набора обязательно")
-    if not code:
-        errors.append("Код набора обязателен")
-
-    if RouteSet.objects.filter(name=name).exists():
-        errors.append("Набор с таким названием уже существует")
-    if RouteSet.objects.filter(code=code).exists():
-        errors.append("Набор с таким кодом уже существует")
-
+    dto = CreateRouteSetDTO(
+        name=(data.get("name") or "").strip(),
+        code=(data.get("code") or "").strip(),
+    )
+    service = RouteSetService()
+    item, errors = service.create_set(dto)
     if errors:
         return JsonResponse({"success": False, "errors": errors}, status=400)
 
-    rs = RouteSet.objects.create(name=name, code=code)
-
     return JsonResponse(
-        {
-            "success": True,
-            "item": {
-                "id": rs.id,
-                "name": rs.name,
-                "code": rs.code,
-                "routes_count": 0,
-                "created_at": rs.created_at.isoformat() if rs.created_at else None,
-                "updated_at": rs.updated_at.isoformat() if rs.updated_at else None,
-            },
-        },
+        {"success": True, "item": item.to_api_dict()},
         status=201,
     )
 
@@ -1666,14 +1623,6 @@ def route_set_create_api(request):
 @login_required
 @require_http_methods(["POST"])
 def route_set_update_api(request, pk: int):
-    try:
-        rs = RouteSet.objects.get(pk=pk)
-    except RouteSet.DoesNotExist:
-        return JsonResponse(
-            {"success": False, "errors": ["Набор маршрутов не найден"]},
-            status=404,
-        )
-
     try:
         data = json.loads(request.body)
     except json.JSONDecodeError:
@@ -1684,61 +1633,29 @@ def route_set_update_api(request, pk: int):
 
     name_raw = data.get("name")
     code_raw = data.get("code")
-
-    errors: list[str] = []
-
-    if name_raw is not None:
-        name = (str(name_raw) or "").strip()
-        if not name:
-            errors.append("Название набора обязательно")
-        elif RouteSet.objects.exclude(pk=rs.pk).filter(name=name).exists():
-            errors.append("Другой набор с таким названием уже существует")
-    else:
-        name = rs.name
-
-    if code_raw is not None:
-        code = (str(code_raw) or "").strip()
-        if not code:
-            errors.append("Код набора обязателен")
-        elif RouteSet.objects.exclude(pk=rs.pk).filter(code=code).exists():
-            errors.append("Другой набор с таким кодом уже существует")
-    else:
-        code = rs.code
-
-    if errors:
-        return JsonResponse({"success": False, "errors": errors}, status=400)
-
-    rs.name = name
-    rs.code = code
-    rs.save()
-
-    return JsonResponse(
-        {
-            "success": True,
-            "item": {
-                "id": rs.id,
-                "name": rs.name,
-                "code": rs.code,
-                "routes_count": rs.routes.count(),
-                "created_at": rs.created_at.isoformat() if rs.created_at else None,
-                "updated_at": rs.updated_at.isoformat() if rs.updated_at else None,
-            },
-        }
+    dto = UpdateRouteSetDTO(
+        name=(str(name_raw).strip() if name_raw is not None else None),
+        code=(str(code_raw).strip() if code_raw is not None else None),
     )
+
+    service = RouteSetService()
+    item, errors = service.update_set(pk, dto)
+    if errors:
+        return JsonResponse(
+            {"success": False, "errors": errors},
+            status=404 if errors == ["Набор маршрутов не найден"] else 400,
+        )
+
+    return JsonResponse({"success": True, "item": item.to_api_dict()})
 
 
 @login_required
 @require_http_methods(["POST"])
 def route_set_delete_api(request, pk: int):
-    try:
-        rs = RouteSet.objects.get(pk=pk)
-    except RouteSet.DoesNotExist:
-        return JsonResponse(
-            {"success": False, "errors": ["Набор маршрутов не найден"]},
-            status=404,
-        )
-
-    rs.delete()
+    service = RouteSetService()
+    _success, errors = service.delete_set(pk)
+    if errors:
+        return JsonResponse({"success": False, "errors": errors}, status=404)
 
     return JsonResponse({"success": True})
 
@@ -1746,234 +1663,8 @@ def route_set_delete_api(request, pk: int):
 # === Route: API (JSON) ===
 
 
-def _get_route_payload_errors(data: dict) -> tuple[dict, list[str]]:
-    errors: list[str] = []
-
-    payload: dict = {}
-
-    route_set_id = data.get("route_set_id")
-    if route_set_id in (None, "", "null"):
-        errors.append("Набор маршрутов обязателен")
-    else:
-        try:
-            payload["route_set"] = RouteSet.objects.get(pk=int(route_set_id))
-        except (ValueError, RouteSet.DoesNotExist):
-            errors.append("Указан несуществующий набор маршрутов")
-
-    cargo_code = data.get("cargo_code")
-    if cargo_code in (None, "", "null"):
-        errors.append("Код груза обязателен")
-    else:
-        try:
-            payload["cargo"] = Cargo.objects.get(code=int(cargo_code))
-        except (ValueError, Cargo.DoesNotExist):
-            errors.append("Указан несуществующий груз (код ETSNG)")
-
-    origin_esr = data.get("origin_esr_code")
-    if origin_esr in (None, "", "null"):
-        errors.append("Код ЕСР станции отправления обязателен")
-    else:
-        try:
-            payload["origin_station"] = Station.objects.get(esr_code=int(origin_esr))
-        except (ValueError, Station.DoesNotExist):
-            errors.append("Указана несуществующая станция отправления")
-
-    destination_esr = data.get("destination_esr_code")
-    if destination_esr in (None, "", "null"):
-        errors.append("Код ЕСР станции назначения обязателен")
-    else:
-        try:
-            payload["destination_station"] = Station.objects.get(
-                esr_code=int(destination_esr)
-            )
-        except (ValueError, Station.DoesNotExist):
-            errors.append("Указана несуществующая станция назначения")
-
-    wagon_kind_id = data.get("wagon_kind_id")
-    if wagon_kind_id in (None, "", "null"):
-        errors.append("Род вагона обязателен")
-    else:
-        try:
-            payload["wagon_kind"] = WagonKind.objects.get(pk=int(wagon_kind_id))
-        except (ValueError, WagonKind.DoesNotExist):
-            errors.append("Указан несуществующий род вагона")
-
-    shipment_type_id = data.get("shipment_type_id")
-    if shipment_type_id in (None, "", "null"):
-        errors.append("Тип отправки обязателен")
-    else:
-        try:
-            payload["shipment_type"] = ShipmentType.objects.get(
-                pk=int(shipment_type_id)
-            )
-        except (ValueError, ShipmentType.DoesNotExist):
-            errors.append("Указан несуществующий тип отправки")
-
-    message_type_id = data.get("message_type_id")
-    if message_type_id not in (None, "", "null"):
-        try:
-            payload["message_type"] = MessageType.objects.get(pk=int(message_type_id))
-        except (ValueError, MessageType.DoesNotExist):
-            errors.append("Указан несуществующий тип сообщения")
-
-    payload["shipper_holding"] = (data.get("shipper_holding") or "").strip()
-    payload["shipper"] = (data.get("shipper") or "").strip()
-    payload["route_code"] = (data.get("route_code") or "").strip()
-
-    def _parse_int_field(field_name: str) -> int | None:
-        raw = data.get(field_name)
-        if raw in (None, "", "null"):
-            return None
-        try:
-            return int(str(raw).replace(" ", ""))
-        except (TypeError, ValueError):
-            errors.append(f"Поле \"{field_name}\" должно быть целым числом")
-            return None
-
-    def _parse_decimal_field(field_name: str) -> tuple[Decimal | None, None]:
-        from decimal import Decimal, InvalidOperation
-
-        raw = data.get(field_name)
-        if raw in (None, "", "null"):
-            return None, None
-        try:
-            value = Decimal(str(raw).replace(" ", "").replace(",", "."))
-            return value, None
-        except (InvalidOperation, TypeError, ValueError):
-            return None, f'Поле "{field_name}" должно быть числом'
-
-    int_fields = [
-        "distance_loaded_km",
-        "distance_empty_km",
-        "delivery_time_loaded_days",
-        "delivery_time_empty_days",
-        "delivery_time_ops_days",
-    ]
-    for name in int_fields:
-        value = _parse_int_field(name)
-        if value is not None:
-            payload[name] = value
-
-    decimal_fields = [
-        "load_tons_per_wagon",
-        "rate_per_wagon_per_day",
-        "rzd_cost_loaded_per_ton",
-        "rzd_cost_empty_per_ton",
-        "rzd_cost_total_per_ton",
-        "operators_cost_per_ton",
-        "transshipment_cost_per_ton",
-        "excise_or_duty_per_ton",
-        "transport_total_cost_per_ton",
-        "production_cost_per_ton",
-        "total_cost_per_ton",
-        "market_price_per_ton",
-    ]
-    for name in decimal_fields:
-        value, err = _parse_decimal_field(name)
-        if err:
-            errors.append(err)
-        if value is not None:
-            payload[name] = value
-
-    return payload, errors
-
-
-def _route_to_dict(route: Route) -> dict:
-    return {
-        "id": route.id,
-        "route_set_id": route.route_set_id,
-        "route_set_code": route.route_set.code if route.route_set_id else "",
-        "route_code": route.route_code,
-        "cargo_code": route.cargo.code if route.cargo_id else None,
-        "cargo_name": route.cargo.name if route.cargo_id else "",
-        "origin_esr_code": route.origin_station.esr_code
-        if route.origin_station_id
-        else None,
-        "origin_station_name": route.origin_station.full_name
-        if route.origin_station_id
-        else "",
-        "destination_esr_code": route.destination_station.esr_code
-        if route.destination_station_id
-        else None,
-        "destination_station_name": route.destination_station.full_name
-        if route.destination_station_id
-        else "",
-        "origin_railroad_code": route.origin_station.railroad.code
-        if route.origin_station_id and route.origin_station.railroad_id
-        else "",
-        "origin_region_full_name": route.origin_station.region.full_name
-        if route.origin_station_id and route.origin_station.region_id
-        else "",
-        "origin_railroad_name": route.origin_station.railroad.name
-        if route.origin_station_id and route.origin_station.railroad_id
-        else "",
-        "origin_railroad_direction": route.origin_station.railroad.direction
-        if route.origin_station_id and route.origin_station.railroad_id
-        else "",
-        "destination_railroad_code": route.destination_station.railroad.code
-        if route.destination_station_id and route.destination_station.railroad_id
-        else "",
-        "destination_region_full_name": route.destination_station.region.full_name
-        if route.destination_station_id and route.destination_station.region_id
-        else "",
-        "destination_railroad_name": route.destination_station.railroad.name
-        if route.destination_station_id and route.destination_station.railroad_id
-        else "",
-        "destination_railroad_direction": route.destination_station.railroad.direction
-        if route.destination_station_id and route.destination_station.railroad_id
-        else "",
-        "wagon_kind_id": route.wagon_kind_id,
-        "wagon_kind_name": route.wagon_kind.name if route.wagon_kind_id else "",
-        "shipment_type_id": route.shipment_type_id,
-        "shipment_type_name": route.shipment_type.name
-        if route.shipment_type_id
-        else "",
-        "message_type_id": route.message_type_id,
-        "message_type_name": route.message_type.name if route.message_type_id else "",
-        "shipper_holding": route.shipper_holding,
-        "shipper": route.shipper,
-        "distance_loaded_km": route.distance_loaded_km,
-        "distance_empty_km": route.distance_empty_km,
-        "load_tons_per_wagon": str(route.load_tons_per_wagon)
-        if route.load_tons_per_wagon is not None
-        else None,
-        "delivery_time_loaded_days": route.delivery_time_loaded_days,
-        "delivery_time_empty_days": route.delivery_time_empty_days,
-        "delivery_time_ops_days": route.delivery_time_ops_days,
-        "rate_per_wagon_per_day": str(route.rate_per_wagon_per_day)
-        if route.rate_per_wagon_per_day is not None
-        else None,
-        "rzd_cost_loaded_per_ton": str(route.rzd_cost_loaded_per_ton)
-        if route.rzd_cost_loaded_per_ton is not None
-        else None,
-        "rzd_cost_empty_per_ton": str(route.rzd_cost_empty_per_ton)
-        if route.rzd_cost_empty_per_ton is not None
-        else None,
-        "rzd_cost_total_per_ton": str(route.rzd_cost_total_per_ton)
-        if route.rzd_cost_total_per_ton is not None
-        else None,
-        "operators_cost_per_ton": str(route.operators_cost_per_ton)
-        if route.operators_cost_per_ton is not None
-        else None,
-        "transshipment_cost_per_ton": str(route.transshipment_cost_per_ton)
-        if route.transshipment_cost_per_ton is not None
-        else None,
-        "excise_or_duty_per_ton": str(route.excise_or_duty_per_ton)
-        if route.excise_or_duty_per_ton is not None
-        else None,
-        "transport_total_cost_per_ton": str(route.transport_total_cost_per_ton)
-        if route.transport_total_cost_per_ton is not None
-        else None,
-        "production_cost_per_ton": str(route.production_cost_per_ton)
-        if route.production_cost_per_ton is not None
-        else None,
-        "total_cost_per_ton": str(route.total_cost_per_ton)
-        if route.total_cost_per_ton is not None
-        else None,
-        "market_price_per_ton": str(route.market_price_per_ton)
-        if route.market_price_per_ton is not None
-        else None,
-    }
+def _route_not_found_status(errors: list[str]) -> int:
+    return 404 if errors == ["Маршрут не найден"] else 400
 
 
 @login_required
@@ -1994,120 +1685,33 @@ def route_list_api(request):
     except (TypeError, ValueError):
         route_set_id = 0
 
-    if not route_set_id:
-        return JsonResponse(
-            {"success": False, "errors": ["Не указан набор маршрутов"]},
-            status=400,
-        )
-
-    qs = Route.objects.select_related(
-        "route_set",
-        "cargo",
-        "origin_station",
-        "destination_station",
-        "origin_station__railroad",
-        "destination_station__railroad",
-        "wagon_kind",
-        "shipment_type",
-        "message_type",
-    ).filter(route_set_id=route_set_id)
-
-    search = request.GET.get("search") or ""
-    if search:
-        search = search.strip()
-        if search:
-            s = search.casefold()
-            q = Q(cargo__name__icontains=search) | Q(
-                origin_station__short_name_search__contains=s
-            ) | Q(origin_station__full_name_search__contains=s) | Q(
-                destination_station__short_name_search__contains=s
-            ) | Q(
-                destination_station__full_name_search__contains=s
-            ) | Q(
-                route_code__icontains=search
-            ) | Q(
-                message_type__name_search__contains=s
-            )
-            if search.isdigit():
-                try:
-                    esr = int(search)
-                    q = (
-                        Q(origin_station__esr_code=esr)
-                        | Q(destination_station__esr_code=esr)
-                        | q
-                    )
-                except ValueError:
-                    pass
-            qs = qs.filter(q)
-
-    origin_esr = request.GET.get("origin_esr")
-    if origin_esr:
-        try:
-            qs = qs.filter(origin_station__esr_code=int(origin_esr))
-        except (TypeError, ValueError):
-            return JsonResponse(
-                {
-                    "success": False,
-                    "errors": ["Код ЕСР станции отправления должен быть целым числом"],
-                },
-                status=400,
-            )
-
-    destination_esr = request.GET.get("destination_esr")
-    if destination_esr:
-        try:
-            qs = qs.filter(destination_station__esr_code=int(destination_esr))
-        except (TypeError, ValueError):
-            return JsonResponse(
-                {
-                    "success": False,
-                    "errors": ["Код ЕСР станции назначения должен быть целым числом"],
-                },
-                status=400,
-            )
-
-    paginator = Paginator(qs.order_by("id"), page_size)
-    try:
-        page_obj = paginator.page(page)
-    except EmptyPage:
-        page_obj = paginator.page(paginator.num_pages or 1)
-
-    items = [_route_to_dict(route) for route in page_obj.object_list]
-
-    return JsonResponse(
-        {
-            "success": True,
-            "items": items,
-            "total": paginator.count,
-            "page": page_obj.number,
-            "page_size": page_obj.paginator.per_page,
-            "total_pages": paginator.num_pages,
-        }
+    search = (request.GET.get("search") or "").strip() or None
+    filters = RouteListFiltersDTO(
+        route_set_id=route_set_id,
+        page=page,
+        page_size=page_size,
+        search=search,
+        origin_esr=request.GET.get("origin_esr") or None,
+        destination_esr=request.GET.get("destination_esr") or None,
     )
+
+    service = RouteService()
+    result, errors = service.list_routes(filters)
+    if errors:
+        return JsonResponse({"success": False, "errors": errors}, status=400)
+
+    return JsonResponse({"success": True, **result.to_api_dict()})
 
 
 @login_required
 @require_http_methods(["GET"])
 def route_detail_api(request, pk: int):
-    try:
-        route = Route.objects.select_related(
-            "route_set",
-            "cargo",
-            "origin_station",
-            "destination_station",
-            "origin_station__railroad",
-            "destination_station__railroad",
-            "wagon_kind",
-            "shipment_type",
-            "message_type",
-        ).get(pk=pk)
-    except Route.DoesNotExist:
-        return JsonResponse(
-            {"success": False, "errors": ["Маршрут не найден"]},
-            status=404,
-        )
+    service = RouteService()
+    item, errors = service.get_route(pk)
+    if errors:
+        return JsonResponse({"success": False, "errors": errors}, status=404)
 
-    return JsonResponse({"success": True, "item": _route_to_dict(route)})
+    return JsonResponse({"success": True, "item": item.to_api_dict()})
 
 
 @login_required
@@ -2121,26 +1725,13 @@ def route_create_api(request):
             status=400,
         )
 
-    payload, errors = _get_route_payload_errors(data)
+    service = RouteService()
+    item, errors = service.create_route(data)
     if errors:
         return JsonResponse({"success": False, "errors": errors}, status=400)
 
-    try:
-        route = Route.objects.create(**payload)
-    except Exception as exc:  # noqa: BLE001
-        return JsonResponse(
-            {
-                "success": False,
-                "errors": [f"Не удалось создать маршрут: {exc}"],
-            },
-            status=400,
-        )
-
     return JsonResponse(
-        {
-            "success": True,
-            "item": _route_to_dict(route),
-        },
+        {"success": True, "item": item.to_api_dict()},
         status=201,
     )
 
@@ -2149,14 +1740,6 @@ def route_create_api(request):
 @require_http_methods(["POST"])
 def route_update_api(request, pk: int):
     try:
-        route = Route.objects.get(pk=pk)
-    except Route.DoesNotExist:
-        return JsonResponse(
-            {"success": False, "errors": ["Маршрут не найден"]},
-            status=404,
-        )
-
-    try:
         data = json.loads(request.body)
     except json.JSONDecodeError:
         return JsonResponse(
@@ -2164,48 +1747,33 @@ def route_update_api(request, pk: int):
             status=400,
         )
 
-    payload, errors = _get_route_payload_errors(data)
+    service = RouteService()
+    item, errors = service.update_route(pk, data)
     if errors:
-        return JsonResponse({"success": False, "errors": errors}, status=400)
-
-    for field, value in payload.items():
-        setattr(route, field, value)
-
-    try:
-        route.save()
-    except Exception as exc:  # noqa: BLE001
         return JsonResponse(
-            {
-                "success": False,
-                "errors": [f"Не удалось сохранить маршрут: {exc}"],
-            },
-            status=400,
+            {"success": False, "errors": errors},
+            status=_route_not_found_status(errors),
         )
 
-    return JsonResponse({"success": True, "item": _route_to_dict(route)})
+    return JsonResponse({"success": True, "item": item.to_api_dict()})
 
 
 @login_required
 @require_http_methods(["POST"])
 def route_delete_api(request, pk: int):
-    try:
-        route = Route.objects.get(pk=pk)
-    except Route.DoesNotExist:
-        return JsonResponse(
-            {"success": False, "errors": ["Маршрут не найден"]},
-            status=404,
-        )
+    service = RouteService()
+    _success, errors = service.delete_route(pk)
+    if errors:
+        return JsonResponse({"success": False, "errors": errors}, status=404)
 
-    route.delete()
     return JsonResponse({"success": True})
 
 
 @login_required
 @require_http_methods(["POST"])
-def calculate_route_api(request):
+def route_analysis_api(request):
     """
-    Рассчитать «Структура (табл.)» для выбранного маршрута в рамках сценария.
-    Возвращает ряды по годам в готовом для фронта виде.
+    Расчёт экрана «Экономика грузов»: таблица, эквалайзер, KPI, эффекты.
     """
     try:
         data = json.loads(request.body)
@@ -2215,16 +1783,32 @@ def calculate_route_api(request):
             status=400,
         )
 
-    dto = CalculateRouteRequestDTO(
-        scenario_id=data.get("scenario_id"),
-        route_id=data.get("route_id"),
+    scenario_id = data.get("scenario_id")
+    route_id = data.get("route_id")
+    try:
+        scenario_id = int(scenario_id)
+        route_id = int(route_id)
+    except (TypeError, ValueError):
+        return JsonResponse(
+            {"success": False, "errors": ["Некорректные scenario_id или route_id"]},
+            status=400,
+        )
+
+    dto = RouteAnalysisRequestDTO(
+        scenario_id=scenario_id,
+        route_id=route_id,
+        overrides=RouteAnalysisRequestDTO.parse_overrides(data.get("overrides")),
     )
     errors = dto.validate()
     if errors:
         return JsonResponse({"success": False, "errors": errors}, status=400)
 
     try:
-        scenario = Scenario.objects.get(pk=dto.scenario_id, author=request.user)
+        scenario = (
+            Scenario.objects.select_related("inflation_set")
+            .prefetch_related("inflation_set__values", "price_change_settings")
+            .get(pk=dto.scenario_id, author=request.user)
+        )
     except Scenario.DoesNotExist:
         return JsonResponse(
             {"success": False, "errors": ["Сценарий не найден"]},
@@ -2245,7 +1829,7 @@ def calculate_route_api(request):
             status=404,
         )
 
-    service = CalculateRouteService()
+    service = RouteAnalysisService()
     response_dto = service.calculate(
         request_dto=dto,
         scenario=scenario,
@@ -2255,16 +1839,7 @@ def calculate_route_api(request):
     return JsonResponse(
         {
             "success": True,
-            "years": response_dto.years,
-            "rows": [
-                {
-                    "key": row.key,
-                    "label": row.label,
-                    "values": row.values,
-                    "format": row.format,
-                }
-                for row in response_dto.rows
-            ],
+            **response_dto.to_api_dict(),
         }
     )
 
