@@ -369,6 +369,28 @@ class RouteAnalysisServiceTests(TestCase):
         self.assertEqual(oper_values[0], Decimal("100.00"))
         self.assertEqual(oper_values[1], Decimal("100.00"))
 
+    def test_inflation_partial_matrix_years_use_zero_for_gaps(self) -> None:
+        """Годы без значения в матрице (нет) — 0%, остальные годы индексируются."""
+        self.scenario.end_year = 2028
+        self.scenario.save(update_fields=["end_year"])
+        self._attach_inflation({2025: "0", 2026: "5"})
+        self._set_price_change_mode(
+            ScenarioPriceChangeSetting.Parameter.OPERATORS,
+            ScenarioPriceChangeSetting.Mode.INFLATION,
+        )
+
+        response = self.service.calculate(
+            request_dto=self._request(),
+            scenario=self.scenario,
+            route=self.route,
+        )
+
+        oper_values = [Decimal(v) for v in self._row_values(response, "operators")]
+        self.assertEqual(oper_values[0], Decimal("100.00"))
+        self.assertEqual(oper_values[1], Decimal("105.00"))
+        self.assertEqual(oper_values[2], Decimal("105.00"))
+        self.assertEqual(oper_values[3], Decimal("105.00"))
+
     def test_override_still_wins_over_inflation(self) -> None:
         self._attach_inflation({2025: "0", 2026: "10"})
         self._set_price_change_mode(

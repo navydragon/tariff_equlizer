@@ -43,12 +43,11 @@ def _total_label(years: list[int]) -> str:
     return f"{years[0]}–{years[-1]}"
 
 
-def _payload_has_rule_breakdown(payload: ScenarioEffectsCachePayload) -> bool:
-    if payload.compact is not None and payload.compact.rule_by_year is not None:
+def _payload_has_effects_data(payload: ScenarioEffectsCachePayload) -> bool:
+    """Достаточно compact/facts для базовой и суммарной разбивки по эффектам."""
+    if payload.compact is not None:
         return True
-    if payload.facts and any(fact.rule_by_year for fact in payload.facts):
-        return True
-    return False
+    return bool(payload.facts)
 
 
 def _aggregate_compact_totals(
@@ -111,9 +110,9 @@ class ScenarioEffectsCubeService:
         if access_errors:
             return None, access_errors
 
-        if not _payload_has_rule_breakdown(payload):
+        if not _payload_has_effects_data(payload):
             return None, [
-                "Кэш не содержит разбивку по правилам. Выполните пересчёт.",
+                "Кэш расчёта устарел или недоступен. Выполните пересчёт.",
             ]
 
         effect_slices = self._build_effect_slices(payload, scenario=scenario)

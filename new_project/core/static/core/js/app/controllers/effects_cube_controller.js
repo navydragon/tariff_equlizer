@@ -247,9 +247,8 @@ import { clearToasts, showToast } from "../lib/toast.js";
             (data && data.errors && data.errors.join("; ")) ||
             "Не удалось загрузить куб эффектов";
           if (
-            message.includes("устарел") ||
-            message.includes("пересчёт") ||
-            message.includes("разбивку")
+            !this.state.computing &&
+            (message.includes("устарел") || message.includes("недоступен"))
           ) {
             this.state.cacheKey = null;
             this._computeEffects();

@@ -10,9 +10,13 @@ from calculations.domain.dto.scenario_effects import ScenarioEffectsComputeRespo
 from calculations.domain.services.pandas_tariff_conditions import build_rule_mask
 from calculations.domain.services.scenario_effects_cache import (
     CompactRouteEffects,
+    ScenarioComputeSnapshot,
     ScenarioEffectsCachePayload,
+    compute_scenario_data_version,
+    get_scenario_snapshot,
     make_cache_key,
     store_payload,
+    store_scenario_snapshot,
 )
 from calculations.domain.services.scenario_effects_compact import (
     build_compact_from_arrays,
@@ -24,7 +28,7 @@ from calculations.domain.services.scenario_effects_formatting import (
 )
 from calculations.domain.services.route_effects_loader import (
     fetch_route_set_stats,
-    fetch_routes_dataframe,
+    fetch_routes_dataframe_timed,
 )
 from calculations.domain.services.tariff_load import TariffLoadService
 from scenarios.models import Scenario
@@ -53,15 +57,54 @@ class ScenarioEffectsPandasService:
         t_context = time.perf_counter()
         years = context.years
 
-        df, skipped_charge, skipped_volume = self._load_routes_df(scenario)
-        t_load = time.perf_counter()
+        data_version = compute_scenario_data_version(
+            scenario=scenario,
+            base_coef_by_year=context.base_coef_by_year,
+            rules=context.rules,
+        )
+        snapshot = get_scenario_snapshot(
+            scenario_id=scenario.id,
+            data_version=data_version,
+        )
 
-        compact, global_totals = self._compute_compact(df, context, years)
-        t_compute = time.perf_counter()
+        load_timings: dict[str, int] = {}
+        cache_hit = snapshot is not None
 
-        filter_options = self._collect_filter_options(df)
-        cards = build_cards_from_totals(global_totals, years)
-        t_cards = time.perf_counter()
+        if snapshot is not None:
+            global_totals = snapshot.global_totals
+            compact = snapshot.compact
+            skipped_charge = snapshot.routes_without_charge
+            skipped_volume = snapshot.routes_without_volume
+            filter_options = snapshot.filter_options
+            cards = build_cards_from_totals(global_totals, years)
+            t_load = time.perf_counter()
+            t_compute = t_load
+            t_cards = t_load
+        else:
+            df, skipped_charge, skipped_volume, load_timings = self._load_routes_df(
+                scenario,
+            )
+            t_load = time.perf_counter()
+
+            compact, global_totals = self._compute_compact(df, context, years)
+            t_compute = time.perf_counter()
+
+            filter_options = self._collect_filter_options(df)
+            cards = build_cards_from_totals(global_totals, years)
+            t_cards = time.perf_counter()
+
+            store_scenario_snapshot(
+                scenario_id=scenario.id,
+                snapshot=ScenarioComputeSnapshot(
+                    data_version=data_version,
+                    years=years,
+                    routes_without_charge=skipped_charge,
+                    routes_without_volume=skipped_volume,
+                    global_totals=global_totals,
+                    compact=compact,
+                    filter_options=filter_options,
+                ),
+            )
 
         cache_key = make_cache_key(user_id=user_id, scenario_id=scenario.id)
         store_payload(
@@ -83,12 +126,15 @@ class ScenarioEffectsPandasService:
         meta = {
             "engine": "pandas",
             "elapsed_ms": elapsed_ms,
+            "cache_hit": cache_hit,
+            "data_version": data_version,
             "timings": {
                 "context_ms": int((t_context - started) * 1000),
                 "load_ms": int((t_load - t_context) * 1000),
                 "compute_ms": int((t_compute - t_load) * 1000),
                 "cards_ms": int((t_cards - t_compute) * 1000),
                 "cache_ms": int((t_cache - t_cards) * 1000),
+                **load_timings,
             },
         }
 
@@ -110,11 +156,15 @@ class ScenarioEffectsPandasService:
     def _load_routes_df(
         self,
         scenario: Scenario,
-    ) -> tuple[pd.DataFrame, int, int]:
+    ) -> tuple[pd.DataFrame, int, int, dict[str, int]]:
         route_set_id = scenario.route_set_id
+        t_stats = time.perf_counter()
         skipped_charge, skipped_volume = fetch_route_set_stats(route_set_id)
-        df = fetch_routes_dataframe(route_set_id)
-        return df, skipped_charge, skipped_volume
+        stats_ms = int((time.perf_counter() - t_stats) * 1000)
+
+        df, route_timings = fetch_routes_dataframe_timed(route_set_id)
+        load_timings = {"stats_ms": stats_ms, **route_timings}
+        return df, skipped_charge, skipped_volume, load_timings
 
     def _compute_compact(
         self,

@@ -17,7 +17,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${PROJECT_DIR}"
 
-ADMIN_LOGIN="${1:-admin@emiit.ru}"
+ADMIN_LOGIN="${1:-admin}"
 ADMIN_EMAIL="${2:-admin@emiit.ru}"
 ADMIN_PASSWORD="${3:-${ADMIN_PASSWORD:-}}"
 
@@ -52,6 +52,9 @@ python manage.py create_admin \
 
 echo "==> create_base_scenario"
 python manage.py create_base_scenario
+
+echo "==> load_base_btd"
+python manage.py load_base_btd
 
 echo "==> import_railroads"
 python manage.py import_railroads

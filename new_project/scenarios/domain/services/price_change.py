@@ -8,6 +8,7 @@ from scenarios.domain.constants import (
     PRICE_CHANGE_PARAMETERS,
 )
 from scenarios.domain.repositories import PriceChangeSettingRepository, ScenarioRepository
+from scenarios.domain.services.scenario_access import ScenarioAccessHelper
 
 
 class PriceChangeSettingService:
@@ -16,6 +17,7 @@ class PriceChangeSettingService:
     def __init__(self):
         self.repository = PriceChangeSettingRepository()
         self.scenario_repository = ScenarioRepository()
+        self._access = ScenarioAccessHelper(self.scenario_repository)
 
     def get_settings(self, scenario_id: int) -> dict[str, str]:
         stored = self.repository.get_by_scenario(scenario_id)
@@ -31,11 +33,10 @@ class PriceChangeSettingService:
         settings: dict[str, str],
         user: User,
     ) -> list[str]:
-        scenario = self.scenario_repository.get_by_id(scenario_id)
-        if not scenario:
-            return ["Сценарий не найден"]
-        if scenario.author != user:
-            return ["Нет прав на изменение этого сценария"]
+        _scenario, errors = self._access.require_scenario_write(scenario_id, user)
+        if errors:
+            return errors
+        scenario = _scenario
 
         errors = self._validate_settings(settings)
         if errors:

@@ -19,6 +19,13 @@ class InflationSetRepository:
             )
         )
 
+    def list_all(self) -> list[InflationSet]:
+        return list(
+            InflationSet.objects.select_related("author").order_by(
+                "-updated_at", "-created_at", "id"
+            )
+        )
+
     def create(self, data: dict) -> InflationSet:
         inflation_set = InflationSet.objects.create(**data)
         return InflationSet.objects.select_related("author").get(id=inflation_set.id)

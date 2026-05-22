@@ -140,30 +140,25 @@
     const isOwner = scenario.author_id === currentUserId;
     const isActive = activeScenarioId !== null && scenario.id === activeScenarioId;
     
-    // Формируем список кнопок действий
-    let actionButtons = '';
-    
-    if (isOwner) {
-      actionButtons = `
+    let actionButtons = `
         <div class="btn-list mt-3">
           <button class="btn btn-sm btn-outline-primary edit-scenario-btn" data-scenario-id="${scenario.id}">
             <i class="ti ti-edit"></i>
             Редактировать
           </button>
-          ${!isActive ? `
+          ${isOwner && !isActive ? `
             <button class="btn btn-sm btn-outline-danger delete-scenario-btn" data-scenario-id="${scenario.id}">
               <i class="ti ti-trash"></i>
               Удалить
             </button>
-          ` : `
+          ` : isOwner && isActive ? `
             <button class="btn btn-sm btn-outline-danger" disabled title="Нельзя удалить активный сценарий">
               <i class="ti ti-trash"></i>
               Удалить
             </button>
-          `}
+          ` : ""}
         </div>
       `;
-    }
 
     return `
       <div class="col-md-6 col-lg-4 d-flex">

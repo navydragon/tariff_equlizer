@@ -57,6 +57,20 @@ class User(AbstractBaseUser, PermissionsMixin):
         return self.login
 
 
+class Setting(models.Model):
+    code = models.CharField("Код", max_length=100, unique=True, db_index=True)
+    description = models.TextField("Описание", blank=True)
+    value = models.CharField("Значение", max_length=255)
+
+    class Meta:
+        verbose_name = "Настройка"
+        verbose_name_plural = "Настройки"
+        ordering = ["code"]
+
+    def __str__(self) -> str:
+        return f"{self.code}={self.value}"
+
+
 class CargoGroup(models.Model):
     code = models.PositiveSmallIntegerField("Код", primary_key=True)
     name = models.CharField("Название", max_length=255)
@@ -516,6 +530,15 @@ class Route(models.Model):
             models.Index(
                 fields=["route_set", "freight_charge_ths_rub"],
                 name="route_set_charge_idx",
+            ),
+            models.Index(fields=["route_set", "id"], name="route_set_id_idx"),
+            models.Index(
+                fields=["route_set", "origin_station"],
+                name="route_set_origin_idx",
+            ),
+            models.Index(
+                fields=["route_set", "destination_station"],
+                name="route_set_dest_idx",
             ),
             models.Index(fields=["cargo"], name="route_cargo_idx"),
             models.Index(

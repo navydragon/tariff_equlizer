@@ -1,7 +1,13 @@
 import os
+import sys
 import time
+from pathlib import Path
 
 import django
+
+PROJECT_DIR = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_DIR))
+os.chdir(PROJECT_DIR)
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
 django.setup()
@@ -12,9 +18,13 @@ from scenarios.models import Scenario
 
 
 def main() -> None:
-    scenario = Scenario.objects.filter(name__icontains="Базовый").first()
+    scenario = (
+        Scenario.objects.select_related("route_set")
+        .filter(name__icontains="Базовый")
+        .first()
+    )
     if scenario is None:
-        scenario = Scenario.objects.first()
+        scenario = Scenario.objects.select_related("route_set").first()
     if scenario is None:
         print("No scenarios found")
         return
@@ -43,7 +53,23 @@ def main() -> None:
     t1 = time.perf_counter()
     print(
         f"pandas: wall={t1 - t0:.2f}s "
-        f"server_elapsed_ms={meta.get('elapsed_ms')} errors={pd_errors}",
+        f"server_elapsed_ms={meta.get('elapsed_ms')} "
+        f"cache_hit={meta.get('cache_hit')} errors={pd_errors}",
+    )
+    timings = meta.get("timings") or {}
+    if timings:
+        print(f"  timings: {timings}")
+
+    t0 = time.perf_counter()
+    pd_result_2, pd_errors_2, meta_2 = pd.compute_pandas(
+        scenario=scenario,
+        user_id=user_id,
+    )
+    t1 = time.perf_counter()
+    print(
+        f"pandas (repeat): wall={t1 - t0:.2f}s "
+        f"server_elapsed_ms={meta_2.get('elapsed_ms')} "
+        f"cache_hit={meta_2.get('cache_hit')} errors={pd_errors_2}",
     )
 
     if py_result and pd_result:

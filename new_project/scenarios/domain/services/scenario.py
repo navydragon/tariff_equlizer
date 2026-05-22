@@ -11,10 +11,11 @@ from scenarios.domain.dto import (
 )
 from scenarios.domain.repositories import ScenarioRepository
 from scenarios.domain.services.price_change import PriceChangeSettingService
+from scenarios.domain.services.scenario_access import (
+    ERR_SCENARIO_NOT_FOUND,
+    ScenarioAccessHelper,
+)
 from scenarios.models import ExchangeRateSet
-
-
-ERR_SCENARIO_NOT_FOUND = "Сценарий не найден"
 
 
 class ScenarioService:
@@ -23,10 +24,19 @@ class ScenarioService:
     def __init__(self):
         self.repository = ScenarioRepository()
         self.price_change_service = PriceChangeSettingService()
+        self._access = ScenarioAccessHelper(self.repository)
 
-    def get_user_scenarios(self) -> list[ScenarioListDTO]:
-        all_scenarios = self.repository.get_all()
-        return [ScenarioListDTO.from_model(s) for s in all_scenarios]
+    def _app_settings(self):
+        from core.domain.services.app_settings import AppSettingsService
+
+        return AppSettingsService()
+
+    def get_user_scenarios(self, user: User) -> list[ScenarioListDTO]:
+        if self._app_settings().shares_all_scenarios():
+            scenarios = self.repository.get_all()
+        else:
+            scenarios = self.repository.get_by_author(user)
+        return [ScenarioListDTO.from_model(s) for s in scenarios]
 
     def get_scenario(self, scenario_id: int) -> Optional[ScenarioDTO]:
         scenario = self.repository.get_by_id(scenario_id)
@@ -69,6 +79,15 @@ class ScenarioService:
         if errors:
             return None, errors
 
+        base_scenario = self.repository.get_by_id(dto.base_scenario_id)
+        if not base_scenario:
+            return None, ["Исходный сценарий не найден"]
+        if not self._app_settings().can_read_scenario(
+            author_id=base_scenario.author_id,
+            user_id=user.id,
+        ):
+            return None, ["Исходный сценарий не найден"]
+
         scenario = self.repository.copy_scenario(
             source_id=dto.base_scenario_id,
             new_name=dto.name,
@@ -97,12 +116,9 @@ class ScenarioService:
     def update_scenario(
         self, scenario_id: int, dto: UpdateScenarioDTO, user: User
     ) -> tuple[Optional[ScenarioDTO], list[str]]:
-        scenario = self.repository.get_by_id(scenario_id)
-        if not scenario:
-            return None, [ERR_SCENARIO_NOT_FOUND]
-
-        if scenario.author != user:
-            return None, ["Нет прав на редактирование этого сценария"]
+        scenario, errors = self._access.require_scenario_write(scenario_id, user)
+        if errors:
+            return None, errors
 
         errors = dto.validate()
         if errors:
@@ -168,7 +184,10 @@ class ScenarioService:
             rate_set = ExchangeRateSet.objects.get(id=exchange_rate_set_id)
         except ExchangeRateSet.DoesNotExist:
             return None, ["Набор курсов валют не найден"]
-        if rate_set.author_id != user.id:
+        if not self._app_settings().can_read_user_resource(
+            owner_id=rate_set.author_id,
+            user_id=user.id,
+        ):
             return None, ["Нет прав на использование этого набора курсов"]
         return rate_set, []
 
@@ -197,9 +216,9 @@ class ScenarioService:
         self, user: User, scenario_id: Optional[int]
     ) -> tuple[bool, list[str]]:
         if scenario_id is not None:
-            scenario = self.repository.get_by_id(scenario_id)
-            if not scenario:
-                return False, [ERR_SCENARIO_NOT_FOUND]
+            scenario, errors = self._access.require_scenario_read(scenario_id, user)
+            if errors:
+                return False, errors
 
         user.active_scenario_id = scenario_id
         user.save(update_fields=["active_scenario"])

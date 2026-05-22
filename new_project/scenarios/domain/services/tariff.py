@@ -10,6 +10,7 @@ from scenarios.domain.dto import (
     UpdateTariffRuleDTO,
 )
 from scenarios.domain.repositories import ScenarioRepository, TariffRuleRepository
+from scenarios.domain.services.scenario_access import ScenarioAccessHelper
 
 
 ERR_RULE_NOT_FOUND = "Тарифное решение не найдено"
@@ -19,19 +20,12 @@ class TariffRuleService:
     def __init__(self):
         self.repository = TariffRuleRepository()
         self.scenario_repository = ScenarioRepository()
-
-    def _validate_scenario_access(self, scenario_id: int, user: User):
-        scenario = self.scenario_repository.get_by_id(scenario_id)
-        if not scenario:
-            return None, ["Сценарий не найден"]
-        if scenario.author != user:
-            return None, ["Нет прав на изменение этого сценария"]
-        return scenario, []
+        self._access = ScenarioAccessHelper(self.scenario_repository)
 
     def list_rules(
         self, scenario_id: int, user: User
     ) -> tuple[list[TariffRuleDTO], list[str]]:
-        _scenario, errors = self._validate_scenario_access(scenario_id, user)
+        _scenario, errors = self._access.require_scenario_read(scenario_id, user)
         if errors:
             return [], errors
         rules = self.repository.list_by_scenario(scenario_id)
@@ -43,7 +37,7 @@ class TariffRuleService:
         rule = self.repository.get_by_id(rule_id)
         if not rule:
             return None, [ERR_RULE_NOT_FOUND]
-        _scenario, errors = self._validate_scenario_access(rule.scenario_id, user)
+        _scenario, errors = self._access.require_scenario_read(rule.scenario_id, user)
         if errors:
             return None, errors
         return TariffRuleDTO.from_model(rule), []
@@ -56,7 +50,7 @@ class TariffRuleService:
         if errors:
             return None, errors
 
-        scenario, errors = self._validate_scenario_access(dto.scenario_id, user)
+        scenario, errors = self._access.require_scenario_write(dto.scenario_id, user)
         if errors:
             return None, errors
 
@@ -99,7 +93,7 @@ class TariffRuleService:
         if not rule:
             return None, [ERR_RULE_NOT_FOUND]
 
-        scenario, errors = self._validate_scenario_access(rule.scenario_id, user)
+        scenario, errors = self._access.require_scenario_write(rule.scenario_id, user)
         if errors:
             return None, errors
 
@@ -142,7 +136,7 @@ class TariffRuleService:
         rule = self.repository.get_by_id(rule_id)
         if not rule:
             return False, [ERR_RULE_NOT_FOUND]
-        _scenario, errors = self._validate_scenario_access(rule.scenario_id, user)
+        _scenario, errors = self._access.require_scenario_write(rule.scenario_id, user)
         if errors:
             return False, errors
         ok = self.repository.delete(rule_id)

@@ -22,7 +22,10 @@ def _quantize_money(value: Decimal) -> Decimal:
 
 def load_inflation_rates_by_year(scenario: Scenario) -> dict[int, Decimal] | None:
     """
-    Возвращает ставки инфляции (%) по годам сценария или None, если данные неполные.
+    Возвращает ставки инфляции (%) по годам сценария.
+
+    None — если набор инфляции не привязан к сценарию.
+    Годы без явного значения в матрице считаются 0% (ячейка «нет» в UI).
     """
     if not scenario.inflation_set_id:
         return None
@@ -39,13 +42,10 @@ def load_inflation_rates_by_year(scenario: Scenario) -> dict[int, Decimal] | Non
     for row in inflation_set.values.all():
         values_by_year[int(row.year)] = Decimal(row.rate_percent)
 
-    rates: dict[int, Decimal] = {}
-    for year in years:
-        if year not in values_by_year:
-            return None
-        rates[year] = values_by_year[year]
-
-    return rates
+    return {
+        year: values_by_year.get(year, Decimal("0"))
+        for year in years
+    }
 
 
 def index_money_series(

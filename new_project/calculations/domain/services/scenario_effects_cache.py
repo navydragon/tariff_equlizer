@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import uuid
 from dataclasses import dataclass, field
 from decimal import Decimal
@@ -7,8 +9,12 @@ from decimal import Decimal
 import numpy as np
 from django.core.cache import cache
 
+from calculations.domain.services.scenario_effects_formatting import GlobalTotals
+from scenarios.models import Scenario, TariffRule
+
 CACHE_PREFIX = "scenario_effects"
-CACHE_TIMEOUT_SECONDS = 60 * 60
+STABLE_CACHE_PREFIX = f"{CACHE_PREFIX}:stable"
+CACHE_TIMEOUT_SECONDS = 60 * 60 * 24
 
 
 @dataclass
@@ -53,6 +59,93 @@ class ScenarioEffectsCachePayload:
     baseline_total: Decimal
     facts: list[RouteEffectFact] = field(default_factory=list)
     compact: CompactRouteEffects | None = None
+
+
+@dataclass
+class ScenarioComputeSnapshot:
+    """Результат compute для сценария (без привязки к пользователю)."""
+
+    data_version: str
+    years: list[int]
+    routes_without_charge: int
+    routes_without_volume: int
+    global_totals: GlobalTotals
+    compact: CompactRouteEffects | None
+    filter_options: dict[str, list[str]]
+
+
+def compute_scenario_data_version(
+    *,
+    scenario: Scenario,
+    base_coef_by_year: dict[int, Decimal],
+    rules: list[TariffRule],
+) -> str:
+    """
+    Версия входных данных для инвалидации стабильного кэша:
+    набор маршрутов + коэффициенты + тарифные правила.
+    """
+    route_set = scenario.route_set
+    parts: list[str] = [
+        str(scenario.id),
+        str(scenario.start_year),
+        str(scenario.end_year),
+        str(route_set.id),
+        route_set.updated_at.isoformat() if route_set.updated_at else "",
+    ]
+    for year in sorted(base_coef_by_year):
+        parts.append(f"base:{year}:{base_coef_by_year[year]}")
+    for rule in rules:
+        parts.append(
+            f"rule:{rule.id}:{rule.position}:{rule.base_percent}",
+        )
+        for condition in rule.conditions.all():
+            parts.append(
+                json.dumps(
+                    {
+                        "parameter": condition.parameter,
+                        "operator": condition.operator,
+                        "values": condition.values,
+                    },
+                    sort_keys=True,
+                    ensure_ascii=False,
+                ),
+            )
+        for year_value in rule.year_values.all():
+            parts.append(f"coef:{year_value.year}:{year_value.coefficient}")
+    digest = hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()
+    return digest[:16]
+
+
+def stable_snapshot_cache_key(*, scenario_id: int, data_version: str) -> str:
+    return f"{STABLE_CACHE_PREFIX}:{scenario_id}:{data_version}"
+
+
+def get_scenario_snapshot(
+    *,
+    scenario_id: int,
+    data_version: str,
+) -> ScenarioComputeSnapshot | None:
+    payload = cache.get(
+        stable_snapshot_cache_key(scenario_id=scenario_id, data_version=data_version),
+    )
+    if isinstance(payload, ScenarioComputeSnapshot):
+        return payload
+    return None
+
+
+def store_scenario_snapshot(
+    *,
+    scenario_id: int,
+    snapshot: ScenarioComputeSnapshot,
+) -> None:
+    cache.set(
+        stable_snapshot_cache_key(
+            scenario_id=scenario_id,
+            data_version=snapshot.data_version,
+        ),
+        snapshot,
+        CACHE_TIMEOUT_SECONDS,
+    )
 
 
 def make_cache_key(*, user_id: int, scenario_id: int) -> str:

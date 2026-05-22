@@ -3,6 +3,7 @@ from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 
 from .models import (
     User,
+    Setting,
     CargoGroup,
     Cargo,
     RailRoad,
@@ -36,6 +37,13 @@ class UserAdmin(BaseUserAdmin):
             "fields": ("login", "password1", "password2", "last_name", "first_name", "middle_name", "email", "is_staff", "is_superuser"),
         }),
     )
+
+
+@admin.register(Setting)
+class SettingAdmin(admin.ModelAdmin):
+    list_display = ("code", "value", "description")
+    search_fields = ("code", "description", "value")
+    ordering = ("code",)
 
 
 @admin.register(CargoGroup)

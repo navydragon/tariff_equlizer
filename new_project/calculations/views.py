@@ -24,6 +24,7 @@ from calculations.domain.services import (
     ScenarioEffectsService,
     TariffLoadService,
 )
+from core.domain.services.app_settings import AppSettingsService
 from core.export import ExcelExportService, ExportColumn, ExportTable, excel_response
 from core.models import Route
 from scenarios.models import Scenario
@@ -41,12 +42,21 @@ def _parse_json_body(request):
 
 def _get_user_scenario(request, scenario_id: int):
     try:
-        return Scenario.objects.get(pk=scenario_id, author=request.user), None
+        scenario = Scenario.objects.get(pk=scenario_id)
     except Scenario.DoesNotExist:
         return None, JsonResponse(
             {"success": False, "errors": ["Сценарий не найден"]},
             status=404,
         )
+    if not AppSettingsService().can_read_scenario(
+        author_id=scenario.author_id,
+        user_id=request.user.id,
+    ):
+        return None, JsonResponse(
+            {"success": False, "errors": ["Сценарий не найден"]},
+            status=404,
+        )
+    return scenario, None
 
 
 @login_required
@@ -140,6 +150,8 @@ def scenario_effects_compute_pandas_api(request):
     if error_response:
         return error_response
 
+    scenario = Scenario.objects.select_related("route_set").get(pk=scenario.pk)
+
     service = ScenarioEffectsPandasService()
     response_dto, calc_errors, meta = service.compute_pandas(
         scenario=scenario,
@@ -154,6 +166,8 @@ def scenario_effects_compute_pandas_api(request):
             **response_dto.to_api_dict(),
             "engine": meta.get("engine"),
             "elapsed_ms": meta.get("elapsed_ms"),
+            "cache_hit": meta.get("cache_hit", False),
+            "data_version": meta.get("data_version"),
             "timings": meta.get("timings"),
         },
     )

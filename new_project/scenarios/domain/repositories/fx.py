@@ -19,6 +19,13 @@ class ExchangeRateSetRepository:
             )
         )
 
+    def list_all(self) -> list[ExchangeRateSet]:
+        return list(
+            ExchangeRateSet.objects.select_related("author").order_by(
+                "-updated_at", "-created_at", "id"
+            )
+        )
+
     def create(self, data: dict) -> ExchangeRateSet:
         rate_set = ExchangeRateSet.objects.create(**data)
         return ExchangeRateSet.objects.select_related("author").get(id=rate_set.id)

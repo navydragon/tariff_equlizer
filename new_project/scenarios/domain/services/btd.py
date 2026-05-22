@@ -18,6 +18,7 @@ from scenarios.domain.repositories import (
     ScenarioRepository,
 )
 from scenarios.domain.services.btd_coefficients import compute_total_coefficient_by_year
+from scenarios.domain.services.scenario_access import ScenarioAccessHelper
 from scenarios.models import BTDCategory, BTDCategoryValue
 
 
@@ -30,19 +31,12 @@ class BTDCategoryService:
     def __init__(self):
         self.repository = BTDCategoryRepository()
         self.scenario_repository = ScenarioRepository()
-
-    def _validate_scenario_access(self, scenario_id: int, user: User):
-        scenario = self.scenario_repository.get_by_id(scenario_id)
-        if not scenario:
-            return None, ["Сценарий не найден"]
-        if scenario.author != user:
-            return None, ["Нет прав на изменение этого сценария"]
-        return scenario, []
+        self._access = ScenarioAccessHelper(self.scenario_repository)
 
     def list_categories(
         self, scenario_id: int, user: User
     ) -> tuple[list[BTDCategoryDTO], list[str]]:
-        scenario, errors = self._validate_scenario_access(scenario_id, user)
+        scenario, errors = self._access.require_scenario_read(scenario_id, user)
         if errors:
             return [], errors
 
@@ -57,7 +51,7 @@ class BTDCategoryService:
         if errors:
             return None, errors
 
-        scenario, errors = self._validate_scenario_access(
+        scenario, errors = self._access.require_scenario_write(
             dto.scenario_id, user
         )
         if errors:
@@ -83,7 +77,7 @@ class BTDCategoryService:
         if not category:
             return None, [ERR_CATEGORY_NOT_FOUND]
 
-        scenario, errors = self._validate_scenario_access(
+        scenario, errors = self._access.require_scenario_write(
             category.scenario_id, user
         )
         if errors:
@@ -143,7 +137,7 @@ class BTDCategoryService:
         if not category:
             return False, [ERR_CATEGORY_NOT_FOUND]
 
-        scenario, errors = self._validate_scenario_access(
+        scenario, errors = self._access.require_scenario_write(
             category.scenario_id, user
         )
         if errors:
@@ -166,7 +160,7 @@ class BTDCategoryService:
         if not category:
             return None, [ERR_CATEGORY_NOT_FOUND]
 
-        scenario, errors = self._validate_scenario_access(
+        scenario, errors = self._access.require_scenario_write(
             category.scenario_id, user
         )
         if errors:
@@ -202,17 +196,10 @@ class BTDCategoryValueService:
         self.scenario_repository = ScenarioRepository()
         self.category_repository = BTDCategoryRepository()
         self.value_repository = BTDCategoryValueRepository()
-
-    def _validate_scenario_access(self, scenario_id: int, user: User):
-        scenario = self.scenario_repository.get_by_id(scenario_id)
-        if not scenario:
-            return None, ["Сценарий не найден"]
-        if scenario.author != user:
-            return None, ["Нет прав на изменение этого сценария"]
-        return scenario, []
+        self._access = ScenarioAccessHelper(self.scenario_repository)
 
     def get_matrix(self, scenario_id: int, user: User) -> tuple[dict, list[str]]:
-        scenario, errors = self._validate_scenario_access(scenario_id, user)
+        scenario, errors = self._access.require_scenario_read(scenario_id, user)
         if errors:
             return {}, errors
 
@@ -258,7 +245,7 @@ class BTDCategoryValueService:
         if basic_errors:
             return None, basic_errors
 
-        scenario, errors = self._validate_scenario_access(dto.scenario_id, user)
+        scenario, errors = self._access.require_scenario_write(dto.scenario_id, user)
         if errors:
             return None, errors
 

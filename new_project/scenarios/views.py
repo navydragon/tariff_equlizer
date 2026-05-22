@@ -11,6 +11,7 @@ from django.shortcuts import render
 from django.urls import reverse
 from django.views.decorators.http import require_http_methods
 
+from core.domain.services.app_settings import AppSettingsService
 from core.models import Route
 from scenarios.models import Scenario
 from scenarios.domain.constants import PRICE_CHANGE_MODES, PRICE_CHANGE_PARAMETERS
@@ -42,7 +43,7 @@ def scenario_window_view(request):
 def scenario_list_api(request):
     """AJAX endpoint (JSON) для получения списка сценариев."""
     service = ScenarioService()
-    scenarios = service.get_user_scenarios()
+    scenarios = service.get_user_scenarios(request.user)
     
     return JsonResponse({
         "success": True,
@@ -209,7 +210,7 @@ def scenario_create_modal_view(request):
     """Возвращает HTML шаблон модалки создания."""
     # Получаем список сценариев для выпадающего списка "на базе существующего"
     service = ScenarioService()
-    scenarios = service.get_user_scenarios()
+    scenarios = service.get_user_scenarios(request.user)
     
     return render(request, "scenarios/create_scenario_modal.html", {
         "scenarios": scenarios
@@ -231,10 +232,12 @@ def scenario_edit_modal_view(request, scenario_id):
     if not scenario:
         return HttpResponse("Сценарий не найден", status=404)
     
-    # Проверка прав: только автор может редактировать
-    if scenario.author_id != request.user.id:
+    if not AppSettingsService().can_write_scenario(
+        author_id=scenario.author_id,
+        user_id=request.user.id,
+    ):
         return HttpResponse("Нет прав на редактирование этого сценария", status=403)
-    
+
     return render(request, "scenarios/edit_scenario_modal.html", {
         "scenario": scenario
     })
@@ -249,10 +252,12 @@ def scenario_edit_view(request, scenario_id):
     if not scenario:
         return HttpResponse("Сценарий не найден", status=404)
     
-    # Проверка прав: только автор может редактировать
-    if scenario.author_id != request.user.id:
+    if not AppSettingsService().can_write_scenario(
+        author_id=scenario.author_id,
+        user_id=request.user.id,
+    ):
         return HttpResponse("Нет прав на редактирование этого сценария", status=403)
-    
+
     breadcrumbs = [
         {"title": "Экономика грузов", "url": reverse("home")},
         {"title": "Сценарии", "url": reverse("scenarios:management")},
@@ -386,7 +391,10 @@ def tariff_rule_options_api(request, scenario_id):
     except Scenario.DoesNotExist:
         return JsonResponse({"success": False, "errors": ["Сценарий не найден"]}, status=404)
 
-    if scenario.author_id != request.user.id:
+    if not AppSettingsService().can_write_scenario(
+        author_id=scenario.author_id,
+        user_id=request.user.id,
+    ):
         return JsonResponse({"success": False, "errors": ["Нет прав на изменение этого сценария"]}, status=403)
 
     qs = Route.objects.filter(route_set_id=scenario.route_set_id)
@@ -463,7 +471,10 @@ def tariff_rule_stats_api(request, scenario_id):
     except Scenario.DoesNotExist:
         return JsonResponse({"success": False, "errors": ["Сценарий не найден"]}, status=404)
 
-    if scenario.author_id != request.user.id:
+    if not AppSettingsService().can_write_scenario(
+        author_id=scenario.author_id,
+        user_id=request.user.id,
+    ):
         return JsonResponse({"success": False, "errors": ["Нет прав на изменение этого сценария"]}, status=403)
 
     conditions = data.get("conditions") or []

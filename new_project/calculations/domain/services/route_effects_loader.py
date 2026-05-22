@@ -1,19 +1,8 @@
 from __future__ import annotations
 
+import time
 import pandas as pd
 from django.db import connection
-
-def _read_sql(sql: str, params: list | tuple | None = None) -> pd.DataFrame:
-    """read_sql через DB-API соединение Django (без предупреждения pandas)."""
-    with connection.cursor() as cursor:
-        if params:
-            cursor.execute(sql, params)
-        else:
-            cursor.execute(sql)
-        columns = [col[0] for col in cursor.description]
-        rows = cursor.fetchall()
-    return pd.DataFrame.from_records(rows, columns=columns)
-
 
 from core.models import (
     Cargo,
@@ -25,6 +14,18 @@ from core.models import (
     Station,
     WagonKind,
 )
+
+
+def _read_sql(sql: str, params: list | tuple | None = None) -> pd.DataFrame:
+    """read_sql через DB-API соединение Django (без предупреждения pandas)."""
+    with connection.cursor() as cursor:
+        if params:
+            cursor.execute(sql, params)
+        else:
+            cursor.execute(sql)
+        columns = [col[0] for col in cursor.description]
+        rows = cursor.fetchall()
+    return pd.DataFrame.from_records(rows, columns=columns)
 
 
 def _table(model) -> str:
@@ -64,6 +65,18 @@ def fetch_route_set_stats(route_set_id: int) -> tuple[int, int]:
 
 
 def fetch_routes_dataframe(route_set_id: int) -> pd.DataFrame:
+    """Загружает маршруты с измерениями одним SQL-запросом."""
+    df, _timings = fetch_routes_dataframe_timed(route_set_id)
+    return df
+
+
+def fetch_routes_dataframe_timed(
+    route_set_id: int,
+) -> tuple[pd.DataFrame, dict[str, int]]:
+    """
+    Загружает маршруты с измерениями одним SQL-запросом.
+    Возвращает DataFrame и под-тайминги (мс) для диагностики.
+    """
     route_table = _table(Route)
     cargo_table = _table(Cargo)
     cargo_group_table = _table(CargoGroup)
@@ -75,115 +88,68 @@ def fetch_routes_dataframe(route_set_id: int) -> pd.DataFrame:
 
     routes_sql = f"""
         SELECT
-            id,
-            freight_charge_ths_rub,
-            transport_volume_mln_tons,
-            shipper_holding,
-            cargo_id,
-            origin_station_id,
-            destination_station_id,
-            wagon_kind_id,
-            shipment_type_id,
-            message_type_id,
-            distance_loaded_km
-        FROM {route_table}
-        WHERE route_set_id = %s
-          AND freight_charge_ths_rub IS NOT NULL
-          AND freight_charge_ths_rub > 0
+            r.id,
+            r.freight_charge_ths_rub,
+            r.transport_volume_mln_tons,
+            r.shipper_holding,
+            r.cargo_id,
+            r.origin_station_id,
+            r.destination_station_id,
+            r.wagon_kind_id,
+            r.shipment_type_id,
+            r.message_type_id,
+            r.distance_loaded_km,
+            CAST(c.code AS TEXT) AS cargo_code,
+            cg.name AS cargo_group,
+            CAST(cg.code AS TEXT) AS cargo_group_code,
+            origin_rr.code AS origin_railroad_code,
+            origin_rr.direction AS direction_raw,
+            dest_rr.code AS destination_railroad_code,
+            wk.name AS wagon_kind,
+            st.name AS shipment_category,
+            mt.name AS transport_type
+        FROM {route_table} r
+        LEFT JOIN {cargo_table} c ON r.cargo_id = c.code
+        LEFT JOIN {cargo_group_table} cg ON c.cargo_group_id = cg.code
+        LEFT JOIN {station_table} origin_st ON r.origin_station_id = origin_st.esr_code
+        LEFT JOIN {railroad_table} origin_rr ON origin_st.railroad_id = origin_rr.code
+        LEFT JOIN {station_table} dest_st ON r.destination_station_id = dest_st.esr_code
+        LEFT JOIN {railroad_table} dest_rr ON dest_st.railroad_id = dest_rr.code
+        LEFT JOIN {wagon_kind_table} wk ON r.wagon_kind_id = wk.id
+        LEFT JOIN {shipment_type_table} st ON r.shipment_type_id = st.id
+        LEFT JOIN {message_type_table} mt ON r.message_type_id = mt.id
+        WHERE r.route_set_id = %s
+          AND r.freight_charge_ths_rub IS NOT NULL
+          AND r.freight_charge_ths_rub > 0
     """
-    routes = _read_sql(routes_sql, [route_set_id])
-    if routes.empty:
-        return routes
 
-    cargo_ids = routes["cargo_id"].dropna().unique().tolist()
-    if cargo_ids:
-        placeholders = ", ".join(["%s"] * len(cargo_ids))
-        cargo_sql = f"""
-            SELECT
-                c.code AS cargo_id,
-                CAST(c.code AS TEXT) AS cargo_code,
-                cg.name AS cargo_group,
-                CAST(cg.code AS TEXT) AS cargo_group_code
-            FROM {cargo_table} c
-            LEFT JOIN {cargo_group_table} cg ON c.cargo_group_id = cg.code
-            WHERE c.code IN ({placeholders})
-        """
-        cargo = _read_sql(cargo_sql, cargo_ids)
-    else:
-        cargo = pd.DataFrame(
-            columns=["cargo_id", "cargo_code", "cargo_group", "cargo_group_code"],
-        )
+    timings: dict[str, int] = {}
+    t0 = time.perf_counter()
 
-    station_ids = pd.unique(
-        routes[["origin_station_id", "destination_station_id"]].to_numpy().ravel(),
-    )
-    station_ids = [int(value) for value in station_ids if pd.notna(value)]
-    if station_ids:
-        placeholders = ", ".join(["%s"] * len(station_ids))
-        stations_sql = f"""
-            SELECT
-                s.esr_code AS station_id,
-                r.code AS railroad_code,
-                r.direction AS direction_raw
-            FROM {station_table} s
-            LEFT JOIN {railroad_table} r ON s.railroad_id = r.code
-            WHERE s.esr_code IN ({placeholders})
-        """
-        stations = _read_sql(stations_sql, station_ids)
-    else:
-        stations = pd.DataFrame(
-            columns=["station_id", "railroad_code", "direction_raw"],
-        )
+    with connection.cursor() as cursor:
+        cursor.execute(routes_sql, [route_set_id])
+        t_execute = time.perf_counter()
+        columns = [col[0] for col in cursor.description]
+        rows = cursor.fetchall()
+        t_fetch = time.perf_counter()
 
-    wagon_kind_sql = f"""
-        SELECT id AS wagon_kind_id, name AS wagon_kind
-        FROM {wagon_kind_table}
-    """
-    wagon_kinds = _read_sql(wagon_kind_sql)
+    timings["routes_sql_execute_ms"] = int((t_execute - t0) * 1000)
+    timings["routes_fetch_ms"] = int((t_fetch - t_execute) * 1000)
 
-    shipment_type_sql = f"""
-        SELECT id AS shipment_type_id, name AS shipment_category
-        FROM {shipment_type_table}
-    """
-    shipment_types = _read_sql(shipment_type_sql)
+    if not rows:
+        timings["dataframe_build_ms"] = 0
+        timings["normalize_ms"] = 0
+        return pd.DataFrame(columns=columns), timings
 
-    message_type_sql = f"""
-        SELECT id AS message_type_id, name AS transport_type
-        FROM {message_type_table}
-    """
-    message_types = _read_sql(message_type_sql)
+    df = pd.DataFrame.from_records(rows, columns=columns)
+    t_df = time.perf_counter()
+    timings["dataframe_build_ms"] = int((t_df - t_fetch) * 1000)
 
-    routes = routes.merge(cargo, on="cargo_id", how="left")
+    normalize_route_dimensions(df)
+    t_norm = time.perf_counter()
+    timings["normalize_ms"] = int((t_norm - t_df) * 1000)
 
-    if not stations.empty:
-        origin_stations = stations.rename(
-            columns={
-                "station_id": "origin_station_id",
-                "railroad_code": "origin_railroad_code",
-            },
-        )[["origin_station_id", "origin_railroad_code", "direction_raw"]]
-        destination_stations = stations.rename(
-            columns={
-                "station_id": "destination_station_id",
-                "railroad_code": "destination_railroad_code",
-            },
-        )[["destination_station_id", "destination_railroad_code"]]
-        routes = routes.merge(
-            origin_stations,
-            on="origin_station_id",
-            how="left",
-        )
-        routes = routes.merge(
-            destination_stations,
-            on="destination_station_id",
-            how="left",
-        )
-    routes = routes.merge(wagon_kinds, on="wagon_kind_id", how="left")
-    routes = routes.merge(shipment_types, on="shipment_type_id", how="left")
-    routes = routes.merge(message_types, on="message_type_id", how="left")
-
-    normalize_route_dimensions(routes)
-    return routes
+    return df, timings
 
 
 def normalize_route_dimensions(df: pd.DataFrame) -> None:
@@ -194,7 +160,8 @@ def normalize_route_dimensions(df: pd.DataFrame) -> None:
     df["direction"] = direction.mask(direction.eq(""), "—")
 
     for column in ("wagon_kind", "transport_type", "shipment_category"):
-        df[column] = df[column].fillna("—").replace("", "—")
+        if column in df.columns:
+            df[column] = df[column].fillna("—").replace("", "—")
 
     df["park_type"] = "—"
 

@@ -15,6 +15,8 @@ from scenarios.domain.repositories import (
     InflationValueRepository,
     ScenarioRepository,
 )
+from core.domain.services.app_settings import AppSettingsService
+from scenarios.domain.services.scenario_access import ScenarioAccessHelper
 from scenarios.models import InflationSet, InflationValue, Scenario
 
 
@@ -25,17 +27,19 @@ class InflationService:
         self.scenario_repository = ScenarioRepository()
         self.set_repository = InflationSetRepository()
         self.value_repository = InflationValueRepository()
+        self._access = ScenarioAccessHelper(self.scenario_repository)
 
-    def _validate_scenario_access(self, scenario_id: int, user: User):
-        scenario = self.scenario_repository.get_by_id(scenario_id)
-        if not scenario:
-            return None, ["Сценарий не найден"]
-        if scenario.author != user:
-            return None, ["Нет прав на изменение этого сценария"]
-        return scenario, []
+    def _require_scenario_read(self, scenario_id: int, user: User):
+        return self._access.require_scenario_read(scenario_id, user)
+
+    def _require_scenario_write(self, scenario_id: int, user: User):
+        return self._access.require_scenario_write(scenario_id, user)
 
     def list_sets(self, user: User) -> list[InflationSetDTO]:
-        sets = self.set_repository.list_by_author(user)
+        if self._access.shares_all_scenarios():
+            sets = self.set_repository.list_all()
+        else:
+            sets = self.set_repository.list_by_author(user)
         return [InflationSetDTO.from_model(s) for s in sets]
 
     @transaction.atomic
@@ -52,14 +56,17 @@ class InflationService:
     def attach_set_to_scenario(
         self, scenario_id: int, inflation_set_id: int, user: User
     ) -> tuple[Optional[ScenarioDTO], list[str]]:
-        scenario, errors = self._validate_scenario_access(scenario_id, user)
+        scenario, errors = self._require_scenario_write(scenario_id, user)
         if errors:
             return None, errors
 
         inflation_set = self.set_repository.get_by_id(inflation_set_id)
         if not inflation_set:
             return None, ["Набор инфляции не найден"]
-        if inflation_set.author_id != user.id:
+        if not self._access.can_read_resource(
+            owner_id=inflation_set.author_id,
+            user=user,
+        ):
             return None, ["Нет прав на использование этого набора инфляции"]
 
         scenario.inflation_set = inflation_set
@@ -67,7 +74,7 @@ class InflationService:
         return ScenarioDTO.from_model(scenario), []
 
     def get_matrix(self, scenario_id: int, user: User) -> tuple[dict, list[str]]:
-        scenario, errors = self._validate_scenario_access(scenario_id, user)
+        scenario, errors = self._require_scenario_read(scenario_id, user)
         if errors:
             return {}, errors
 
@@ -99,7 +106,7 @@ class InflationService:
         if basic_errors:
             return None, basic_errors
 
-        scenario, errors = self._validate_scenario_access(dto.scenario_id, user)
+        scenario, errors = self._require_scenario_write(dto.scenario_id, user)
         if errors:
             return None, errors
 
@@ -112,7 +119,10 @@ class InflationService:
         inflation_set = self.set_repository.get_by_id(dto.inflation_set_id)
         if not inflation_set:
             return None, ["Набор инфляции не найден"]
-        if inflation_set.author_id != user.id:
+        if not AppSettingsService().can_write_user_resource(
+            owner_id=inflation_set.author_id,
+            user_id=user.id,
+        ):
             return None, ["Нет прав на изменение этого набора инфляции"]
 
         try:

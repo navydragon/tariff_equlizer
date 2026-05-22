@@ -1,10 +1,13 @@
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
+from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.test import TestCase
 
 from core.models import RouteSet
 from scenarios.domain.constants import PRICE_CHANGE_PARAMETER_KEYS
+from scenarios.domain.services.base_btd_seed import BASE_SCENARIO_NAME
 from scenarios.domain.services import (
     BTDCategoryService,
     BTDCategoryValueService,
@@ -20,7 +23,15 @@ from scenarios.domain.dto import (
     UpdateExchangeRateValueDTO,
     UpdateInflationValueDTO,
 )
-from scenarios.models import Scenario, BTDCategory, BTDCategoryValue
+from core.domain.services.app_settings import SHARE_MODE_ALL, SHARE_MODE_OWN, SHARE_SCENARIOS_CODE
+from core.models import Setting
+from scenarios.models import (
+    Scenario,
+    BTDCategory,
+    BTDCategoryValue,
+    ExchangeRateSet,
+    InflationSet,
+)
 
 
 User = get_user_model()
@@ -580,3 +591,152 @@ class PriceChangeSettingServiceTests(TestCase):
         self.assertFalse(errors)
         self.assertIsNotNone(updated)
         self.assertEqual(updated.price_change_settings["transshipment"], "inflation")
+
+
+class ShareScenariosAccessTests(TestCase):
+    def setUp(self) -> None:
+        Setting.objects.filter(code=SHARE_SCENARIOS_CODE).delete()
+        self.owner = User.objects.create_user(login="owner", password="pass")
+        self.other = User.objects.create_user(login="other", password="pass")
+        self.route_set = RouteSet.objects.create(name="RS_SHARE", code="RS_SHARE")
+        self.owner_scenario = Scenario.objects.create(
+            name="Owner scenario",
+            start_year=2025,
+            end_year=2026,
+            route_set=self.route_set,
+            author=self.owner,
+        )
+        self.other_scenario = Scenario.objects.create(
+            name="Other scenario",
+            start_year=2025,
+            end_year=2026,
+            route_set=self.route_set,
+            author=self.other,
+        )
+        self.scenario_service = ScenarioService()
+        self.fx_service = ExchangeRateService()
+        self.inflation_service = InflationService()
+
+    def _set_share_mode(self, mode: str) -> None:
+        Setting.objects.update_or_create(
+            code=SHARE_SCENARIOS_CODE,
+            defaults={"description": "", "value": mode},
+        )
+
+    def test_list_scenarios_own_mode_shows_only_own(self) -> None:
+        self._set_share_mode(SHARE_MODE_OWN)
+        ids = {s.id for s in self.scenario_service.get_user_scenarios(self.other)}
+        self.assertEqual(ids, {self.other_scenario.id})
+
+    def test_list_scenarios_all_mode_shows_everyone(self) -> None:
+        self._set_share_mode(SHARE_MODE_ALL)
+        ids = {s.id for s in self.scenario_service.get_user_scenarios(self.other)}
+        self.assertEqual(ids, {self.owner_scenario.id, self.other_scenario.id})
+
+    def test_fx_list_sets_own_mode_hides_foreign(self) -> None:
+        self._set_share_mode(SHARE_MODE_OWN)
+        ExchangeRateSet.objects.create(name="Owner set", author=self.owner)
+        ids = {s.id for s in self.fx_service.list_sets(self.other)}
+        self.assertEqual(len(ids), 0)
+
+    def test_fx_list_sets_all_mode_shows_foreign(self) -> None:
+        self._set_share_mode(SHARE_MODE_ALL)
+        foreign_set = ExchangeRateSet.objects.create(name="Owner set", author=self.owner)
+        ids = {s.id for s in self.fx_service.list_sets(self.other)}
+        self.assertIn(foreign_set.id, ids)
+
+    def test_attach_foreign_fx_set_all_mode(self) -> None:
+        self._set_share_mode(SHARE_MODE_ALL)
+        foreign_set = ExchangeRateSet.objects.create(name="Owner set", author=self.owner)
+        updated, errors = self.fx_service.attach_set_to_scenario(
+            self.other_scenario.id,
+            foreign_set.id,
+            self.other,
+        )
+        self.assertFalse(errors)
+        self.assertEqual(updated.exchange_rate_set_id, foreign_set.id)
+
+    def test_attach_foreign_fx_set_own_mode_denied(self) -> None:
+        self._set_share_mode(SHARE_MODE_OWN)
+        foreign_set = ExchangeRateSet.objects.create(name="Owner set", author=self.owner)
+        _updated, errors = self.fx_service.attach_set_to_scenario(
+            self.other_scenario.id,
+            foreign_set.id,
+            self.other,
+        )
+        self.assertTrue(errors)
+        self.assertIn("Нет прав", errors[0])
+
+    def test_inflation_list_sets_all_mode_shows_foreign(self) -> None:
+        self._set_share_mode(SHARE_MODE_ALL)
+        foreign_set = InflationSet.objects.create(name="Owner infl", author=self.owner)
+        ids = {s.id for s in self.inflation_service.list_sets(self.other)}
+        self.assertIn(foreign_set.id, ids)
+
+    def test_set_active_foreign_scenario_own_mode_denied(self) -> None:
+        self._set_share_mode(SHARE_MODE_OWN)
+        ok, errors = self.scenario_service.set_active_scenario(
+            self.other,
+            self.owner_scenario.id,
+        )
+        self.assertFalse(ok)
+        self.assertTrue(errors)
+
+    def test_set_active_foreign_scenario_all_mode_allowed(self) -> None:
+        self._set_share_mode(SHARE_MODE_ALL)
+        ok, errors = self.scenario_service.set_active_scenario(
+            self.other,
+            self.owner_scenario.id,
+        )
+        self.assertTrue(ok)
+        self.assertFalse(errors)
+        self.other.refresh_from_db()
+        self.assertEqual(self.other.active_scenario_id, self.owner_scenario.id)
+
+
+class LoadBaseBtdCommandTests(TestCase):
+    def setUp(self) -> None:
+        self.user = User.objects.create_user(
+            login="btd_seed_user",
+            password="test_pass",
+        )
+        self.route_set = RouteSet.objects.create(
+            name="Технический набор",
+            code="DEFAULT_ROUTE_SET",
+        )
+        self.scenario = Scenario.objects.create(
+            name=BASE_SCENARIO_NAME,
+            description="Базовый",
+            start_year=2025,
+            end_year=2035,
+            route_set=self.route_set,
+            author=self.user,
+        )
+
+    def test_load_base_btd_creates_matrix_values(self) -> None:
+        call_command("load_base_btd")
+
+        categories = list(
+            BTDCategory.objects.filter(scenario=self.scenario).order_by("position")
+        )
+        self.assertEqual(len(categories), 5)
+        self.assertEqual(categories[0].name, "Индексация базовая")
+
+        indexation_2025 = BTDCategoryValue.objects.get(
+            scenario=self.scenario,
+            category=categories[0],
+            year=2025,
+        )
+        self.assertEqual(indexation_2025.value, Decimal("1.125"))
+
+        capital_2030 = BTDCategoryValue.objects.get(
+            scenario=self.scenario,
+            category=categories[1],
+            year=2030,
+        )
+        self.assertEqual(capital_2030.value, Decimal("1.07"))
+
+    def test_load_base_btd_missing_scenario_raises(self) -> None:
+        self.scenario.delete()
+        with self.assertRaises(CommandError):
+            call_command("load_base_btd")

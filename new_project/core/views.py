@@ -14,6 +14,7 @@ from core.domain.cargo.dto import CreateCargoDTO, UpdateCargoDTO
 from core.domain.cargo.services import CargoService
 from core.domain.route_analysis.dto import RouteAnalysisRequestDTO
 from core.domain.route_analysis.services import RouteAnalysisService
+from core.domain.services.app_settings import AppSettingsService
 from core.domain.railroad.dto import CreateRailRoadDTO, UpdateRailRoadDTO
 from core.domain.railroad.services import RailRoadService
 from core.domain.route.dto import (
@@ -1807,9 +1808,17 @@ def route_analysis_api(request):
         scenario = (
             Scenario.objects.select_related("inflation_set")
             .prefetch_related("inflation_set__values", "price_change_settings")
-            .get(pk=dto.scenario_id, author=request.user)
+            .get(pk=dto.scenario_id)
         )
     except Scenario.DoesNotExist:
+        return JsonResponse(
+            {"success": False, "errors": ["Сценарий не найден"]},
+            status=404,
+        )
+    if not AppSettingsService().can_read_scenario(
+        author_id=scenario.author_id,
+        user_id=request.user.id,
+    ):
         return JsonResponse(
             {"success": False, "errors": ["Сценарий не найден"]},
             status=404,

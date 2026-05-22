@@ -77,29 +77,7 @@ class RouteRepository:
         if search:
             search = search.strip()
             if search:
-                s = search.casefold()
-                q = Q(cargo__name__icontains=search) | Q(
-                    origin_station__short_name_search__contains=s
-                ) | Q(origin_station__full_name_search__contains=s) | Q(
-                    destination_station__short_name_search__contains=s
-                ) | Q(
-                    destination_station__full_name_search__contains=s
-                ) | Q(
-                    route_code__icontains=search
-                ) | Q(
-                    message_type__name_search__contains=s
-                )
-                if search.isdigit():
-                    try:
-                        esr = int(search)
-                        q = (
-                            Q(origin_station__esr_code=esr)
-                            | Q(destination_station__esr_code=esr)
-                            | q
-                        )
-                    except ValueError:
-                        pass
-                qs = qs.filter(q)
+                qs = qs.filter(self._build_search_query(search))
 
         if filters.origin_esr:
             qs = qs.filter(origin_station__esr_code=int(filters.origin_esr))
@@ -108,6 +86,34 @@ class RouteRepository:
             qs = qs.filter(destination_station__esr_code=int(filters.destination_esr))
 
         return qs.order_by("id")
+
+    @staticmethod
+    def _build_search_query(search: str) -> Q:
+        """
+        Поиск в модалке «Выбор маршрута» (route_list_api).
+        Для кода ЕСР — отдельная ветка с индексами (route_set, origin/destination_station).
+        """
+        if search.isdigit():
+            esr = int(search)
+            return (
+                Q(origin_station__esr_code=esr)
+                | Q(destination_station__esr_code=esr)
+                | Q(route_code__icontains=search)
+            )
+
+        s = search.casefold()
+        q = (
+            Q(cargo__name__icontains=search)
+            | Q(origin_station__short_name_search__contains=s)
+            | Q(origin_station__full_name_search__contains=s)
+            | Q(destination_station__short_name_search__contains=s)
+            | Q(destination_station__full_name_search__contains=s)
+            | Q(route_code__icontains=search)
+            | Q(message_type__name_search__contains=s)
+        )
+        if " " not in search:
+            q |= Q(route_code__istartswith=search)
+        return q
 
     def get_by_id(self, pk: int) -> Optional[Route]:
         try:

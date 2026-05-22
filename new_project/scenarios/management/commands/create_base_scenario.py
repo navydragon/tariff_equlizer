@@ -88,71 +88,16 @@ class Command(BaseCommand):
                 )
             )
 
-        # ========= BTDCategory + BTDCategoryValue (базовые тарифные решения) =========
-        # Эти данные нужны для матрицы на странице "Базовые тарифные решения".
-        from scenarios.models import BTDCategory, BTDCategoryValue
+        from scenarios.domain.services.base_btd_seed import seed_base_btd_for_scenario
 
-        years = list(range(scenario.start_year, scenario.end_year + 1))
-
-        indexation_values: dict[int, str] = {
-            2025: "1.125",
-            2026: "1.104",
-            2027: "1.088",
-            2028: "1.062",
-            2029: "1.045",
-            2030: "1.046",
-            2031: "1.046",
-            2032: "1.046",
-            2033: "1.046",
-            2034: "1.046",
-            2035: "1.046",
-        }
-
-        constant_values: dict[str, str] = {
-            "Капитальный ремонт": "1.07",
-            "Налоговая надбавка": "1.015",
-            "Транспортная безопасность": "1.01",
-            "Инвестиционный тариф": "1",
-        }
-
-        btd_definitions: list[tuple[str, int, dict[int, str] | None]] = [
-            ("Индексация базовая", 1, indexation_values),
-            ("Капитальный ремонт", 2, None),
-            ("Налоговая надбавка", 3, None),
-            ("Транспортная безопасность", 4, None),
-            ("Инвестиционный тариф", 5, None),
-        ]
-
-        for name, position, value_map in btd_definitions:
-            category, _created = BTDCategory.objects.get_or_create(
-                scenario=scenario,
-                position=position,
-                defaults={"name": name},
-            )
-            if category.name != name:
-                category.name = name
-                category.save(update_fields=["name"])
-
-            for year in years:
-                if value_map is not None:
-                    raw_value = value_map.get(year)
-                    if raw_value is None:
-                        continue
-                else:
-                    raw_value = constant_values[name]
-
-                BTDCategoryValue.objects.update_or_create(
-                    scenario=scenario,
-                    category=category,
-                    year=year,
-                    defaults={"value": Decimal(str(raw_value))},
-                )
-
+        seed_base_btd_for_scenario(scenario)
         self.stdout.write(
             self.style.SUCCESS(
                 "Базовые тарифные решения (BTD) обновлены/созданы."
             )
         )
+
+        years = list(range(scenario.start_year, scenario.end_year + 1))
 
         # ========= Exchange rates (USD/RUB) =========
         from scenarios.models import ExchangeRateSet, ExchangeRateValue

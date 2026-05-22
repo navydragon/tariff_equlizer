@@ -70,74 +70,94 @@ class Command(BaseCommand):
             )
         )
 
-        with transaction.atomic():
-            route_set, _ = RouteSet.objects.get_or_create(
-                code=route_set_code,
-                defaults={"name": route_set_name},
-            )
+        route_set, _ = RouteSet.objects.get_or_create(
+            code=route_set_code,
+            defaults={"name": route_set_name},
+        )
 
-            if clear_existing:
-                deleted_count, _ = Route.objects.filter(route_set=route_set).delete()
-                self.stdout.write(
-                    self.style.WARNING(
-                        f"Удалено существующих маршрутов в RouteSet {route_set.code}: "
-                        f"{deleted_count}"
-                    )
+        if clear_existing:
+            deleted_count, _ = Route.objects.filter(route_set=route_set).delete()
+            self.stdout.write(
+                self.style.WARNING(
+                    f"Удалено существующих маршрутов в RouteSet {route_set.code}: "
+                    f"{deleted_count}"
                 )
-
-            cargos: List[Cargo] = list(Cargo.objects.all())
-            stations: List[Station] = list(
-                Station.objects.select_related("railroad", "region")
             )
-            wagon_kinds: List[WagonKind] = list(
-                WagonKind.objects.filter(is_active=True)
-            )
-            shipment_types: List[ShipmentType] = list(
-                ShipmentType.objects.filter(is_active=True)
-            )
-            message_types: List[MessageType] = list(MessageType.objects.all())
 
-            if not cargos:
-                raise CommandError("Справочник Cargo пуст. Нечего выбирать.")
-            if not stations:
-                raise CommandError("Справочник Station пуст. Нечего выбирать.")
-            if not wagon_kinds:
-                raise CommandError("Справочник WagonKind пуст. Нечего выбирать.")
-            if not shipment_types:
-                raise CommandError("Справочник ShipmentType пуст. Нечего выбирать.")
-            if not message_types:
-                raise CommandError("Справочник MessageType пуст. Нечего выбирать.")
+        self.stdout.write("Загрузка справочников...")
+        cargos: List[Cargo] = list(Cargo.objects.all())
+        stations: List[Station] = list(
+            Station.objects.select_related("railroad", "region")
+        )
+        wagon_kinds: List[WagonKind] = list(WagonKind.objects.filter(is_active=True))
+        shipment_types: List[ShipmentType] = list(
+            ShipmentType.objects.filter(is_active=True)
+        )
+        message_types: List[MessageType] = list(MessageType.objects.all())
 
+        if not cargos:
+            raise CommandError("Справочник Cargo пуст. Нечего выбирать.")
+        if not stations:
+            raise CommandError("Справочник Station пуст. Нечего выбирать.")
+        if not wagon_kinds:
+            raise CommandError("Справочник WagonKind пуст. Нечего выбирать.")
+        if not shipment_types:
+            raise CommandError("Справочник ShipmentType пуст. Нечего выбирать.")
+        if not message_types:
+            raise CommandError("Справочник MessageType пуст. Нечего выбирать.")
+
+        self.stdout.write(
+            f"Справочники: cargo={len(cargos)}, stations={len(stations)}, "
+            f"wagon_kinds={len(wagon_kinds)}, shipment_types={len(shipment_types)}, "
+            f"message_types={len(message_types)}"
+        )
+
+        existing_random_codes: set[str] = set()
+        if not clear_existing:
+            self.stdout.write("Загрузка существующих route_code (RND-*)...")
             existing_random_codes = set(
-                Route.objects.filter(route_set=route_set, route_code__startswith="RND-")
-                .values_list("route_code", flat=True)
+                Route.objects.filter(
+                    route_set=route_set, route_code__startswith="RND-"
+                ).values_list("route_code", flat=True)
             )
+            self.stdout.write(f"Уже занято кодов: {len(existing_random_codes)}")
 
-            created_total = 0
-            batch: List[Route] = []
+        created_total = 0
+        batch: List[Route] = []
+        progress_step = max(batch_size, count // 100) if count >= 100 else batch_size
 
-            for i in range(count):
-                route = self._build_random_route(
-                    index=i,
-                    route_set=route_set,
-                    cargos=cargos,
-                    stations=stations,
-                    wagon_kinds=wagon_kinds,
-                    shipment_types=shipment_types,
-                    message_types=message_types,
-                    existing_random_codes=existing_random_codes,
-                )
-                existing_random_codes.add(route.route_code)
-                batch.append(route)
+        self.stdout.write("Генерация и вставка маршрутов (прогресс ниже)...")
 
-                if len(batch) >= batch_size:
+        for i in range(count):
+            route = self._build_random_route(
+                index=i,
+                route_set=route_set,
+                cargos=cargos,
+                stations=stations,
+                wagon_kinds=wagon_kinds,
+                shipment_types=shipment_types,
+                message_types=message_types,
+                existing_random_codes=existing_random_codes,
+            )
+            existing_random_codes.add(route.route_code)
+            batch.append(route)
+
+            if len(batch) >= batch_size:
+                with transaction.atomic():
                     Route.objects.bulk_create(batch, batch_size=batch_size)
-                    created_total += len(batch)
-                    batch.clear()
-
-            if batch:
-                Route.objects.bulk_create(batch, batch_size=batch_size)
                 created_total += len(batch)
+                batch.clear()
+                if created_total % progress_step == 0 or created_total == count:
+                    self.stdout.write(
+                        f"  … {created_total:,} / {count:,} "
+                        f"({created_total * 100 // count}%)"
+                    )
+
+        if batch:
+            with transaction.atomic():
+                Route.objects.bulk_create(batch, batch_size=batch_size)
+            created_total += len(batch)
+            self.stdout.write(f"  … {created_total:,} / {count:,} (100%)")
 
         self.stdout.write(
             self.style.SUCCESS(
@@ -208,30 +228,32 @@ class Command(BaseCommand):
             total_cost_per_ton * (Decimal("1.0") + margin)
         ).quantize(Decimal("0.01"))
 
-        base_code = f"RND-{route_set.code}-{origin.esr_code}-{destination.esr_code}-{index}"
-        route_code = base_code
-        suffix = 1
-        while route_code in existing_random_codes:
-            suffix += 1
-            route_code = f"{base_code}-{suffix}"
+        route_code = (
+            f"RND-{route_set.code}-{origin.esr_code}-"
+            f"{destination.esr_code}-{index:07d}"
+        )
+        if route_code in existing_random_codes:
+            suffix = 1
+            while True:
+                candidate = f"{route_code}-{suffix}"
+                if candidate not in existing_random_codes:
+                    route_code = candidate
+                    break
+                suffix += 1
 
         shipper_holding = f"Холдинг {random.randint(1, 1000)}"
         shipper = f"Грузоотправитель {random.randint(1, 1000)}"
 
-        transport_volume_mln_tons = None
-        freight_turnover_bln_tkm = None
-        freight_charge_ths_rub = None
-        if random.random() < 0.8:
-            volume = Decimal(str(round(random.uniform(0.1, 30.0), 4)))
-            turnover = (volume * Decimal(str(round(random.uniform(0.1, 2.5), 4)))).quantize(
-                Decimal("0.0001")
-            )
-            charge = (turnover * Decimal(str(round(random.uniform(80, 400), 2)))).quantize(
-                Decimal("0.01")
-            )
-            transport_volume_mln_tons = volume
-            freight_turnover_bln_tkm = turnover
-            freight_charge_ths_rub = charge
+        volume = Decimal(str(round(random.uniform(0.1, 30.0), 4)))
+        turnover = (volume * Decimal(str(round(random.uniform(0.1, 2.5), 4)))).quantize(
+            Decimal("0.0001")
+        )
+        charge = (turnover * Decimal(str(round(random.uniform(80, 400), 2)))).quantize(
+            Decimal("0.01")
+        )
+        transport_volume_mln_tons = volume
+        freight_turnover_bln_tkm = turnover
+        freight_charge_ths_rub = charge
 
         return Route(
             route_set=route_set,

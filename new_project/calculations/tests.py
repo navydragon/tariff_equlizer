@@ -20,6 +20,7 @@ from calculations.domain.services import (
     ScenarioEffectsService,
     TariffLoadService,
 )
+from core.domain.services.app_settings import SHARE_MODE_ALL, SHARE_MODE_OWN, SHARE_SCENARIOS_CODE
 from core.models import (
     Cargo,
     CargoGroup,
@@ -28,6 +29,7 @@ from core.models import (
     Region,
     Route,
     RouteSet,
+    Setting,
     ShipmentType,
     Station,
     WagonKind,
@@ -848,6 +850,29 @@ class ScenarioEffectsPandasParityTests(TariffLoadServiceTestMixin, TestCase):
         self.assertEqual(meta["engine"], "pandas")
         self._assert_aggregate_close(python_result, pandas_result)
 
+    def test_scenario_snapshot_cache_hit(self) -> None:
+        self._setup_btd("1.1000")
+        scenario = Scenario.objects.select_related("route_set").get(
+            pk=self.scenario.pk,
+        )
+
+        _, _, meta_first = self.pandas_service.compute_pandas(
+            scenario=scenario,
+            user_id=self.user.id,
+        )
+        _, _, meta_second = self.pandas_service.compute_pandas(
+            scenario=scenario,
+            user_id=self.user.id,
+        )
+
+        self.assertFalse(meta_first.get("cache_hit"))
+        self.assertTrue(meta_second.get("cache_hit"))
+        self.assertEqual(meta_first.get("data_version"), meta_second.get("data_version"))
+        self.assertLess(
+            meta_second["timings"]["load_ms"],
+            meta_first["timings"]["load_ms"],
+        )
+
 
 class ScenarioEffectsComputePandasApiTests(TariffLoadServiceTestMixin, TestCase):
     def setUp(self) -> None:
@@ -1069,6 +1094,50 @@ class ScenarioEffectsCubeApiTests(TariffLoadServiceTestMixin, TestCase):
         self.assertIn("spreadsheetml", response["Content-Type"])
         self.assertGreater(len(response.content), 100)
 
+    def test_cube_api_without_matching_rules(self) -> None:
+        """Куб работает, даже если ни одно правило не применилось к маршрутам."""
+        TariffRule.objects.filter(scenario=self.scenario).delete()
+        rule = TariffRule.objects.create(
+            scenario=self.scenario,
+            name="Не применяется",
+            base_percent=Decimal("100"),
+            position=1,
+        )
+        TariffRuleYearValue.objects.create(
+            tariff_rule=rule,
+            year=2026,
+            coefficient=Decimal("1.0500"),
+        )
+        TariffRuleCondition.objects.create(
+            tariff_rule=rule,
+            parameter="cargo_group",
+            operator="include",
+            values=["несуществующая_группа"],
+            position=1,
+        )
+
+        cache_key = self._compute_cache_key()
+        response = self.client.post(
+            reverse("calculations:scenario_effects_cube_api"),
+            data=json.dumps(
+                {
+                    "scenario_id": self.scenario.id,
+                    "cache_key": cache_key,
+                    "group_by": "cargo_group",
+                    "group_by_inner": "none",
+                },
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["success"])
+        effect_labels = {row["effect_label"] for row in payload["table"]["rows"]}
+        self.assertIn("Базовая индексация", effect_labels)
+        self.assertIn("Отдельные тарифные решения", effect_labels)
+        self.assertNotIn("Не применяется", effect_labels)
+
     def test_cube_service_tariff_decision_group(self) -> None:
         pandas_service = ScenarioEffectsPandasService()
         compute_result, errors, _meta = pandas_service.compute_pandas(
@@ -1090,3 +1159,46 @@ class ScenarioEffectsCubeApiTests(TariffLoadServiceTestMixin, TestCase):
         assert cube_result is not None
         self.assertTrue(cube_result.rows)
         self.assertEqual(cube_result.rows[0].group_label, "ИТОГО")
+
+
+class ShareScenariosCalculationsApiTests(TariffLoadServiceTestMixin, TestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        Setting.objects.filter(code=SHARE_SCENARIOS_CODE).delete()
+        self.foreign_user = User.objects.create_user(login="foreign", password="pass")
+        self.foreign_scenario = Scenario.objects.create(
+            name="Foreign scenario",
+            start_year=2025,
+            end_year=2026,
+            route_set=self.route_set,
+            author=self.foreign_user,
+        )
+        self.client = Client()
+        self.client.force_login(self.user)
+
+    def _set_share_mode(self, mode: str) -> None:
+        Setting.objects.update_or_create(
+            code=SHARE_SCENARIOS_CODE,
+            defaults={"description": "", "value": mode},
+        )
+
+    def test_compute_foreign_scenario_all_mode_success(self) -> None:
+        self._set_share_mode(SHARE_MODE_ALL)
+        url = reverse("calculations:scenario_effects_compute_api")
+        response = self.client.post(
+            url,
+            data=json.dumps({"scenario_id": self.foreign_scenario.id}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["success"])
+
+    def test_compute_foreign_scenario_own_mode_not_found(self) -> None:
+        self._set_share_mode(SHARE_MODE_OWN)
+        url = reverse("calculations:scenario_effects_compute_api")
+        response = self.client.post(
+            url,
+            data=json.dumps({"scenario_id": self.foreign_scenario.id}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 404)

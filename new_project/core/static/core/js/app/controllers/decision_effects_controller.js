@@ -450,12 +450,19 @@ import { clearToasts, showToast } from "../lib/toast.js";
             ["загрузка", meta.timings.load_ms],
             ["расчёт", meta.timings.compute_ms],
             ["кэш", meta.timings.cache_ms],
+            ["stats", meta.timings.stats_ms],
+            ["sql", meta.timings.routes_sql_execute_ms],
+            ["fetch", meta.timings.routes_fetch_ms],
+            ["df", meta.timings.dataframe_build_ms],
           ]
             .filter(([, value]) => value !== undefined && value !== null)
             .map(([label, value]) => `${label} ${value} мс`);
           if (partsTiming.length) {
             timingDetails = ` (${partsTiming.join(", ")})`;
           }
+        }
+        if (meta.cache_hit) {
+          timingDetails += ", снимок сценария";
         }
         showToast(
           `Движок расчёта: ${meta.engine}${elapsed}${timingDetails}.`,
