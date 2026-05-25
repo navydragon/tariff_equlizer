@@ -17,7 +17,8 @@ import { renderErrors } from "../lib/errors.js";
     { code: "wagon_kind", label: "Род вагона", type: "choice" },
     { code: "shipment_type", label: "Тип отправки", type: "choice" },
     { code: "message_type", label: "Вид сообщения", type: "choice" },
-    { code: "shipper_holding", label: "Холдинг", type: "choice" },
+    { code: "shipper", label: "Грузоотправитель", type: "choice" },
+    { code: "shipper_holding", label: "Холдинг грузоотправителя", type: "choice" },
     { code: "distance_loaded_km", label: "Расстояние груж., км", type: "numeric" },
   ];
 

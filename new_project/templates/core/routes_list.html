@@ -17,6 +17,7 @@
   data-routes-route-delete-url-template-value="{{ route_delete_api_url_template }}"
   data-routes-cargo-search-url-value="{% url 'cargo_list_api' %}"
   data-routes-station-search-url-value="{% url 'station_list_api' %}"
+  data-routes-shipper-search-url-value="{% url 'shipper_list_api' %}"
 >
 <div class="page-header d-print-none">
   <div class="row align-items-center">
@@ -346,16 +347,19 @@
                   </div>
 
                   <div class="row">
-                    <div class="col-md-4 mb-3">
-                      <label class="form-label" for="routeShipperHolding">Холдинг грузоотправителя</label>
-                      <input type="text" id="routeShipperHolding" class="form-control" />
+                    <div class="col-md-6 mb-3">
+                      <label class="form-label" for="routeShipperId">Грузоотправитель</label>
+                      <select
+                        id="routeShipperId"
+                        class="form-select"
+                        data-routes-target="shipperSelect"
+                        placeholder="Начните вводить название или ИНН"
+                      >
+                        <option value="">Не выбрано</option>
+                      </select>
                     </div>
-                    <div class="col-md-4 mb-3">
-                      <label class="form-label" for="routeShipper">Грузоотправитель</label>
-                      <input type="text" id="routeShipper" class="form-control" />
-                    </div>
-                    <div class="col-md-4 mb-3">
-                      <label class="form-label" for="routeMessageTypeId">ID типа сообщения</label>
+                    <div class="col-md-6 mb-3">
+                      <label class="form-label" for="routeMessageTypeId">Вид сообщения</label>
                       <select id="routeMessageTypeId" class="form-select">
                         <option value="">Не выбрано</option>
                         {% if message_types %}
@@ -403,7 +407,7 @@
                   >
                     <div><strong>Отправление:</strong> не выбрано</div>
                     <div><strong>Назначение:</strong> не выбрано</div>
-                    <div><strong>Тип сообщения:</strong> не выбрано</div>
+                    <div><strong>Вид сообщения:</strong> не выбрано</div>
                   </div>
                 </div>
               </div>

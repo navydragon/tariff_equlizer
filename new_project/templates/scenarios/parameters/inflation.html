@@ -10,24 +10,24 @@
   <div class="card-body">
     <div id="inflationErrors"></div>
 
-    <div class="row g-3 align-items-end">
+    <div class="row g-3">
       <div class="col-md-8">
         <label for="inflationSetSelect" class="form-label">Набор инфляции *</label>
         <select id="inflationSetSelect" class="form-select">
           <option value="">Загрузка...</option>
         </select>
-        <div class="form-text">
-          Набор можно использовать в нескольких сценариях (в пределах автора).
-        </div>
       </div>
-      <div class="col-md-4 d-flex gap-2">
-        <button type="button" class="btn btn-secondary flex-fill" id="inflationAttachBtn">
-          <i class="ti ti-link"></i>
-          Применить к сценарию
-        </button>
-        <button type="button" class="btn btn-outline-danger" id="inflationDeleteSetBtn" title="Удалить набор">
-          <i class="ti ti-trash"></i>
-        </button>
+      <div class="col-md-4">
+        <label class="form-label d-none d-md-block" aria-hidden="true">&nbsp;</label>
+        <div class="d-flex gap-2">
+          <button type="button" class="btn btn-secondary flex-fill" id="inflationAttachBtn">
+            <i class="ti ti-link"></i>
+            Применить к сценарию
+          </button>
+          <button type="button" class="btn btn-outline-danger" id="inflationDeleteSetBtn" title="Удалить набор">
+            <i class="ti ti-trash"></i>
+          </button>
+        </div>
       </div>
     </div>
 

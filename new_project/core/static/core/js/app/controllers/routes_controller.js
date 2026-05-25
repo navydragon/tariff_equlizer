@@ -14,6 +14,7 @@ import { renderPagination } from "../lib/pagination.js";
     static targets = [
       "routeSetSelect",
       "cargoSelect",
+      "shipperSelect",
       "originStationSelect",
       "destinationStationSelect",
       "routeSummary",
@@ -40,6 +41,7 @@ import { renderPagination } from "../lib/pagination.js";
       routeUpdateUrlTemplate: String,
       routeDeleteUrlTemplate: String,
       cargoSearchUrl: String,
+      shipperSearchUrl: String,
       stationSearchUrl: String,
       pageSizeDefault: { type: Number, default: 20 },
     };
@@ -54,6 +56,8 @@ import { renderPagination } from "../lib/pagination.js";
       this.searchDebounceTimer = null;
       this.cargoSelectInstance = null;
       this.initCargoSelect();
+      this.shipperSelectInstance = null;
+      this.initShipperSelect();
       this.originStationSelectInstance = null;
       this.destinationStationSelectInstance = null;
       this.initStationSelects();
@@ -302,6 +306,67 @@ import { renderPagination } from "../lib/pagination.js";
       });
     }
 
+    // === Tom Select для выбора грузоотправителя ===
+    initShipperSelect() {
+      if (!this.hasShipperSelectTarget) return;
+      if (typeof TomSelect === "undefined") {
+        console.warn("TomSelect is not available on window.TomSelect (shipper)");
+        return;
+      }
+
+      const searchUrl = this.shipperSearchUrlValue;
+      if (!searchUrl) {
+        console.warn("shipperSearchUrlValue is not defined for routes controller");
+        return;
+      }
+
+      const selectEl = this.shipperSelectTarget;
+      this.shipperSelectInstance = new TomSelect(selectEl, {
+        valueField: "value",
+        labelField: "text",
+        searchField: ["text"],
+        maxOptions: 50,
+        allowEmptyOption: true,
+        loadThrottle: 400,
+        preload: false,
+        render: {
+          option(item, escape) {
+            return `<div>${escape(item.text || "")}</div>`;
+          },
+          item(item, escape) {
+            return `<div>${escape(item.text || "")}</div>`;
+          },
+        },
+        load: async (query, callback) => {
+          const q = (query || "").trim();
+          if (q.length < 2) {
+            return callback();
+          }
+          try {
+            const params = new URLSearchParams();
+            params.set("page", "1");
+            params.set("page_size", "20");
+            params.set("search", q);
+            const { data } = await fetchJson(
+              `${searchUrl}?${params.toString()}`,
+              { method: "GET" },
+            );
+            if (!data || !data.success || !Array.isArray(data.items)) {
+              return callback();
+            }
+            const options = data.items.map((item) => ({
+              value: String(item.id),
+              text: item.text || item.name,
+            }));
+            callback(options);
+          } catch (e) {
+            console.error("Ошибка загрузки грузоотправителей:", e);
+            callback();
+          }
+        },
+      });
+    }
+
     // === Tom Select для выбора станций ===
     initStationSelects() {
       if (typeof TomSelect === "undefined") {
@@ -448,7 +513,7 @@ import { renderPagination } from "../lib/pagination.js";
       this.routeSummaryTarget.innerHTML = `
         <div><strong>Отправление:</strong> ${escapeHtml(originText)}</div>
         <div><strong>Назначение:</strong> ${escapeHtml(destText)}</div>
-        <div><strong>Тип сообщения:</strong> ${escapeHtml(mtText)}</div>
+        <div><strong>Вид сообщения:</strong> ${escapeHtml(mtText)}</div>
       `;
     }
 
@@ -813,9 +878,20 @@ import { renderPagination } from "../lib/pagination.js";
         }
       }
 
-      document.getElementById("routeShipperHolding").value =
-        it.shipper_holding || "";
-      document.getElementById("routeShipper").value = it.shipper || "";
+      if (this.shipperSelectInstance) {
+        const shipperId = it.shipper_id;
+        if (shipperId != null) {
+          const value = String(shipperId);
+          const text =
+            it.shipper_name && it.shipper_holding
+              ? `${it.shipper_name} (${it.shipper_holding})`
+              : it.shipper_name || value;
+          this.shipperSelectInstance.addOption({ value, text });
+          this.shipperSelectInstance.setValue(value, true);
+        } else {
+          this.shipperSelectInstance.clear(true);
+        }
+      }
       document.getElementById("routeWagonKindId").value =
         it.wagon_kind_id ?? "";
       document.getElementById("routeShipmentTypeId").value =
@@ -911,9 +987,14 @@ import { renderPagination } from "../lib/pagination.js";
       } else {
         payload.cargo_code = "";
       }
-      payload.shipper_holding =
-        document.getElementById("routeShipperHolding").value.trim();
-      payload.shipper = document.getElementById("routeShipper").value.trim();
+      if (this.shipperSelectInstance) {
+        const shipperValue = this.shipperSelectInstance.getValue();
+        payload.shipper_id = shipperValue ? String(shipperValue).trim() : "";
+      } else if (this.hasShipperSelectTarget) {
+        payload.shipper_id = this.shipperSelectTarget.value.trim();
+      } else {
+        payload.shipper_id = "";
+      }
 
       if (this.originStationSelectInstance) {
         const origin = this.originStationSelectInstance.getValue();

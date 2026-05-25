@@ -1,35 +1,41 @@
 import csv
 from pathlib import Path
 
-from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
+from core.management.reference_clear import clear_stations_only
+from core.management.refs_paths import get_refs_csv
 from core.models import RailRoad, Region, Station
 
 
 class Command(BaseCommand):
-    help = "Импортирует регионы и станции из core/data/railway_stations.csv"
+    help = "Импортирует станции из data/refs-01/stations.csv"
 
     def add_arguments(self, parser):
         parser.add_argument(
+            "--file",
+            type=str,
+            default="",
+            help="Путь к CSV (по умолчанию data/refs-01/stations.csv)",
+        )
+        parser.add_argument(
             "--clear",
             action="store_true",
-            help="Очистить таблицу станций (и регионов) перед импортом",
+            help="Очистить таблицу станций перед импортом",
         )
 
     def handle(self, *args, **options):
-        csv_path = Path(settings.BASE_DIR) / "core" / "data" / "railway_stations.csv"
+        csv_path = Path(options["file"]) if options["file"] else get_refs_csv("stations.csv")
 
         if not csv_path.exists():
             raise CommandError(f"Файл не найден: {csv_path}")
 
         if options.get("clear"):
-            deleted_stations, _ = Station.objects.all().delete()
-            deleted_regions, _ = Region.objects.all().delete()
+            deleted_routes, deleted_stations = clear_stations_only()
             self.stdout.write(
                 self.style.WARNING(
-                    "Таблицы Station и Region очищены перед импортом "
-                    f"(удалено станций: {deleted_stations}, регионов: {deleted_regions})."
+                    "Таблица Station очищена перед импортом "
+                    f"(маршрутов: {deleted_routes}, станций: {deleted_stations})."
                 )
             )
 
@@ -38,7 +44,6 @@ class Command(BaseCommand):
         updated_stations = 0
         processed_rows = 0
 
-        # Кешируем созданные/найденные регионы в памяти, чтобы не дергать БД каждый раз
         region_cache: dict[tuple[str, str], Region] = {}
         railroads_by_code: dict[str, RailRoad] = RailRoad.objects.in_bulk()
 
@@ -125,9 +130,7 @@ class Command(BaseCommand):
                     region, created = Region.objects.get_or_create(
                         full_name=normalized_region_full,
                         type=normalized_region_type,
-                        defaults={
-                            "short_name": normalized_region_short,
-                        },
+                        defaults={"short_name": normalized_region_short},
                     )
                     region_cache[region_key] = region
                     if created:
@@ -153,9 +156,8 @@ class Command(BaseCommand):
         self.stdout.write(
             self.style.SUCCESS(
                 "Импорт станций завершён. "
-                f"Создано регионов: {created_regions}, "
+                f"Дополнительно создано регионов: {created_regions}, "
                 f"создано станций: {created_stations}, "
                 f"обновлено станций: {updated_stations}."
             )
         )
-

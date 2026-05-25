@@ -30,6 +30,7 @@ from core.models import (
     WagonKind,
     ShipmentType,
     MessageType,
+    Shipper,
     Route,
     Cargo,
 )
@@ -1485,8 +1486,8 @@ def message_type_list_view(request):
         request,
         "core/message_type_list.html",
         {
-            "page_title": "Типы сообщения",
-            "page_subtitle": "Справочник типа сообщения (создание/редактирование/удаление)",
+            "page_title": "Виды сообщения",
+            "page_subtitle": "Справочник вида сообщения (создание/редактирование/удаление)",
             "list_api_url": "/references/api/message-types/",
             "create_api_url": "/references/api/message-types/create/",
             "detail_api_url_template": "/references/api/message-types/0/",
@@ -1524,6 +1525,208 @@ def message_type_update_api(request, pk: int):
 @require_http_methods(["POST"])
 def message_type_delete_api(request, pk: int):
     return _simple_dict_delete_api(MessageType, pk)
+
+
+# === Shipper: HTML и API ===
+
+
+def _shipper_item_dict(shipper: Shipper) -> dict:
+    holding = (shipper.holding or "").strip()
+    text = shipper.name
+    if holding:
+        text = f"{text} ({holding})"
+    return {
+        "id": shipper.id,
+        "name": shipper.name,
+        "holding": holding,
+        "okpo": shipper.okpo,
+        "inn": shipper.inn,
+        "text": text,
+    }
+
+
+@login_required
+def shipper_list_view(request):
+    holdings = (
+        Shipper.objects.exclude(holding="")
+        .order_by("holding")
+        .values_list("holding", flat=True)
+        .distinct()
+    )
+    return render(
+        request,
+        "core/shipper_list.html",
+        {"holdings": holdings},
+    )
+
+
+@login_required
+@require_http_methods(["GET"])
+def shipper_list_api(request):
+    try:
+        page = int(request.GET.get("page", "1"))
+    except (TypeError, ValueError):
+        page = 1
+    try:
+        page_size = int(request.GET.get("page_size", "20"))
+    except (TypeError, ValueError):
+        page_size = 20
+
+    qs = Shipper.objects.all().order_by("name")
+    holding = (request.GET.get("holding") or "").strip()
+    if holding:
+        qs = qs.filter(holding=holding)
+
+    search = (request.GET.get("search") or "").strip()
+    if search:
+        s = search.casefold()
+        if search.isdigit():
+            qs = qs.filter(
+                Q(okpo=int(search))
+                | Q(inn__icontains=search)
+                | Q(name_search__contains=s)
+                | Q(holding__icontains=search)
+            )
+        else:
+            qs = qs.filter(
+                Q(name_search__contains=s) | Q(holding__icontains=search)
+            )
+
+    paginator = Paginator(qs, page_size)
+    try:
+        page_obj = paginator.page(page)
+    except EmptyPage:
+        page_obj = paginator.page(paginator.num_pages or 1)
+
+    items = [_shipper_item_dict(shipper) for shipper in page_obj.object_list]
+
+    return JsonResponse(
+        {
+            "success": True,
+            "items": items,
+            "total": paginator.count,
+            "page": page_obj.number,
+            "page_size": page_size,
+            "total_pages": paginator.num_pages,
+        }
+    )
+
+
+@login_required
+@require_http_methods(["GET"])
+def shipper_detail_api(request, pk: int):
+    try:
+        shipper = Shipper.objects.get(pk=pk)
+    except Shipper.DoesNotExist:
+        return JsonResponse({"success": False, "errors": ["Грузоотправитель не найден"]}, status=404)
+
+    return JsonResponse({"success": True, "item": _shipper_item_dict(shipper)})
+
+
+@login_required
+@require_http_methods(["POST"])
+def shipper_create_api(request):
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"success": False, "errors": ["Неверный формат JSON"]}, status=400)
+
+    errors: list[str] = []
+    name = (data.get("name") or "").strip()
+    if not name:
+        errors.append("Наименование обязательно")
+
+    okpo, okpo_error = _parse_shipper_okpo(data.get("okpo"))
+    if okpo_error:
+        errors.append(okpo_error)
+
+    inn = (data.get("inn") or "").strip()
+    holding = (data.get("holding") or "").strip()
+
+    if errors:
+        return JsonResponse({"success": False, "errors": errors}, status=400)
+
+    if Shipper.objects.filter(okpo=okpo, inn=inn, name=name).exists():
+        return JsonResponse(
+            {"success": False, "errors": ["Грузоотправитель с такими ОКПО, ИНН и названием уже существует"]},
+            status=400,
+        )
+
+    shipper = Shipper.objects.create(okpo=okpo, inn=inn, name=name, holding=holding)
+    return JsonResponse({"success": True, "item": _shipper_item_dict(shipper)}, status=201)
+
+
+@login_required
+@require_http_methods(["POST"])
+def shipper_update_api(request, pk: int):
+    try:
+        shipper = Shipper.objects.get(pk=pk)
+    except Shipper.DoesNotExist:
+        return JsonResponse({"success": False, "errors": ["Грузоотправитель не найден"]}, status=404)
+
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"success": False, "errors": ["Неверный формат JSON"]}, status=400)
+
+    errors: list[str] = []
+    name = shipper.name
+    if "name" in data:
+        name = (data.get("name") or "").strip()
+        if not name:
+            errors.append("Наименование обязательно")
+
+    okpo = shipper.okpo
+    if "okpo" in data:
+        okpo, okpo_error = _parse_shipper_okpo(data.get("okpo"))
+        if okpo_error:
+            errors.append(okpo_error)
+
+    inn = shipper.inn
+    if "inn" in data:
+        inn = (data.get("inn") or "").strip()
+
+    holding = shipper.holding
+    if "holding" in data:
+        holding = (data.get("holding") or "").strip()
+
+    if errors:
+        return JsonResponse({"success": False, "errors": errors}, status=400)
+
+    if Shipper.objects.exclude(pk=shipper.pk).filter(okpo=okpo, inn=inn, name=name).exists():
+        return JsonResponse(
+            {"success": False, "errors": ["Грузоотправитель с такими ОКПО, ИНН и названием уже существует"]},
+            status=400,
+        )
+
+    shipper.okpo = okpo
+    shipper.inn = inn
+    shipper.name = name
+    shipper.holding = holding
+    shipper.save()
+
+    return JsonResponse({"success": True, "item": _shipper_item_dict(shipper)})
+
+
+@login_required
+@require_http_methods(["POST"])
+def shipper_delete_api(request, pk: int):
+    try:
+        shipper = Shipper.objects.get(pk=pk)
+    except Shipper.DoesNotExist:
+        return JsonResponse({"success": False, "errors": ["Грузоотправитель не найден"]}, status=404)
+
+    shipper.delete()
+    return JsonResponse({"success": True})
+
+
+def _parse_shipper_okpo(raw) -> tuple[int | None, str | None]:
+    if raw in (None, "", "null"):
+        return None, None
+    try:
+        return int(str(raw).strip()), None
+    except (TypeError, ValueError):
+        return None, "ОКПО должно быть целым числом"
 
 
 # === Routes: HTML-страница ===
@@ -1806,8 +2009,12 @@ def route_analysis_api(request):
 
     try:
         scenario = (
-            Scenario.objects.select_related("inflation_set")
-            .prefetch_related("inflation_set__values", "price_change_settings")
+            Scenario.objects.select_related("inflation_set", "exchange_rate_set")
+            .prefetch_related(
+                "inflation_set__values",
+                "exchange_rate_set__values",
+                "price_change_settings",
+            )
             .get(pk=dto.scenario_id)
         )
     except Scenario.DoesNotExist:
@@ -1825,7 +2032,7 @@ def route_analysis_api(request):
         )
 
     try:
-        route = Route.objects.get(pk=dto.route_id)
+        route = Route.objects.select_related("message_type").get(pk=dto.route_id)
     except Route.DoesNotExist:
         return JsonResponse(
             {"success": False, "errors": ["Маршрут не найден"]},

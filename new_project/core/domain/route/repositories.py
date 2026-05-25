@@ -63,6 +63,7 @@ class RouteRepository:
             "wagon_kind",
             "shipment_type",
             "message_type",
+            "shipper",
         )
 
     def list_queryset(self, route_set_id: int) -> QuerySet[Route]:

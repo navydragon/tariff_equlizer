@@ -10,6 +10,7 @@ from core.models import (
     Route,
     RouteSet,
     ShipmentType,
+    Shipper,
     Station,
     WagonKind,
 )
@@ -114,8 +115,11 @@ class RouteDTO:
     shipment_type_name: str
     message_type_id: Optional[int]
     message_type_name: str
+    shipper_id: Optional[int]
+    shipper_name: str
     shipper_holding: str
-    shipper: str
+    shipper_okpo: Optional[int]
+    shipper_inn: str
     distance_loaded_km: Optional[int]
     distance_empty_km: Optional[int]
     load_tons_per_wagon: Optional[str]
@@ -188,8 +192,11 @@ class RouteDTO:
             shipment_type_name=route.shipment_type.name if route.shipment_type_id else "",
             message_type_id=route.message_type_id,
             message_type_name=route.message_type.name if route.message_type_id else "",
-            shipper_holding=route.shipper_holding,
-            shipper=route.shipper,
+            shipper_id=route.shipper_id,
+            shipper_name=route.shipper.name if route.shipper_id else "",
+            shipper_holding=route.shipper.holding if route.shipper_id else "",
+            shipper_okpo=route.shipper.okpo if route.shipper_id else None,
+            shipper_inn=route.shipper.inn if route.shipper_id else "",
             distance_loaded_km=route.distance_loaded_km,
             distance_empty_km=route.distance_empty_km,
             load_tons_per_wagon=_decimal_to_api_str(route.load_tons_per_wagon)
@@ -268,8 +275,11 @@ class RouteDTO:
             "shipment_type_name": self.shipment_type_name,
             "message_type_id": self.message_type_id,
             "message_type_name": self.message_type_name,
+            "shipper_id": self.shipper_id,
+            "shipper_name": self.shipper_name,
             "shipper_holding": self.shipper_holding,
-            "shipper": self.shipper,
+            "shipper_okpo": self.shipper_okpo,
+            "shipper_inn": self.shipper_inn,
             "distance_loaded_km": self.distance_loaded_km,
             "distance_empty_km": self.distance_empty_km,
             "load_tons_per_wagon": self.load_tons_per_wagon,
@@ -395,10 +405,17 @@ class RouteWriteDTO:
             try:
                 payload["message_type"] = MessageType.objects.get(pk=int(message_type_id))
             except (ValueError, MessageType.DoesNotExist):
-                errors.append("Указан несуществующий тип сообщения")
+                errors.append("Указан несуществующий вид сообщения")
 
-        payload["shipper_holding"] = (data.get("shipper_holding") or "").strip()
-        payload["shipper"] = (data.get("shipper") or "").strip()
+        shipper_id = data.get("shipper_id")
+        if shipper_id in (None, "", "null"):
+            payload["shipper"] = None
+        else:
+            try:
+                payload["shipper"] = Shipper.objects.get(pk=int(shipper_id))
+            except (ValueError, Shipper.DoesNotExist):
+                errors.append("Указан несуществующий грузоотправитель")
+
         payload["route_code"] = (data.get("route_code") or "").strip()
 
         def parse_int_field(field_name: str) -> int | None:

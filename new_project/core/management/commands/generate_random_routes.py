@@ -11,6 +11,7 @@ from core.models import (
     Route,
     RouteSet,
     ShipmentType,
+    Shipper,
     Station,
     WagonKind,
 )
@@ -94,6 +95,7 @@ class Command(BaseCommand):
             ShipmentType.objects.filter(is_active=True)
         )
         message_types: List[MessageType] = list(MessageType.objects.all())
+        shippers: List[Shipper] = list(Shipper.objects.all())
 
         if not cargos:
             raise CommandError("Справочник Cargo пуст. Нечего выбирать.")
@@ -109,7 +111,7 @@ class Command(BaseCommand):
         self.stdout.write(
             f"Справочники: cargo={len(cargos)}, stations={len(stations)}, "
             f"wagon_kinds={len(wagon_kinds)}, shipment_types={len(shipment_types)}, "
-            f"message_types={len(message_types)}"
+            f"message_types={len(message_types)}, shippers={len(shippers)}"
         )
 
         existing_random_codes: set[str] = set()
@@ -137,6 +139,7 @@ class Command(BaseCommand):
                 wagon_kinds=wagon_kinds,
                 shipment_types=shipment_types,
                 message_types=message_types,
+                shippers=shippers,
                 existing_random_codes=existing_random_codes,
             )
             existing_random_codes.add(route.route_code)
@@ -175,6 +178,7 @@ class Command(BaseCommand):
         wagon_kinds: List[WagonKind],
         shipment_types: List[ShipmentType],
         message_types: List[MessageType],
+        shippers: List[Shipper],
         existing_random_codes: set[str],
     ) -> Route:
         cargo = random.choice(cargos)
@@ -241,8 +245,7 @@ class Command(BaseCommand):
                     break
                 suffix += 1
 
-        shipper_holding = f"Холдинг {random.randint(1, 1000)}"
-        shipper = f"Грузоотправитель {random.randint(1, 1000)}"
+        shipper_obj = random.choice(shippers) if shippers else None
 
         volume = Decimal(str(round(random.uniform(0.1, 30.0), 4)))
         turnover = (volume * Decimal(str(round(random.uniform(0.1, 2.5), 4)))).quantize(
@@ -263,8 +266,7 @@ class Command(BaseCommand):
             wagon_kind=wagon_kind,
             shipment_type=shipment_type,
             message_type=message_type,
-            shipper_holding=shipper_holding,
-            shipper=shipper,
+            shipper=shipper_obj,
             route_code=route_code,
             distance_loaded_km=distance_loaded_km,
             distance_empty_km=distance_empty_km,

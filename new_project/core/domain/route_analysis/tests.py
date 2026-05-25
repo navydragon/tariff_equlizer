@@ -20,6 +20,8 @@ from core.models import (
 from scenarios.models import (
     BTDCategory,
     BTDCategoryValue,
+    ExchangeRateSet,
+    ExchangeRateValue,
     InflationSet,
     InflationValue,
     Scenario,
@@ -409,3 +411,125 @@ class RouteAnalysisServiceTests(TestCase):
         oper_values = [Decimal(v) for v in self._row_values(response, "operators")]
         self.assertEqual(oper_values[0], Decimal("100.00"))
         self.assertEqual(oper_values[1], Decimal("200.00"))
+
+    def _create_export_route(self) -> Route:
+        message_type, _ = MessageType.objects.get_or_create(
+            code="MT_EXP",
+            defaults={"name": "Экспорт"},
+        )
+        self.route.message_type = message_type
+        self.route.market_price_per_ton = Decimal("2000.00")
+        self.route.save(update_fields=["message_type", "market_price_per_ton"])
+        return self.route
+
+    def _attach_fx(self, rates: dict[int, str]) -> None:
+        fx_set = ExchangeRateSet.objects.create(
+            name="Тестовый курс",
+            author=self.user,
+        )
+        for year, rate in rates.items():
+            ExchangeRateValue.objects.create(
+                rate_set=fx_set,
+                year=year,
+                usd_rub=Decimal(rate),
+            )
+        self.scenario.exchange_rate_set = fx_set
+        self.scenario.save(update_fields=["exchange_rate_set"])
+
+    def test_export_by_fx_converts_market_price(self) -> None:
+        export_route = self._create_export_route()
+        self.scenario.export_price_mode = Scenario.ExportPriceMode.BY_FX
+        self.scenario.save(update_fields=["export_price_mode"])
+        self._attach_fx({2025: "100", 2026: "110"})
+        self._set_price_change_mode(
+            ScenarioPriceChangeSetting.Parameter.MARKET_PRICE,
+            ScenarioPriceChangeSetting.Mode.FIXED,
+        )
+
+        response = self.service.calculate(
+            request_dto=self._request(),
+            scenario=self.scenario,
+            route=export_route,
+        )
+
+        price_values = [Decimal(v) for v in self._row_values(response, "price_rub")]
+        usd_y0 = Decimal("2000.00") / Decimal("100")
+        self.assertEqual(price_values[0], Decimal("2000.00"))
+        self.assertEqual(price_values[1], _quantize(usd_y0 * Decimal("110")))
+
+        fx_type = next(t for t in response.equalizer.types if t.key == "fx")
+        self.assertTrue(fx_type.visible)
+        self.assertTrue(fx_type.editable)
+        self.assertEqual(Decimal(fx_type.values["2025"]), Decimal("100"))
+
+    def test_export_by_fx_with_inflation_in_usd(self) -> None:
+        export_route = self._create_export_route()
+        self.scenario.export_price_mode = Scenario.ExportPriceMode.BY_FX
+        self.scenario.save(update_fields=["export_price_mode"])
+        self._attach_fx({2025: "100", 2026: "100"})
+        self._attach_inflation({2025: "0", 2026: "10"})
+        self._set_price_change_mode(
+            ScenarioPriceChangeSetting.Parameter.MARKET_PRICE,
+            ScenarioPriceChangeSetting.Mode.INFLATION,
+        )
+
+        response = self.service.calculate(
+            request_dto=self._request(),
+            scenario=self.scenario,
+            route=export_route,
+        )
+
+        price_values = [Decimal(v) for v in self._row_values(response, "price_rub")]
+        usd_y0 = Decimal("2000.00") / Decimal("100")
+        self.assertEqual(price_values[0], Decimal("2000.00"))
+        self.assertEqual(price_values[1], _quantize(usd_y0 * Decimal("1.1") * Decimal("100")))
+
+    def test_export_fx_equalizer_notice_without_rate_set(self) -> None:
+        export_route = self._create_export_route()
+        self.scenario.export_price_mode = Scenario.ExportPriceMode.BY_FX
+        self.scenario.save(update_fields=["export_price_mode"])
+
+        response = self.service.calculate(
+            request_dto=self._request(),
+            scenario=self.scenario,
+            route=export_route,
+        )
+
+        fx_type = next(t for t in response.equalizer.types if t.key == "fx")
+        self.assertFalse(fx_type.editable)
+        self.assertIn("не прикреплён", fx_type.notice.lower())
+
+    def test_internal_route_has_no_fx_equalizer(self) -> None:
+        response = self.service.calculate(
+            request_dto=self._request(),
+            scenario=self.scenario,
+            route=self.route,
+        )
+        keys = {item.key for item in response.equalizer.types}
+        self.assertNotIn("fx", keys)
+
+    def test_fx_override_changes_market_price(self) -> None:
+        export_route = self._create_export_route()
+        self.scenario.export_price_mode = Scenario.ExportPriceMode.BY_FX
+        self.scenario.save(update_fields=["export_price_mode"])
+        self._attach_fx({2025: "100", 2026: "100"})
+        self._set_price_change_mode(
+            ScenarioPriceChangeSetting.Parameter.MARKET_PRICE,
+            ScenarioPriceChangeSetting.Mode.FIXED,
+        )
+
+        response = self.service.calculate(
+            request_dto=self._request(
+                overrides={"fx": {2026: Decimal("200")}},
+            ),
+            scenario=self.scenario,
+            route=export_route,
+        )
+
+        price_values = [Decimal(v) for v in self._row_values(response, "price_rub")]
+        usd_y0 = Decimal("2000.00") / Decimal("100")
+        self.assertEqual(price_values[1], _quantize(usd_y0 * Decimal("200")))
+
+
+def _quantize(value: Decimal) -> Decimal:
+    return value.quantize(Decimal("0.01"))

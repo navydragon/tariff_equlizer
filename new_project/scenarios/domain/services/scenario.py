@@ -149,6 +149,9 @@ class ScenarioService:
         if rate_set is not None:
             update_data["exchange_rate_set"] = rate_set
 
+        if dto.export_price_mode is not None:
+            update_data["export_price_mode"] = dto.export_price_mode
+
         updated_scenario = self.repository.update(scenario_id, update_data)
         if not updated_scenario:
             return None, ["Ошибка при обновлении сценария"]

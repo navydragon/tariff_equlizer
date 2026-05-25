@@ -1,10 +1,11 @@
 from django.core.management.base import BaseCommand
 
+from core.management.reference_clear import clear_route_ref_catalog
 from core.models import WagonKind, ShipmentType, MessageType
 
 
 class Command(BaseCommand):
-    help = "Инициализирует справочники маршрутов: род вагона, тип отправки, тип сообщения"
+    help = "Инициализирует справочники маршрутов: род вагона, тип отправки, вид сообщения"
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -38,10 +39,20 @@ class Command(BaseCommand):
         ]
 
         if options.get("clear"):
-            WagonKind.objects.all().delete()
-            ShipmentType.objects.all().delete()
-            MessageType.objects.all().delete()
-            self.stdout.write(self.style.WARNING("Таблицы справочников очищены."))
+            (
+                deleted_routes,
+                deleted_wagon_kinds,
+                deleted_shipment_types,
+                deleted_message_types,
+            ) = clear_route_ref_catalog()
+            self.stdout.write(
+                self.style.WARNING(
+                    "Справочники маршрутов очищены "
+                    f"(маршрутов: {deleted_routes}, родов вагона: {deleted_wagon_kinds}, "
+                    f"типов отправки: {deleted_shipment_types}, "
+                    f"видов сообщения: {deleted_message_types})."
+                )
+            )
 
         created_total = 0
         updated_total = 0

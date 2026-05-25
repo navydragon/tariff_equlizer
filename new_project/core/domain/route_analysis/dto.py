@@ -5,7 +5,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 EQUALIZER_OVERRIDE_KEYS = frozenset(
-    {"cost", "oper", "per", "price_rub", "base", "rules"},
+    {"cost", "oper", "per", "price_rub", "fx", "base", "rules"},
 )
 
 
@@ -90,6 +90,8 @@ class EqualizerTypeDTO:
     step: str
     values: dict[str, str]
     visible: bool = True
+    editable: bool = True
+    notice: str = ""
 
     def to_api_dict(self) -> dict[str, Any]:
         return {
@@ -99,6 +101,8 @@ class EqualizerTypeDTO:
             "step": self.step,
             "values": self.values,
             "visible": self.visible,
+            "editable": self.editable,
+            "notice": self.notice,
         }
 
 

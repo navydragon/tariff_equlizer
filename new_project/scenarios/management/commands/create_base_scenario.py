@@ -2,7 +2,6 @@
 Management команда для создания базового сценария "Базовый сценарий" 2025-2035.
 """
 import os
-from decimal import Decimal
 
 from django.core.management.base import BaseCommand
 from django.contrib.auth import get_user_model
@@ -97,28 +96,42 @@ class Command(BaseCommand):
             )
         )
 
-        years = list(range(scenario.start_year, scenario.end_year + 1))
+        # ========= Exchange rates (USD/RUB, прогноз ЦБ) =========
+        from scenarios.domain.services.base_fx_seed import (
+            FX_SET_NAME,
+            seed_cbr_fx_for_scenario,
+        )
 
-        # ========= Exchange rates (USD/RUB) =========
-        from scenarios.models import ExchangeRateSet, ExchangeRateValue
-
-        if scenario.exchange_rate_set_id:
-            rate_set = scenario.exchange_rate_set
-        else:
-            rate_set, _ = ExchangeRateSet.objects.get_or_create(
-                author=user,
-                name="Базовый курс USD/RUB",
-            )
-            scenario.exchange_rate_set = rate_set
-            scenario.save(update_fields=["exchange_rate_set"])
-
-        for year in years:
-            ExchangeRateValue.objects.update_or_create(
-                rate_set=rate_set,
-                year=year,
-                defaults={"usd_rub": Decimal("1.0000")},
-            )
-
+        fx_result = seed_cbr_fx_for_scenario(
+            scenario,
+            author=user,
+            attach=True,
+        )
         self.stdout.write(
-            self.style.SUCCESS("Набор курсов валют обновлён/создан.")
+            self.style.SUCCESS(
+                f'Набор курсов «{FX_SET_NAME}» обновлён/создан '
+                f"(id={fx_result.rate_set_id}, "
+                f"значений: {fx_result.values_upserted}"
+                f"{', привязан к сценарию' if fx_result.attached_to_scenario else ''})."
+            )
+        )
+
+        # ========= Inflation (прогноз ЦБ) =========
+        from scenarios.domain.services.base_inflation_seed import (
+            INFLATION_SET_NAME,
+            seed_cbr_inflation_for_scenario,
+        )
+
+        inflation_result = seed_cbr_inflation_for_scenario(
+            scenario,
+            author=user,
+            attach=True,
+        )
+        self.stdout.write(
+            self.style.SUCCESS(
+                f'Набор инфляции «{INFLATION_SET_NAME}» обновлён/создан '
+                f"(id={inflation_result.inflation_set_id}, "
+                f"значений: {inflation_result.values_upserted}"
+                f"{', привязан к сценарию' if inflation_result.attached_to_scenario else ''})."
+            )
         )

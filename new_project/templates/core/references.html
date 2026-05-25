@@ -126,6 +126,24 @@
   <div class="col-md-6 col-lg-3">
     <a
       class="card card-sm card-link"
+      href="{% url 'shipper_list' %}"
+    >
+      <div class="card-body">
+        <div class="d-flex align-items-center">
+          <span class="avatar me-3 bg-orange-lt">
+            <i class="ti ti-building-factory-2"></i>
+          </span>
+          <div>
+            <div class="fw-bold">Грузоотправители</div>
+            <div class="text-muted">Справочник компаний-отправителей</div>
+          </div>
+        </div>
+      </div>
+    </a>
+  </div>
+  <div class="col-md-6 col-lg-3">
+    <a
+      class="card card-sm card-link"
       href="{% url 'message_type_list' %}"
     >
       <div class="card-body">
@@ -134,8 +152,8 @@
             <i class="ti ti-message"></i>
           </span>
           <div>
-            <div class="fw-bold">Типы сообщения</div>
-            <div class="text-muted">Справочник типа сообщения</div>
+            <div class="fw-bold">Виды сообщения</div>
+            <div class="text-muted">Справочник вида сообщения</div>
           </div>
         </div>
       </div>

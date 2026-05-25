@@ -1,9 +1,10 @@
 import csv
 from pathlib import Path
 
-from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
+from core.management.reference_clear import clear_cargos_catalog
+from core.management.refs_paths import get_refs_csv
 from core.models import Cargo, CargoGroup
 
 
@@ -58,13 +59,35 @@ def _resolve_group(raw_group_code, stderr, style, code):
 
 
 class Command(BaseCommand):
-    help = "Импортирует номенклатуру грузов ETSNG из core/data/etsng_filled.csv"
+    help = "Импортирует номенклатуру грузов ETSNG из data/refs-01/cargos.csv"
+
+    def add_arguments(self, parser):
+        parser.add_argument(
+            "--file",
+            type=str,
+            default="",
+            help="Путь к CSV (по умолчанию data/refs-01/cargos.csv)",
+        )
+        parser.add_argument(
+            "--clear",
+            action="store_true",
+            help="Очистить справочник грузов перед импортом",
+        )
 
     def handle(self, *args, **options):
-        csv_path = Path(settings.BASE_DIR) / "core" / "data" / "etsng_filled.csv"
+        csv_path = Path(options["file"]) if options["file"] else get_refs_csv("cargos.csv")
 
         if not csv_path.exists():
             raise CommandError(f"Файл не найден: {csv_path}")
+
+        if options.get("clear"):
+            deleted_routes, deleted_cargos = clear_cargos_catalog()
+            self.stdout.write(
+                self.style.WARNING(
+                    "Справочник грузов очищен "
+                    f"(маршрутов: {deleted_routes}, грузов: {deleted_cargos})."
+                )
+            )
 
         created_count = 0
         updated_count = 0
@@ -114,4 +137,3 @@ class Command(BaseCommand):
                 f"пропущено из‑за отсутствующей группы: {skipped_no_group}."
             )
         )
-

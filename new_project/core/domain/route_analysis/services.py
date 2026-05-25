@@ -6,6 +6,7 @@ from typing import Any, Optional
 from calculations.domain.services import TariffLoadService
 from core.models import Route
 from scenarios.domain.services.price_change import PriceChangeSettingService
+from scenarios.domain.utils.fx_rates import load_fx_rates_by_year, missing_fx_years
 from scenarios.domain.utils.price_inflation import (
     index_money_series,
     load_inflation_rates_by_year,
@@ -43,6 +44,13 @@ def _is_internal_route(route: Route) -> bool:
         return False
     name = (route.message_type.name or "").lower()
     return "внутр" in name
+
+
+def _is_export_route(route: Route) -> bool:
+    if not route.message_type_id:
+        return False
+    name = (route.message_type.name or "").lower()
+    return "экспорт" in name
 
 
 def _route_cost_baseline(route: Route) -> Decimal:
@@ -115,12 +123,12 @@ class RouteAnalysisService:
             price_change_settings=price_change_settings,
             inflation_rates=inflation_rates,
         )
-        price_values = self._money_series_for_parameter(
+        price_values = self._build_market_price_series(
             years=years,
+            route=route,
+            scenario=scenario,
             scalar=price_scalar,
-            analysis_key="price_rub",
-            price_change_key=ScenarioPriceChangeSetting.Parameter.MARKET_PRICE,
-            overrides=overrides.get("price_rub"),
+            overrides=overrides,
             price_change_settings=price_change_settings,
             inflation_rates=inflation_rates,
         )
@@ -181,14 +189,17 @@ class RouteAnalysisService:
             ),
         ]
 
+        fx_rates = load_fx_rates_by_year(scenario)
         equalizer = self._build_equalizer(
             years=years,
             route=route,
+            scenario=scenario,
             tariff_load=tariff_load,
             cost_values=cost_values,
             oper_values=oper_values,
             per_values=per_values,
             price_values=price_values,
+            fx_rates=fx_rates,
         )
 
         transport_structure = self._build_transport_structure(
@@ -259,18 +270,106 @@ class RouteAnalysisService:
 
         return self._series_for_years(years=years, scalar=scalar, overrides=None)
 
+    def _build_market_price_series(
+        self,
+        *,
+        years: list[int],
+        route: Route,
+        scenario: Scenario,
+        scalar: Decimal,
+        overrides: dict[str, dict[int, Decimal]] | None,
+        price_change_settings: dict[str, str],
+        inflation_rates: dict[int, Decimal] | None,
+    ) -> list[Decimal]:
+        overrides = overrides or {}
+        price_rub_overrides = overrides.get("price_rub")
+
+        base_series = self._money_series_for_parameter(
+            years=years,
+            scalar=scalar,
+            analysis_key="price_rub",
+            price_change_key=ScenarioPriceChangeSetting.Parameter.MARKET_PRICE,
+            overrides=price_rub_overrides,
+            price_change_settings=price_change_settings,
+            inflation_rates=inflation_rates,
+        )
+
+        use_fx = (
+            _is_export_route(route)
+            and scenario.export_price_mode == Scenario.ExportPriceMode.BY_FX
+        )
+        if not use_fx:
+            return base_series
+
+        fx_rates = load_fx_rates_by_year(scenario)
+        if not fx_rates:
+            return base_series
+
+        fx_overrides = overrides.get("fx")
+        fx_series = self._fx_series_for_years(
+            years=years,
+            fx_rates=fx_rates,
+            overrides=fx_overrides,
+        )
+        if not fx_series or fx_series[0] <= 0:
+            return base_series
+
+        usd_y0 = scalar / fx_series[0]
+        market_mode = price_change_settings.get(
+            ScenarioPriceChangeSetting.Parameter.MARKET_PRICE,
+        )
+        if (
+            market_mode == ScenarioPriceChangeSetting.Mode.INFLATION
+            and inflation_rates is not None
+        ):
+            usd_by_year = index_money_series(years, usd_y0, inflation_rates)
+            usd_values = [usd_by_year[year] for year in years]
+        else:
+            usd_values = [usd_y0 for _ in years]
+
+        rub_series = [
+            _quantize_money(usd_values[index] * fx_series[index])
+            for index in range(len(years))
+        ]
+
+        if price_rub_overrides:
+            return self._series_for_years(
+                years=years,
+                scalar=scalar,
+                overrides=price_rub_overrides,
+            )
+        return rub_series
+
+    @staticmethod
+    def _fx_series_for_years(
+        *,
+        years: list[int],
+        fx_rates: dict[int, Decimal],
+        overrides: dict[int, Decimal] | None,
+    ) -> list[Decimal]:
+        result: list[Decimal] = []
+        for year in years:
+            if overrides and year in overrides:
+                result.append(overrides[year])
+            else:
+                result.append(fx_rates.get(year, Decimal("0")))
+        return result
+
     def _build_equalizer(
         self,
         *,
         years: list[int],
         route: Route,
+        scenario: Scenario,
         tariff_load: Any,
         cost_values: list[Decimal],
         oper_values: list[Decimal],
         per_values: list[Decimal],
         price_values: list[Decimal],
+        fx_rates: dict[int, Decimal] | None,
     ) -> EqualizerResponseDTO:
         is_internal = _is_internal_route(route)
+        is_export = _is_export_route(route)
 
         def coef_values(coef_map: dict[int, Decimal]) -> dict[str, str]:
             return {
@@ -334,7 +433,64 @@ class RouteAnalysisService:
                 visible=True,
             ),
         ]
+
+        if is_export:
+            types.append(self._build_fx_equalizer_type(years=years, fx_rates=fx_rates))
+
         return EqualizerResponseDTO(types=types)
+
+    def _build_fx_equalizer_type(
+        self,
+        *,
+        years: list[int],
+        fx_rates: dict[int, Decimal] | None,
+    ) -> EqualizerTypeDTO:
+        if fx_rates is None:
+            return EqualizerTypeDTO(
+                key="fx",
+                label="Курс $",
+                unit="руб./$",
+                step="0.0001",
+                values={},
+                visible=True,
+                editable=False,
+                notice=(
+                    "К сценарию не прикреплён набор курсов валют. "
+                    "Задайте курсы на вкладке «Курсы валют» сценария."
+                ),
+            )
+
+        missing = missing_fx_years(years, fx_rates)
+        if missing:
+            years_text = ", ".join(str(y) for y in missing)
+            return EqualizerTypeDTO(
+                key="fx",
+                label="Курс $",
+                unit="руб./$",
+                step="0.0001",
+                values={},
+                visible=True,
+                editable=False,
+                notice=(
+                    f"Не задан курс USD/RUB для годов: {years_text}. "
+                    "Заполните курсы на вкладке «Курсы валют» сценария."
+                ),
+            )
+
+        values = {
+            str(year): _format_decimal(fx_rates[year])
+            for year in years
+        }
+        return EqualizerTypeDTO(
+            key="fx",
+            label="Курс $",
+            unit="руб./$",
+            step="0.0001",
+            values=values,
+            visible=True,
+            editable=True,
+            notice="",
+        )
 
     def _build_transport_structure(
         self,

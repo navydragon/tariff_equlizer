@@ -4,6 +4,7 @@ from pathlib import Path
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
+from core.management.reference_clear import clear_railroads_catalog
 from core.models import RailRoad
 
 
@@ -24,10 +25,12 @@ class Command(BaseCommand):
             raise CommandError(f"Файл не найден: {csv_path}")
 
         if options.get("clear"):
-            deleted_count, _ = RailRoad.objects.all().delete()
+            deleted_routes, deleted_stations, deleted_railroads = clear_railroads_catalog()
             self.stdout.write(
                 self.style.WARNING(
-                    f"Таблица RailRoad очищена перед импортом (удалено записей: {deleted_count})."
+                    "Справочники очищены перед импортом дорог "
+                    f"(маршрутов: {deleted_routes}, станций: {deleted_stations}, "
+                    f"дорог: {deleted_railroads})."
                 )
             )
 

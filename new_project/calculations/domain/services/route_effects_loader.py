@@ -11,6 +11,7 @@ from core.models import (
     RailRoad,
     Route,
     ShipmentType,
+    Shipper,
     Station,
     WagonKind,
 )
@@ -85,13 +86,15 @@ def fetch_routes_dataframe_timed(
     wagon_kind_table = _table(WagonKind)
     shipment_type_table = _table(ShipmentType)
     message_type_table = _table(MessageType)
+    shipper_table = _table(Shipper)
 
     routes_sql = f"""
         SELECT
             r.id,
             r.freight_charge_ths_rub,
             r.transport_volume_mln_tons,
-            r.shipper_holding,
+            r.shipper_id,
+            COALESCE(NULLIF(TRIM(s.holding), ''), 'Прочие') AS shipper_holding,
             r.cargo_id,
             r.origin_station_id,
             r.destination_station_id,
@@ -109,6 +112,7 @@ def fetch_routes_dataframe_timed(
             st.name AS shipment_category,
             mt.name AS transport_type
         FROM {route_table} r
+        LEFT JOIN {shipper_table} s ON r.shipper_id = s.id
         LEFT JOIN {cargo_table} c ON r.cargo_id = c.code
         LEFT JOIN {cargo_group_table} cg ON c.cargo_group_id = cg.code
         LEFT JOIN {station_table} origin_st ON r.origin_station_id = origin_st.esr_code

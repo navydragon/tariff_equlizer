@@ -1445,6 +1445,18 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
           : "";
       }
 
+      if (typeDef.editable === false) {
+        const notice =
+          typeDef.notice ||
+          "Настройка недоступна для текущего сценария.";
+        this.equalizerPanelTarget.innerHTML = `
+          <div class="alert alert-warning mb-0" role="status">
+            ${escapeHtml(notice)}
+          </div>
+        `;
+        return;
+      }
+
       const step = Number(typeDef.step) || 1;
       const years = [];
       for (let y = startYear; y <= endYear; y += 1) years.push(y);

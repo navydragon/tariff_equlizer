@@ -5,6 +5,10 @@ from core.models import RouteSet
 
 
 class Scenario(models.Model):
+    class ExportPriceMode(models.TextChoices):
+        FIXED = "fixed", "Без изменений"
+        BY_FX = "by_fx", "По курсу $"
+
     name = models.CharField("Название", max_length=255)
     description = models.TextField("Описание", blank=True)
     start_year = models.IntegerField("Год начала", default=2025)
@@ -36,6 +40,12 @@ class Scenario(models.Model):
         related_name="scenarios",
         null=True,
         blank=True,
+    )
+    export_price_mode = models.CharField(
+        "Экспортная цена",
+        max_length=16,
+        choices=ExportPriceMode.choices,
+        default=ExportPriceMode.FIXED,
     )
 
     class Meta:

@@ -125,6 +125,13 @@ import { renderErrors } from "../lib/errors.js";
       }
     }
 
+    collectExportPriceMode() {
+      const checked = this.element.querySelector(
+        'input.btn-check[name="export_price_mode"]:checked',
+      );
+      return checked ? checked.value : "fixed";
+    }
+
     collectPriceChangeSettings() {
       const settings = {};
       const inputs = this.element.querySelectorAll(
@@ -163,6 +170,7 @@ import { renderErrors } from "../lib/errors.js";
           : null,
         route_set_id: routeSetId || null,
         price_change_settings: this.collectPriceChangeSettings(),
+        export_price_mode: this.collectExportPriceMode(),
       };
 
       const url = this.updateUrlValue;

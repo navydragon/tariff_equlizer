@@ -3,7 +3,14 @@ from typing import Optional
 from django.db import transaction
 
 from scenarios.domain.repositories.price_change import PriceChangeSettingRepository
-from scenarios.models import Scenario
+from scenarios.models import (
+    BTDCategory,
+    BTDCategoryValue,
+    Scenario,
+    TariffRule,
+    TariffRuleCondition,
+    TariffRuleYearValue,
+)
 
 
 class ScenarioRepository:
@@ -57,8 +64,78 @@ class ScenarioRepository:
             route_set=source.route_set,
             exchange_rate_set=source.exchange_rate_set,
             inflation_set=source.inflation_set,
+            export_price_mode=source.export_price_mode,
             author=new_author,
         )
         PriceChangeSettingRepository().copy_from_scenario(source_id, new_scenario)
+        self._copy_btd(source, new_scenario)
+        self._copy_tariff_rules(source, new_scenario)
         return Scenario.objects.select_related("author").get(id=new_scenario.id)
+
+    @staticmethod
+    def _copy_btd(source: Scenario, target: Scenario) -> None:
+        category_map: dict[int, int] = {}
+        for category in BTDCategory.objects.filter(scenario=source).order_by(
+            "position", "id"
+        ):
+            new_category = BTDCategory.objects.create(
+                name=category.name,
+                scenario=target,
+                position=category.position,
+            )
+            category_map[category.id] = new_category.id
+
+        value_rows = []
+        for value in BTDCategoryValue.objects.filter(scenario=source):
+            new_category_id = category_map.get(value.category_id)
+            if new_category_id is None:
+                continue
+            value_rows.append(
+                BTDCategoryValue(
+                    scenario=target,
+                    category_id=new_category_id,
+                    year=value.year,
+                    value=value.value,
+                )
+            )
+        if value_rows:
+            BTDCategoryValue.objects.bulk_create(value_rows)
+
+    @staticmethod
+    def _copy_tariff_rules(source: Scenario, target: Scenario) -> None:
+        rules = (
+            TariffRule.objects.filter(scenario=source)
+            .prefetch_related("conditions", "year_values")
+            .order_by("position", "id")
+        )
+        for rule in rules:
+            new_rule = TariffRule.objects.create(
+                scenario=target,
+                name=rule.name,
+                base_percent=rule.base_percent,
+                position=rule.position,
+            )
+            conditions = [
+                TariffRuleCondition(
+                    tariff_rule=new_rule,
+                    parameter=condition.parameter,
+                    operator=condition.operator,
+                    values=condition.values,
+                    position=condition.position,
+                )
+                for condition in rule.conditions.all()
+            ]
+            if conditions:
+                TariffRuleCondition.objects.bulk_create(conditions)
+
+            year_values = [
+                TariffRuleYearValue(
+                    tariff_rule=new_rule,
+                    year=year_value.year,
+                    coefficient=year_value.coefficient,
+                )
+                for year_value in rule.year_values.all()
+            ]
+            if year_values:
+                TariffRuleYearValue.objects.bulk_create(year_values)
 

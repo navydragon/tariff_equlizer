@@ -11,7 +11,8 @@ FIELD_MAP = {
     "wagon_kind": "wagon_kind__id",
     "shipment_type": "shipment_type__id",
     "message_type": "message_type__id",
-    "shipper_holding": "shipper_holding",
+    "shipper": "shipper_id",
+    "shipper_holding": "shipper__holding",
     "distance_loaded_km": "distance_loaded_km",
 }
 

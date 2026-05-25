@@ -248,6 +248,7 @@ class ScenarioEffectsService:
             freight_charge_ths_rub__gt=0,
         ).select_related(
             "cargo__cargo_group",
+            "shipper",
             "message_type",
             "wagon_kind",
             "shipment_type",
@@ -394,7 +395,9 @@ class ScenarioEffectsService:
 
         holdings = {
             (value or "").strip() or "Прочие"
-            for value in qs.values_list("shipper_holding", flat=True).distinct()
+            for value in qs.filter(shipper__isnull=False)
+            .values_list("shipper__holding", flat=True)
+            .distinct()
         }
 
         return {
@@ -526,7 +529,9 @@ def _route_dimensions(route: Route) -> _RouteDimensions:
     else:
         shipment_category = "—"
 
-    holding = (route.shipper_holding or "").strip() or "Прочие"
+    holding = "Прочие"
+    if route.shipper_id:
+        holding = (route.shipper.holding or "").strip() or "Прочие"
 
     return _RouteDimensions(
         cargo_group=cargo_group,

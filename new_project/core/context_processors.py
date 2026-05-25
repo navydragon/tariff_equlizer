@@ -79,7 +79,12 @@ def breadcrumbs(request):
         "message_type_list": [
             {"title": home_title, "url": home_url},
             {"title": refs_title, "url": refs_url},
-            {"title": "Типы сообщения", "url": None},
+            {"title": "Виды сообщения", "url": None},
+        ],
+        "shipper_list": [
+            {"title": home_title, "url": home_url},
+            {"title": refs_title, "url": refs_url},
+            {"title": "Грузоотправители", "url": None},
         ],
         "scenarios:management": [
             {"title": home_title, "url": home_url},

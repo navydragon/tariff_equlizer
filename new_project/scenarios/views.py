@@ -150,6 +150,7 @@ def scenario_update_api(request, scenario_id):
         route_set_id=data.get("route_set_id"),
         exchange_rate_set_id=data.get("exchange_rate_set_id"),
         price_change_settings=data.get("price_change_settings"),
+        export_price_mode=data.get("export_price_mode"),
     )
     
     service = ScenarioService()
@@ -173,6 +174,7 @@ def scenario_update_api(request, scenario_id):
             "inflation_set_id": scenario.inflation_set_id,
             "inflation_set_name": scenario.inflation_set_name,
             "price_change_settings": scenario.price_change_settings,
+            "export_price_mode": scenario.export_price_mode,
             "author_id": scenario.author_id,
             "author_name": scenario.author_name,
         }
@@ -273,6 +275,7 @@ def scenario_edit_view(request, scenario_id):
         }
         for key, label in PRICE_CHANGE_PARAMETERS
     ]
+    export_price_modes = list(Scenario.ExportPriceMode.choices)
 
     return render(
         request,
@@ -282,6 +285,7 @@ def scenario_edit_view(request, scenario_id):
             "breadcrumbs": breadcrumbs,
             "price_change_rows": price_change_rows,
             "price_change_modes": PRICE_CHANGE_MODES,
+            "export_price_modes": export_price_modes,
         },
     )
 
@@ -440,13 +444,31 @@ def tariff_rule_options_api(request, scenario_id):
             .order_by("message_type__name")
         )
         items = [{"value": r["message_type__id"], "text": r["message_type__name"]} for r in rows]
+    elif parameter == "shipper":
+        rows = (
+            qs.exclude(shipper__isnull=True)
+            .values("shipper_id", "shipper__name", "shipper__holding")
+            .distinct()
+            .order_by("shipper__name")
+        )
+        items = [
+            {
+                "value": r["shipper_id"],
+                "text": (
+                    f'{r["shipper__name"]} ({r["shipper__holding"]})'
+                    if r["shipper__holding"]
+                    else r["shipper__name"]
+                ),
+            }
+            for r in rows
+        ]
     elif parameter == "shipper_holding":
         rows = (
-            qs.exclude(shipper_holding__isnull=True)
-            .exclude(shipper_holding="")
-            .values_list("shipper_holding", flat=True)
+            qs.exclude(shipper__isnull=True)
+            .exclude(shipper__holding="")
+            .values_list("shipper__holding", flat=True)
             .distinct()
-            .order_by("shipper_holding")
+            .order_by("shipper__holding")
         )
         items = [{"value": v, "text": v} for v in rows]
     elif parameter == "distance_loaded_km":

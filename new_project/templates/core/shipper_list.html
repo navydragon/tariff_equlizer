@@ -1,0 +1,229 @@
+{% extends "base.html" %}
+
+{% block title %}Грузоотправители · Цифровой тарифный инструментарий{% endblock %}
+
+{% block content %}
+<div
+  data-controller="shipper-list"
+  data-shipper-list-list-url-value="{% url 'shipper_list_api' %}"
+  data-shipper-list-detail-url-template-value="{% url 'shipper_detail_api' 0 %}"
+  data-shipper-list-create-url-value="{% url 'shipper_create_api' %}"
+  data-shipper-list-update-url-template-value="{% url 'shipper_update_api' 0 %}"
+  data-shipper-list-delete-url-template-value="{% url 'shipper_delete_api' 0 %}"
+>
+  <div class="page-header d-print-none">
+    <div class="row align-items-center">
+      <div class="col">
+        <h2 class="page-title">Грузоотправители</h2>
+        <div class="text-muted mt-1">
+          Справочник компаний-отправителей (ОКПО, ИНН, холдинг)
+        </div>
+      </div>
+      <div class="col-auto">
+        <button
+          type="button"
+          class="btn btn-primary"
+          data-bs-toggle="modal"
+          data-bs-target="#shipperCreateModal"
+        >
+          <i class="ti ti-plus"></i>
+          Создать
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div class="page-body">
+    <div class="container-xl">
+      <div class="card">
+        <div class="card-body border-bottom py-3">
+          <div class="row">
+            <div class="col-12 col-md-4 mb-2">
+              <label class="form-label" for="shipperSearchInput">Поиск</label>
+              <input
+                type="text"
+                id="shipperSearchInput"
+                class="form-control"
+                placeholder="Название, ИНН, ОКПО, холдинг"
+                data-shipper-list-target="searchInput"
+              />
+            </div>
+            <div class="col-6 col-md-3 mb-2">
+              <label class="form-label" for="shipperHoldingFilter">Холдинг</label>
+              <select
+                id="shipperHoldingFilter"
+                class="form-select"
+                data-shipper-list-target="holdingFilter"
+              >
+                <option value="">Все</option>
+                {% for h in holdings %}
+                  <option value="{{ h }}">{{ h }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-6 col-md-2 mb-2">
+              <label class="form-label" for="shipperPageSize">На странице</label>
+              <select
+                id="shipperPageSize"
+                class="form-select"
+                data-shipper-list-target="pageSize"
+              >
+                <option value="10">10</option>
+                <option value="20" selected>20</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+              </select>
+            </div>
+            <div class="col-12 col-md-3 mb-2 d-flex align-items-end justify-content-end">
+              <button
+                type="button"
+                class="btn btn-outline-primary me-2"
+                data-shipper-list-target="searchButton"
+              >
+                <i class="ti ti-search"></i>
+                Найти
+              </button>
+              <button
+                type="button"
+                class="btn btn-outline-secondary"
+                data-shipper-list-target="resetButton"
+              >
+                <i class="ti ti-refresh"></i>
+                Сбросить
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div
+          class="text-center py-4"
+          style="display: none;"
+          data-shipper-list-target="loading"
+        >
+          <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Загрузка...</span>
+          </div>
+        </div>
+
+        <div
+          class="text-center py-5"
+          style="display: none;"
+          data-shipper-list-target="empty"
+        >
+          <div class="empty">
+            <div class="empty-icon">
+              <i class="ti ti-inbox" style="font-size: 3rem;"></i>
+            </div>
+            <p class="empty-title">Нет данных</p>
+            <p class="empty-text text-muted">
+              Измените условия поиска или создайте первую запись
+            </p>
+          </div>
+        </div>
+
+        <div class="table-responsive">
+          <table class="table table-vcenter card-table">
+            <thead>
+              <tr>
+                <th>Наименование</th>
+                <th style="width: 12%;">ОКПО</th>
+                <th style="width: 12%;">ИНН</th>
+                <th style="width: 22%;">Холдинг</th>
+                <th class="text-end" style="width: 12%;">Действия</th>
+              </tr>
+            </thead>
+            <tbody data-shipper-list-target="tableBody"></tbody>
+          </table>
+        </div>
+
+        <div class="card-footer d-flex align-items-center">
+          <p class="m-0 text-muted" data-shipper-list-target="summary"></p>
+          <ul
+            class="pagination m-0 ms-auto"
+            data-shipper-list-target="pagination"
+          ></ul>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal modal-blur fade" id="shipperCreateModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered" role="document">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Создать грузоотправителя</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div data-shipper-list-target="createErrors"></div>
+        <form id="shipperCreateForm">
+          <div class="mb-3">
+            <label class="form-label" for="shipperCreateName">Наименование</label>
+            <input type="text" class="form-control" id="shipperCreateName" required />
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="shipperCreateOkpo">ОКПО</label>
+            <input type="number" class="form-control" id="shipperCreateOkpo" />
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="shipperCreateInn">ИНН</label>
+            <input type="text" class="form-control" id="shipperCreateInn" maxlength="12" />
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="shipperCreateHolding">Холдинг</label>
+            <input type="text" class="form-control" id="shipperCreateHolding" />
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-link link-secondary" data-bs-dismiss="modal">Отмена</button>
+        <button type="button" class="btn btn-primary" id="shipperCreateSubmit">
+          <i class="ti ti-check"></i>
+          Сохранить
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal modal-blur fade" id="shipperEditModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered" role="document">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Редактировать грузоотправителя</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div data-shipper-list-target="editErrors"></div>
+        <form id="shipperEditForm">
+          <input type="hidden" id="shipperEditId" />
+          <div class="mb-3">
+            <label class="form-label" for="shipperEditName">Наименование</label>
+            <input type="text" class="form-control" id="shipperEditName" required />
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="shipperEditOkpo">ОКПО</label>
+            <input type="number" class="form-control" id="shipperEditOkpo" />
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="shipperEditInn">ИНН</label>
+            <input type="text" class="form-control" id="shipperEditInn" maxlength="12" />
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="shipperEditHolding">Холдинг</label>
+            <input type="text" class="form-control" id="shipperEditHolding" />
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-link link-secondary" data-bs-dismiss="modal">Отмена</button>
+        <button type="button" class="btn btn-primary" id="shipperEditSubmit">
+          <i class="ti ti-check"></i>
+          Сохранить
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

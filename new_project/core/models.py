@@ -292,8 +292,8 @@ class MessageType(models.Model):
     )
 
     class Meta:
-        verbose_name = "Тип сообщения"
-        verbose_name_plural = "Типы сообщения"
+        verbose_name = "Вид сообщения"
+        verbose_name_plural = "Виды сообщения"
         ordering = ["position", "name"]
         constraints = [
             models.UniqueConstraint(
@@ -309,6 +309,43 @@ class MessageType(models.Model):
     def save(self, *args, **kwargs):
         self.name_search = (self.name or "").casefold()
         self.code = (self.code or "").strip()
+        return super().save(*args, **kwargs)
+
+
+class Shipper(models.Model):
+    okpo = models.BigIntegerField("ОКПО", null=True, blank=True)
+    inn = models.CharField("ИНН", max_length=12, blank=True, default="")
+    name = models.CharField("Грузоотправитель", max_length=255)
+    holding = models.CharField(
+        "Холдинг грузоотправителя",
+        max_length=255,
+        blank=True,
+        default="",
+    )
+    name_search = models.CharField(
+        max_length=255,
+        editable=False,
+        default="",
+        db_index=True,
+    )
+
+    class Meta:
+        verbose_name = "Грузоотправитель"
+        verbose_name_plural = "Грузоотправители"
+        ordering = ["name", "okpo"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["okpo", "inn", "name"],
+                name="uniq_shipper_okpo_inn_name",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return self.name
+
+    def save(self, *args, **kwargs):
+        self.name_search = (self.name or "").casefold()
+        self.inn = (self.inn or "").strip()
         return super().save(*args, **kwargs)
 
 
@@ -366,22 +403,20 @@ class Route(models.Model):
     )
     message_type = models.ForeignKey(
         MessageType,
-        verbose_name="Тип сообщения",
+        verbose_name="Вид сообщения",
         on_delete=models.PROTECT,
         related_name="routes",
         null=True,
         blank=True,
     )
 
-    shipper_holding = models.CharField(
-        "Холдинг грузоотправителя",
-        max_length=255,
+    shipper = models.ForeignKey(
+        Shipper,
+        verbose_name="Грузоотправитель",
+        on_delete=models.SET_NULL,
+        null=True,
         blank=True,
-    )
-    shipper = models.CharField(
-        "Грузоотправитель",
-        max_length=255,
-        blank=True,
+        related_name="routes",
     )
     route_code = models.CharField(
         "Ключевой код маршрута",

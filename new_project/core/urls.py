@@ -42,6 +42,7 @@ urlpatterns = [
     path("references/wagon-kinds/", views.wagon_kind_list_view, name="wagon_kind_list"),
     path("references/shipment-types/", views.shipment_type_list_view, name="shipment_type_list"),
     path("references/message-types/", views.message_type_list_view, name="message_type_list"),
+    path("references/shippers/", views.shipper_list_view, name="shipper_list"),
     # API для грузов
     path(
         "references/api/cargos/",
@@ -198,7 +199,7 @@ urlpatterns = [
         views.shipment_type_delete_api,
         name="shipment_type_delete_api",
     ),
-    # API: тип сообщения
+    # API: вид сообщения
     path(
         "references/api/message-types/",
         views.message_type_list_api,
@@ -249,6 +250,31 @@ urlpatterns = [
         "references/api/route-sets/<int:pk>/delete/",
         views.route_set_delete_api,
         name="route_set_delete_api",
+    ),
+    path(
+        "references/api/shippers/",
+        views.shipper_list_api,
+        name="shipper_list_api",
+    ),
+    path(
+        "references/api/shippers/<int:pk>/",
+        views.shipper_detail_api,
+        name="shipper_detail_api",
+    ),
+    path(
+        "references/api/shippers/create/",
+        views.shipper_create_api,
+        name="shipper_create_api",
+    ),
+    path(
+        "references/api/shippers/<int:pk>/update/",
+        views.shipper_update_api,
+        name="shipper_update_api",
+    ),
+    path(
+        "references/api/shippers/<int:pk>/delete/",
+        views.shipper_delete_api,
+        name="shipper_delete_api",
     ),
     path(
         "references/api/routes/",

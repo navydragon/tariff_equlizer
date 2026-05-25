@@ -10,6 +10,7 @@ PARAMETER_COLUMN_MAP = {
     "wagon_kind": "wagon_kind_id",
     "shipment_type": "shipment_type_id",
     "message_type": "message_type_id",
+    "shipper": "shipper_id",
     "shipper_holding": "shipper_holding",
     "distance_loaded_km": "distance_loaded_km",
 }
@@ -55,7 +56,7 @@ def build_rule_mask(df: pd.DataFrame, conditions: list[dict]) -> pd.Series:
             continue
 
         series = df[column]
-        if parameter in {"wagon_kind", "shipment_type", "message_type"}:
+        if parameter in {"wagon_kind", "shipment_type", "message_type", "shipper"}:
             compare_vals = []
             for val in vals:
                 try:

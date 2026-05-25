@@ -20,6 +20,7 @@ class ScenarioDTO:
     author_id: int
     author_name: str
     price_change_settings: dict[str, str] = field(default_factory=dict)
+    export_price_mode: str = "fixed"
 
     @classmethod
     def from_model(cls, scenario, *, price_change_settings: dict[str, str] | None = None):
@@ -42,6 +43,7 @@ class ScenarioDTO:
             author_id=scenario.author.id,
             author_name=str(scenario.author),
             price_change_settings=price_change_settings or {},
+            export_price_mode=scenario.export_price_mode,
         )
 
 
@@ -79,6 +81,7 @@ class UpdateScenarioDTO:
     route_set_id: Optional[int] = None
     exchange_rate_set_id: Optional[int] = None
     price_change_settings: Optional[dict[str, str]] = None
+    export_price_mode: Optional[str] = None
 
     def validate(self) -> list[str]:
         errors: list[str] = []
@@ -95,6 +98,12 @@ class UpdateScenarioDTO:
             errors.append("Набор маршрутов указан некорректно")
         if self.exchange_rate_set_id is not None and self.exchange_rate_set_id <= 0:
             errors.append("Набор курсов валют указан некорректно")
+        if self.export_price_mode is not None:
+            from scenarios.models import Scenario
+
+            valid = {choice.value for choice in Scenario.ExportPriceMode}
+            if self.export_price_mode not in valid:
+                errors.append("Некорректный режим экспортной цены")
         return errors
 
 

@@ -31,6 +31,7 @@ from core.models import (
     RouteSet,
     Setting,
     ShipmentType,
+    Shipper,
     Station,
     WagonKind,
 )
@@ -422,8 +423,20 @@ class ScenarioEffectsServiceTests(TariffLoadServiceTestMixin, TestCase):
 
     def test_holding_filter_affects_table_not_kpi(self) -> None:
         self._setup_btd("1.1000")
-        self.route.shipper_holding = "Alpha"
-        self.route.save(update_fields=["shipper_holding"])
+        shipper_alpha, _ = Shipper.objects.get_or_create(
+            okpo=1,
+            inn="",
+            name="Shipper Alpha",
+            defaults={"holding": "Alpha"},
+        )
+        shipper_beta, _ = Shipper.objects.get_or_create(
+            okpo=2,
+            inn="",
+            name="Shipper Beta",
+            defaults={"holding": "Beta"},
+        )
+        self.route.shipper = shipper_alpha
+        self.route.save(update_fields=["shipper"])
 
         route2 = self._create_route(
             rzd=Decimal("500.00"),
@@ -431,8 +444,8 @@ class ScenarioEffectsServiceTests(TariffLoadServiceTestMixin, TestCase):
             route_code="R-002",
         )
         route2.freight_charge_ths_rub = Decimal("2000000.00")
-        route2.shipper_holding = "Beta"
-        route2.save(update_fields=["freight_charge_ths_rub", "shipper_holding"])
+        route2.shipper = shipper_beta
+        route2.save(update_fields=["freight_charge_ths_rub", "shipper"])
 
         compute_result, compute_errors = self.effects_service.compute(
             scenario=self.scenario,
@@ -692,8 +705,20 @@ class ScenarioAbsoluteServiceTests(TariffLoadServiceTestMixin, TestCase):
 
     def test_nested_group_by_holding(self) -> None:
         self._setup_btd("1.0000")
-        self.route.shipper_holding = "Alpha"
-        self.route.save(update_fields=["shipper_holding"])
+        shipper_alpha, _ = Shipper.objects.get_or_create(
+            okpo=11,
+            inn="",
+            name="Shipper Alpha nested",
+            defaults={"holding": "Alpha"},
+        )
+        shipper_beta, _ = Shipper.objects.get_or_create(
+            okpo=12,
+            inn="",
+            name="Shipper Beta nested",
+            defaults={"holding": "Beta"},
+        )
+        self.route.shipper = shipper_alpha
+        self.route.save(update_fields=["shipper"])
 
         route2 = self._create_route(
             rzd=Decimal("500.00"),
@@ -702,12 +727,12 @@ class ScenarioAbsoluteServiceTests(TariffLoadServiceTestMixin, TestCase):
         )
         route2.freight_charge_ths_rub = Decimal("2000000.00")
         route2.transport_volume_mln_tons = Decimal("2.0000")
-        route2.shipper_holding = "Beta"
+        route2.shipper = shipper_beta
         route2.save(
             update_fields=[
                 "freight_charge_ths_rub",
                 "transport_volume_mln_tons",
-                "shipper_holding",
+                "shipper",
             ],
         )
 

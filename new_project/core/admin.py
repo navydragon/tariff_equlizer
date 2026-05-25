@@ -12,6 +12,7 @@ from .models import (
     WagonKind,
     ShipmentType,
     MessageType,
+    Shipper,
     RouteSet,
     Route,
 )
@@ -109,6 +110,14 @@ class MessageTypeAdmin(admin.ModelAdmin):
     list_filter = ("is_active",)
 
 
+@admin.register(Shipper)
+class ShipperAdmin(admin.ModelAdmin):
+    list_display = ("name", "holding", "inn", "okpo")
+    ordering = ("name",)
+    search_fields = ("name", "holding", "inn")
+    list_filter = ("holding",)
+
+
 @admin.register(RouteSet)
 class RouteSetAdmin(admin.ModelAdmin):
     list_display = ("code", "name", "created_at", "updated_at")
@@ -131,11 +140,13 @@ class RouteAdmin(admin.ModelAdmin):
     list_filter = (
         "route_set",
         "cargo",
+        "shipper",
         "origin_station__railroad",
         "destination_station__railroad",
         "wagon_kind",
         "shipment_type",
     )
+    autocomplete_fields = ("shipper",)
     search_fields = (
         "route_code",
         "cargo__name",

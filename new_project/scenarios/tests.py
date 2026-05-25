@@ -19,6 +19,7 @@ from scenarios.domain.services import (
 from scenarios.domain.repositories import ScenarioRepository
 from scenarios.domain.dto import (
     CreateBTDCategoryDTO,
+    CreateScenarioDTO,
     UpdateBTDCategoryValueDTO,
     UpdateExchangeRateValueDTO,
     UpdateInflationValueDTO,
@@ -31,6 +32,9 @@ from scenarios.models import (
     BTDCategoryValue,
     ExchangeRateSet,
     InflationSet,
+    TariffRule,
+    TariffRuleCondition,
+    TariffRuleYearValue,
 )
 
 
@@ -591,6 +595,171 @@ class PriceChangeSettingServiceTests(TestCase):
         self.assertFalse(errors)
         self.assertIsNotNone(updated)
         self.assertEqual(updated.price_change_settings["transshipment"], "inflation")
+
+    def test_update_scenario_saves_export_price_mode(self):
+        scenario_service = ScenarioService()
+        from scenarios.domain.dto import UpdateScenarioDTO
+
+        dto = UpdateScenarioDTO(export_price_mode="by_fx")
+        updated, errors = scenario_service.update_scenario(self.scenario.id, dto, self.user)
+        self.assertFalse(errors)
+        self.assertIsNotNone(updated)
+        self.assertEqual(updated.export_price_mode, "by_fx")
+
+        self.scenario.refresh_from_db()
+        self.assertEqual(self.scenario.export_price_mode, "by_fx")
+
+    def test_copy_scenario_copies_export_price_mode(self):
+        self.scenario.export_price_mode = Scenario.ExportPriceMode.BY_FX
+        self.scenario.save(update_fields=["export_price_mode"])
+
+        copied = self.scenario_repository.copy_scenario(
+            source_id=self.scenario.id,
+            new_name="Копия экспорт",
+            new_author=self.user,
+        )
+        self.assertIsNotNone(copied)
+        self.assertEqual(copied.export_price_mode, Scenario.ExportPriceMode.BY_FX)
+
+
+class ScenarioCopyTests(TestCase):
+    """Копирование сценария при создании на базе выбранного."""
+
+    def setUp(self) -> None:
+        self.user = User.objects.create_user(login="copy_user", password="test_pass")
+        self.route_set = RouteSet.objects.create(name="RS_COPY", code="RS_COPY")
+        self.fx_set = ExchangeRateSet.objects.create(
+            name="Прогноз ЦБ", author=self.user
+        )
+        self.inflation_set = InflationSet.objects.create(
+            name="Прогноз ЦБ", author=self.user
+        )
+        self.scenario = Scenario.objects.create(
+            name="Исходный",
+            description="Описание исходного",
+            start_year=2025,
+            end_year=2027,
+            route_set=self.route_set,
+            exchange_rate_set=self.fx_set,
+            inflation_set=self.inflation_set,
+            author=self.user,
+        )
+        self.btd_category = BTDCategory.objects.create(
+            name="Индексация",
+            scenario=self.scenario,
+            position=1,
+        )
+        BTDCategoryValue.objects.create(
+            scenario=self.scenario,
+            category=self.btd_category,
+            year=2025,
+            value=Decimal("1.1250"),
+        )
+        self.tariff_rule = TariffRule.objects.create(
+            scenario=self.scenario,
+            name="Льгота уголь",
+            base_percent=Decimal("50.0000"),
+            position=1,
+        )
+        TariffRuleCondition.objects.create(
+            tariff_rule=self.tariff_rule,
+            parameter="cargo_group",
+            operator="include",
+            values=["Уголь"],
+            position=1,
+        )
+        TariffRuleYearValue.objects.create(
+            tariff_rule=self.tariff_rule,
+            year=2026,
+            coefficient=Decimal("0.9500"),
+        )
+        PriceChangeSettingService().save_settings(
+            self.scenario.id,
+            {key: "inflation" if key == "operators" else "fixed" for key in PRICE_CHANGE_PARAMETER_KEYS},
+            self.user,
+        )
+        self.repository = ScenarioRepository()
+        self.scenario_service = ScenarioService()
+
+    def test_copy_scenario_transfers_all_configurable_parameters(self) -> None:
+        copied = self.repository.copy_scenario(
+            source_id=self.scenario.id,
+            new_name="Копия",
+            new_author=self.user,
+        )
+        self.assertIsNotNone(copied)
+
+        copied.refresh_from_db()
+        self.assertEqual(copied.description, self.scenario.description)
+        self.assertEqual(copied.start_year, self.scenario.start_year)
+        self.assertEqual(copied.end_year, self.scenario.end_year)
+        self.assertEqual(copied.route_set_id, self.scenario.route_set_id)
+        self.assertEqual(copied.exchange_rate_set_id, self.fx_set.id)
+        self.assertEqual(copied.inflation_set_id, self.inflation_set.id)
+
+        settings = PriceChangeSettingService().get_settings(copied.id)
+        self.assertEqual(settings["operators"], "inflation")
+        self.assertEqual(settings["cost"], "fixed")
+
+        copied_categories = list(
+            BTDCategory.objects.filter(scenario=copied).order_by("position")
+        )
+        self.assertEqual(len(copied_categories), 1)
+        self.assertEqual(copied_categories[0].name, "Индексация")
+        self.assertNotEqual(copied_categories[0].id, self.btd_category.id)
+
+        copied_value = BTDCategoryValue.objects.get(
+            scenario=copied,
+            category=copied_categories[0],
+            year=2025,
+        )
+        self.assertEqual(copied_value.value, Decimal("1.1250"))
+
+        copied_rules = list(
+            TariffRule.objects.filter(scenario=copied).prefetch_related(
+                "conditions", "year_values"
+            )
+        )
+        self.assertEqual(len(copied_rules), 1)
+        self.assertEqual(copied_rules[0].name, "Льгота уголь")
+        self.assertEqual(copied_rules[0].base_percent, Decimal("50.0000"))
+        self.assertNotEqual(copied_rules[0].id, self.tariff_rule.id)
+
+        conditions = list(copied_rules[0].conditions.all())
+        self.assertEqual(len(conditions), 1)
+        self.assertEqual(conditions[0].parameter, "cargo_group")
+        self.assertEqual(conditions[0].values, ["Уголь"])
+
+        year_values = list(copied_rules[0].year_values.all())
+        self.assertEqual(len(year_values), 1)
+        self.assertEqual(year_values[0].year, 2026)
+        self.assertEqual(year_values[0].coefficient, Decimal("0.9500"))
+
+    def test_create_scenario_from_base_via_service(self) -> None:
+        dto = CreateScenarioDTO(
+            name="Новый сценарий",
+            description="Новое описание",
+            start_year=2025,
+            end_year=2028,
+            base_scenario_id=self.scenario.id,
+        )
+        created, errors = self.scenario_service.create_scenario_from_base(
+            dto, self.user
+        )
+        self.assertEqual(errors, [])
+        self.assertIsNotNone(created)
+        self.assertEqual(created.name, "Новый сценарий")
+        self.assertEqual(created.description, "Новое описание")
+        self.assertEqual(created.end_year, 2028)
+        self.assertEqual(created.exchange_rate_set_id, self.fx_set.id)
+        self.assertEqual(created.inflation_set_id, self.inflation_set.id)
+        self.assertEqual(created.price_change_settings["operators"], "inflation")
+        self.assertEqual(
+            BTDCategory.objects.filter(scenario_id=created.id).count(), 1
+        )
+        self.assertEqual(
+            TariffRule.objects.filter(scenario_id=created.id).count(), 1
+        )
 
 
 class ShareScenariosAccessTests(TestCase):

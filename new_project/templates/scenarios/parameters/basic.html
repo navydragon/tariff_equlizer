@@ -87,9 +87,11 @@
         </div>
       </div>
 
-      <h4 class="mt-4 mb-3">Изменение цен</h4>
+      <h4 class="mt-4 mb-3">Параметры экономики грузов</h4>
       <p class="text-muted small mb-3">
-        Параметры экономики маршрута (кроме РЖД): выберите, будет ли значение меняться по инфляции сценария.
+        Параметры влияют на расчёты на дашборде
+        <a href="{% url 'route_analysis' %}">Экономика грузов</a>
+        (кроме РЖД): выберите, будет ли значение меняться по инфляции сценария.
       </p>
       <div class="table-responsive">
         <table class="table table-vcenter">
@@ -124,6 +126,33 @@
               </td>
             </tr>
             {% endfor %}
+            <tr>
+              <td>
+                Экспортная цена
+                <div class="text-muted small">
+                  Только для маршрутов с видом сообщения «Экспорт»
+                </div>
+              </td>
+              <td>
+                <div class="btn-group flex-wrap" role="group" aria-label="Экспортная цена">
+                  {% for mode_key, mode_label in export_price_modes %}
+                  <input
+                    type="radio"
+                    class="btn-check"
+                    name="export_price_mode"
+                    id="export_price_mode__{{ mode_key }}"
+                    value="{{ mode_key }}"
+                    autocomplete="off"
+                    {% if scenario.export_price_mode == mode_key %}checked{% endif %}
+                  />
+                  <label
+                    class="btn btn-outline-primary"
+                    for="export_price_mode__{{ mode_key }}"
+                  >{{ mode_label }}</label>
+                  {% endfor %}
+                </div>
+              </td>
+            </tr>
           </tbody>
         </table>
       </div>

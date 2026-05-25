@@ -14,6 +14,7 @@ from core.models import (
     Route,
     RouteSet,
     ShipmentType,
+    Shipper,
     Station,
     WagonKind,
 )
@@ -357,13 +358,13 @@ class Command(BaseCommand):
                 if shipment is None:
                     reasons.append(f"Не найден Тип отправки '{shipment_raw}'")
 
-                # Тип сообщения сопоставляем по колонке "vid" из CSV
+                # Вид сообщения сопоставляем по колонке "vid" из CSV
                 message_raw = (row.get("vid") or "").strip()
                 message: Optional[MessageType] = None
                 if message_raw:
                     message = message_by_name.get(self._normalize_name(message_raw))
                     if message is None:
-                        reasons.append(f"Не найден Тип сообщения '{message_raw}'")
+                        reasons.append(f"Не найден вид сообщения '{message_raw}'")
 
                 def _parse_int(field: str) -> Optional[int]:
                     raw = (row.get(field) or "").replace(" ", "")
@@ -426,7 +427,18 @@ class Command(BaseCommand):
 
                 route_code = (row.get("КЛЮЧ_КОД_МАРШРУТА") or "").strip()
                 shipper_holding = (row.get("Холдинг грузоотправителя") or "").strip()
-                shipper = (row.get("Грузоотправитель") or "").strip()
+                shipper_name = (row.get("Грузоотправитель") or "").strip()
+                shipper_obj = None
+                if shipper_name:
+                    shipper_obj, _ = Shipper.objects.get_or_create(
+                        okpo=0,
+                        inn="",
+                        name=shipper_name,
+                        defaults={"holding": shipper_holding},
+                    )
+                    if shipper_holding and not shipper_obj.holding:
+                        shipper_obj.holding = shipper_holding
+                        shipper_obj.save(update_fields=["holding"])
 
                 if not route_code:
                     reasons.append("Пустой КЛЮЧ_КОД_МАРШРУТА")
@@ -453,8 +465,7 @@ class Command(BaseCommand):
                     wagon_kind=wagon,
                     shipment_type=shipment,
                     message_type=message,
-                    shipper_holding=shipper_holding,
-                    shipper=shipper,
+                    shipper=shipper_obj,
                     route_code=route_code,
                     distance_loaded_km=distance_loaded_km,
                     distance_empty_km=distance_empty_km,
