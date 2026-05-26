@@ -1,0 +1,33 @@
+# HTTP — для первого запуска и certbot --nginx
+# cp deploy/nginx-http.conf.example /etc/nginx/sites-available/tariff-equlizer
+
+upstream tariff_gunicorn {
+    server 127.0.0.1:8000 fail_timeout=0;
+}
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name 157.22.172.245 ваш-домен.ru;
+
+    client_max_body_size 20m;
+
+    location /static/ {
+        alias /opt/tariff_equlizer/new_project/staticfiles/;
+        expires 7d;
+        add_header Cache-Control "public";
+    }
+
+    location / {
+        proxy_pass http://tariff_gunicorn;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_redirect off;
+
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 300s;
+        proxy_read_timeout 300s;
+    }
+}

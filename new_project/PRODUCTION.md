@@ -102,9 +102,19 @@ sudo journalctl -u tariff-equlizer -f
 
 ---
 
-## 6. Nginx
+## 6. Nginx + HTTPS
 
-Пример: `deploy/nginx.conf.example` → `/etc/nginx/sites-available/tariff-equlizer`.
+Пошагово (Gunicorn, nginx, certbot, IP vs домен): **[deploy/DEPLOY_NGINX_SSL.md](deploy/DEPLOY_NGINX_SSL.md)**.
+
+Шаблоны:
+
+| Файл | Назначение |
+|------|------------|
+| `deploy/nginx-http.conf.example` | HTTP, перед certbot |
+| `deploy/nginx-ssl.conf.example` | HTTPS + Let's Encrypt (нужен **домен**) |
+| `deploy/nginx-ssl-ip.conf.example` | HTTPS по IP (самоподписанный) |
+
+> Certbot/Let's Encrypt **не выдаёт** сертификат на `157.22.172.245` — только на домен с A-записью на этот IP.
 
 После `collectstatic` nginx раздаёт `/static/` из `staticfiles/`.
 
