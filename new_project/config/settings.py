@@ -39,17 +39,29 @@ def _load_env_file(env_path: Path) -> None:
 _load_env_file(BASE_DIR / ".env")
 
 
+def _env_bool(name: str, *, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _env_csv(name: str, *, default: str = "") -> list[str]:
+    return [part.strip() for part in os.environ.get(name, default).split(",") if part.strip()]
+
+
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
+# Production: DJANGO_SETTINGS_MODULE=config.settings_prod (см. PRODUCTION.md).
 
 # SECURITY WARNING: keep the secret key used in production secret!
 # Для локальной разработки используем env (а если не задано — безопасный dev-вариант).
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "dev-secret-key-change-me")
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = _env_bool("DJANGO_DEBUG", default=True)
 
-ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "127.0.0.1,localhost").split(",")
+ALLOWED_HOSTS = _env_csv("DJANGO_ALLOWED_HOSTS", default="127.0.0.1,localhost")
 
 
 # Application definition
@@ -64,7 +76,7 @@ INSTALLED_APPS = [
     # Third-party apps
     'django_htmx',
     # Local apps
-    'core',
+    'core.apps.CoreConfig',
     'scenarios',
     'calculations',
 ]
@@ -177,6 +189,7 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
@@ -187,6 +200,25 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 LOGIN_URL = "/login/"
 LOGIN_REDIRECT_URL = "/home/"
 LOGOUT_REDIRECT_URL = "/"
+
+######################################################################
+# Route mart (parquet cache on disk)
+######################################################################
+
+ROUTE_MART_CACHE_DIR = os.environ.get(
+    "ROUTE_MART_CACHE_DIR",
+    str(BASE_DIR / "cache" / "route_mart"),
+)
+
+SCENARIO_COMPUTE_CACHE_DIR = os.environ.get(
+    "SCENARIO_COMPUTE_CACHE_DIR",
+    str(BASE_DIR / "cache" / "scenario_compute"),
+)
+
+ROUTE_MASK_CACHE_DIR = os.environ.get(
+    "ROUTE_MASK_CACHE_DIR",
+    str(BASE_DIR / "cache" / "route_masks"),
+)
 
 ######################################################################
 # Cache (scenario effects snapshots)

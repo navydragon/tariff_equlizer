@@ -419,10 +419,51 @@ class Route(models.Model):
         related_name="routes",
     )
     route_code = models.CharField(
-        "Ключевой код маршрута",
+        "Код маршрута (index в ИХ_ГП)",
         max_length=50,
         blank=True,
         db_index=True,
+    )
+    distance_belt = models.CharField(
+        "Пояс дальности",
+        max_length=50,
+        blank=True,
+        default="",
+    )
+    distance_belt_midpoint_km = models.PositiveIntegerField(
+        "Середина пояса дальности, км",
+        null=True,
+        blank=True,
+    )
+    shipment_category = models.CharField(
+        "Категория отправки",
+        max_length=100,
+        blank=True,
+        default="",
+    )
+    park_type = models.CharField(
+        "Тип парка",
+        max_length=100,
+        blank=True,
+        default="",
+    )
+    special_container_type = models.CharField(
+        "Вид спец. контейнера",
+        max_length=255,
+        blank=True,
+        default="",
+    )
+    cargo_group_cmtp = models.CharField(
+        "Группа груза ЦМТП",
+        max_length=255,
+        blank=True,
+        default="",
+    )
+    cargo_code_izpod = models.CharField(
+        "Код груза (изпод)",
+        max_length=50,
+        blank=True,
+        default="",
     )
 
     distance_loaded_km = models.PositiveIntegerField(
@@ -534,23 +575,23 @@ class Route(models.Model):
         null=True,
         blank=True,
     )
-    transport_volume_mln_tons = models.DecimalField(
-        "Объём перевозок, млн т",
-        max_digits=12,
+    transport_volume_tons = models.DecimalField(
+        "Объём перевозок, т",
+        max_digits=18,
         decimal_places=4,
         null=True,
         blank=True,
     )
-    freight_turnover_bln_tkm = models.DecimalField(
-        "Грузооборот, млрд т·км",
-        max_digits=14,
+    freight_turnover_tkm = models.DecimalField(
+        "Грузооборот, т·км",
+        max_digits=22,
         decimal_places=4,
         null=True,
         blank=True,
     )
-    freight_charge_ths_rub = models.DecimalField(
-        "Провозная плата, тыс. руб.",
-        max_digits=16,
+    freight_charge_rub = models.DecimalField(
+        "Провозная плата, руб.",
+        max_digits=20,
         decimal_places=2,
         null=True,
         blank=True,
@@ -563,7 +604,7 @@ class Route(models.Model):
         indexes = [
             models.Index(fields=["route_set", "route_code"], name="route_set_code_idx"),
             models.Index(
-                fields=["route_set", "freight_charge_ths_rub"],
+                fields=["route_set", "freight_charge_rub"],
                 name="route_set_charge_idx",
             ),
             models.Index(fields=["route_set", "id"], name="route_set_id_idx"),
@@ -587,6 +628,17 @@ class Route(models.Model):
                 name="uniq_route_set_route_code",
             )
         ]
+
+    def save(self, *args, **kwargs):
+        from core.domain.distance_belt import sync_distance_belt_midpoint
+
+        sync_distance_belt_midpoint(self)
+        update_fields = kwargs.get("update_fields")
+        if update_fields is not None and "distance_belt" in update_fields:
+            kwargs["update_fields"] = list(
+                set(update_fields) | {"distance_belt_midpoint_km"},
+            )
+        super().save(*args, **kwargs)
 
     def __str__(self) -> str:
         return f"{self.route_set.code if self.route_set_id else '-'} / {self.route_code or self.id}"

@@ -30,28 +30,42 @@ def build_compact_from_arrays(
     charge_by_year: np.ndarray,
     rule_meta: list[tuple[int, str]] | None = None,
     rule_by_year: np.ndarray | None = None,
+    dimensions: dict[str, np.ndarray] | None = None,
+    dimension_labels: dict[str, list[str]] | None = None,
 ) -> CompactRouteEffects:
-    dimensions: dict[str, np.ndarray] = {}
-    dimension_labels: dict[str, list[str]] = {}
+    resolved_dimensions: dict[str, np.ndarray] = {}
+    resolved_labels: dict[str, list[str]] = {}
 
-    for column in _DIMENSION_COLUMNS:
-        series = df[column].astype(str)
-        codes, uniques = pd.factorize(series, sort=False)
-        dimensions[column] = codes.astype(np.int32, copy=False)
-        dimension_labels[column] = uniques.tolist()
+    if dimensions is not None and dimension_labels is not None:
+        resolved_dimensions = dimensions
+        resolved_labels = dimension_labels
+    else:
+        for column in _DIMENSION_COLUMNS:
+            dim_column = f"dim_{column}"
+            if dim_column in df.columns:
+                resolved_dimensions[column] = df[dim_column].astype(np.int32, copy=False)
+                if dimension_labels and column in dimension_labels:
+                    resolved_labels[column] = dimension_labels[column]
+                else:
+                    resolved_labels[column] = df[column].astype(str).unique().tolist()
+                continue
+            series = df[column].astype(str)
+            codes, uniques = pd.factorize(series, sort=False)
+            resolved_dimensions[column] = codes.astype(np.int32, copy=False)
+            resolved_labels[column] = uniques.tolist()
 
     volume = (
-        pd.to_numeric(df["transport_volume_mln_tons"], errors="coerce")
+        pd.to_numeric(df["transport_volume_tons"], errors="coerce")
         .fillna(0)
         .to_numpy(dtype=np.float64)
     )
 
     return CompactRouteEffects(
         years=years,
-        dimensions=dimensions,
-        dimension_labels=dimension_labels,
-        baseline_ths=initial.astype(np.float64, copy=False),
-        volume_mln_tons=volume,
+        dimensions=resolved_dimensions,
+        dimension_labels=resolved_labels,
+        baseline_rub=initial.astype(np.float64, copy=False),
+        volume_tons=volume,
         base_by_year=base_by_year.astype(np.float64, copy=False),
         rules_by_year=rules_by_year_arr.astype(np.float64, copy=False),
         charge_by_year=charge_by_year.astype(np.float64, copy=False),
@@ -85,7 +99,7 @@ def _build_mask(
     cargo_filter: set[str] | None,
     holding_filter: set[str] | None,
 ) -> np.ndarray:
-    mask = np.ones(len(compact.baseline_ths), dtype=bool)
+    mask = np.ones(len(compact.baseline_rub), dtype=bool)
     if cargo_filter is not None:
         allowed = {
             idx

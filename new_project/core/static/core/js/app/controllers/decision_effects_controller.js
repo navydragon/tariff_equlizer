@@ -12,7 +12,6 @@ import { clearToasts, showToast } from "../lib/toast.js";
   class DecisionEffectsController extends Stimulus.Controller {
     static targets = [
       "scenarioSelect",
-      "engineSelect",
       "kpiCards",
       "groupBySelect",
       "groupByInnerSelect",
@@ -58,9 +57,6 @@ import { clearToasts, showToast } from "../lib/toast.js";
         scenarioYears: [],
         suppressFilterEvents: false,
         computing: false,
-        computeEngine: this.hasEngineSelectTarget
-          ? this.engineSelectTarget.value || "pandas"
-          : "pandas",
       };
 
       this._loadScenarios();
@@ -76,14 +72,6 @@ import { clearToasts, showToast } from "../lib/toast.js";
         ? this.scenarioSelectTarget.value
         : "";
       this.state.selectedScenarioId = raw ? Number(raw) : null;
-      this.state.cacheKey = null;
-      this._computeEffects();
-    }
-
-    onEngineChange() {
-      if (this.hasEngineSelectTarget) {
-        this.state.computeEngine = this.engineSelectTarget.value || "pandas";
-      }
       this.state.cacheKey = null;
       this._computeEffects();
     }
@@ -204,13 +192,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
     }
 
     _resolveComputeUrl() {
-      if (
-        this.state.computeEngine === "pandas" &&
-        this.computePandasUrlValue
-      ) {
-        return this.computePandasUrlValue;
-      }
-      return this.computeUrlValue;
+      return this.computePandasUrlValue || this.computeUrlValue;
     }
 
     async _computeEffects() {
@@ -439,17 +421,28 @@ import { clearToasts, showToast } from "../lib/toast.js";
       const chargeCount = Number(skippedCharge) || 0;
       const volumeCount = Number(skippedVolume) || 0;
 
-      if (meta.engine) {
+      if (meta.elapsed_ms != null || meta.timings) {
         const elapsed =
           meta.elapsed_ms === undefined || meta.elapsed_ms === null
             ? ""
-            : `, ${meta.elapsed_ms} мс`;
+            : ` за ${meta.elapsed_ms} мс`;
         let timingDetails = "";
         if (meta.timings) {
           const partsTiming = [
+            ["контекст", meta.timings.context_ms],
+            ["снимок read", meta.timings.scenario_snapshot_load_ms],
+            ["снимок write", meta.timings.scenario_snapshot_save_ms],
             ["загрузка", meta.timings.load_ms],
             ["расчёт", meta.timings.compute_ms],
+            ["карточки", meta.timings.cards_ms],
             ["кэш", meta.timings.cache_ms],
+            ["маски", meta.timings.masks_ms],
+            ["годы", meta.timings.years_loop_ms],
+            ["rule×год", meta.timings.rule_by_year_ms],
+            ["compact", meta.timings.compact_build_ms],
+            ["итоги", meta.timings.totals_ms],
+            ["parquet read", meta.timings.parquet_read_ms],
+            ["parquet write", meta.timings.parquet_write_ms],
             ["stats", meta.timings.stats_ms],
             ["sql", meta.timings.routes_sql_execute_ms],
             ["fetch", meta.timings.routes_fetch_ms],
@@ -461,14 +454,16 @@ import { clearToasts, showToast } from "../lib/toast.js";
             timingDetails = ` (${partsTiming.join(", ")})`;
           }
         }
-        if (meta.cache_hit) {
+        if (meta.scenario_compute_cache_hit) {
           timingDetails += ", снимок сценария";
+        } else if (meta.cache_hit || meta.route_mart_cache_hit) {
+          timingDetails += ", витрина parquet";
         }
         showToast(
-          `Движок расчёта: ${meta.engine}${elapsed}${timingDetails}.`,
+          `Расчёт выполнен${elapsed}${timingDetails}.`,
           this._toastOptions({
             variant: "info",
-            title: "Расчёт выполнен",
+            title: "Готово",
             delay: 7000,
           }),
         );
@@ -686,15 +681,15 @@ import { clearToasts, showToast } from "../lib/toast.js";
             <tr class="${rowClass}">
               <td>${escapeHtml(row.label || "")}</td>
               <td class="text-end">
-                ${escapeHtml(this._formatBlnFromThs(row.base_ths_rub))}<br />
+                ${escapeHtml(this._formatBlnFromRub(row.base_rub))}<br />
                 <span class="cell-pct">(+${escapeHtml(this._formatPct(row.base_pct))}%)</span>
               </td>
               <td class="text-end">
-                ${escapeHtml(this._formatBlnFromThs(row.rules_ths_rub))}<br />
+                ${escapeHtml(this._formatBlnFromRub(row.rules_rub))}<br />
                 <span class="cell-pct">(+${escapeHtml(this._formatPct(row.rules_pct))}%)</span>
               </td>
               <td class="text-end">
-                ${escapeHtml(this._formatBlnFromThs(row.total_ths_rub))}<br />
+                ${escapeHtml(this._formatBlnFromRub(row.total_rub))}<br />
                 <span class="cell-pct">(+${escapeHtml(this._formatPct(row.total_pct))}%)</span>
               </td>
             </tr>
@@ -799,10 +794,10 @@ import { clearToasts, showToast } from "../lib/toast.js";
       return num.toFixed(1);
     }
 
-    _formatBlnFromThs(thsValue) {
-      const num = Number(String(thsValue).replace(",", "."));
+    _formatBlnFromRub(rubValue) {
+      const num = Number(String(rubValue).replace(",", "."));
       if (!Number.isFinite(num)) return "0.0";
-      return (num / 1_000_000).toFixed(1);
+      return (num / 1_000_000_000).toFixed(1);
     }
 
     _absolutePayload(kind) {

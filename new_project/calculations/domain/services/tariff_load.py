@@ -370,7 +370,7 @@ class TariffLoadService:
         context: ScenarioTariffContext,
         rule_match_sets: dict[int, set[int]] | None = None,
     ) -> FreightChargeEffects | None:
-        initial = route.freight_charge_ths_rub
+        initial = route.freight_charge_rub
         if initial is None or initial <= 0:
             return None
 

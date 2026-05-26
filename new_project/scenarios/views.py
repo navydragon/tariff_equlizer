@@ -303,16 +303,7 @@ def tariff_rule_list_api(request, scenario_id):
     return JsonResponse(
         {
             "success": True,
-            "rules": [
-                {
-                    "id": r.id,
-                    "scenario_id": r.scenario_id,
-                    "name": r.name,
-                    "base_percent": r.base_percent,
-                    "position": r.position,
-                }
-                for r in rules
-            ],
+            "rules": [asdict(r) for r in rules],
         }
     )
 
@@ -471,9 +462,14 @@ def tariff_rule_options_api(request, scenario_id):
             .order_by("shipper__holding")
         )
         items = [{"value": v, "text": v} for v in rows]
-    elif parameter == "distance_loaded_km":
-        # числовой параметр — UI использует input, опции не требуются
-        items = []
+    elif parameter == "distance_belt":
+        rows = (
+            qs.exclude(distance_belt="")
+            .values_list("distance_belt", flat=True)
+            .distinct()
+            .order_by("distance_belt")
+        )
+        items = [{"value": v, "text": v} for v in rows]
     else:
         return JsonResponse({"success": False, "errors": ["Неизвестный parameter"]}, status=400)
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any, Optional
 
-from calculations.domain.services import TariffLoadService
+from calculations.domain.services.tariff_load import TariffLoadService
 from core.models import Route
 from scenarios.domain.services.price_change import PriceChangeSettingService
 from scenarios.domain.utils.fx_rates import load_fx_rates_by_year, missing_fx_years

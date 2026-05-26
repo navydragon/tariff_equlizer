@@ -68,7 +68,7 @@ def main():
     user_id = scenario.author_id
     rs = scenario.route_set_id
     total = Route.objects.filter(route_set_id=rs).count()
-    with_charge = Route.objects.filter(route_set_id=rs, freight_charge_ths_rub__gt=0).count()
+    with_charge = Route.objects.filter(route_set_id=rs, freight_charge_rub__gt=0).count()
     print(f"scenario={scenario.id} total={total} with_charge={with_charge}\n")
 
     print("PYTHON:")

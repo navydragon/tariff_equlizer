@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
+
+from calculations.domain.services.route_mart_store import MartMeta
 
 PARAMETER_COLUMN_MAP = {
     "cargo_group": "cargo_group_code",
@@ -12,7 +15,7 @@ PARAMETER_COLUMN_MAP = {
     "message_type": "message_type_id",
     "shipper": "shipper_id",
     "shipper_holding": "shipper_holding",
-    "distance_loaded_km": "distance_loaded_km",
+    "distance_belt": "distance_belt",
 }
 
 
@@ -22,6 +25,108 @@ def _as_list(value) -> list:
     if isinstance(value, list):
         return value
     return [value]
+
+
+def _label_codes(values: list, labels: list[str]) -> list[int]:
+    label_to_code = {label: index for index, label in enumerate(labels)}
+    codes: list[int] = []
+    for value in values:
+        key = str(value)
+        if key in label_to_code:
+            codes.append(label_to_code[key])
+    return codes
+
+
+def build_rule_mask_numpy(
+    df: pd.DataFrame,
+    conditions: list[dict],
+    *,
+    mart_meta: MartMeta | None = None,
+) -> np.ndarray:
+    if df.empty:
+        return np.zeros(0, dtype=bool)
+
+    mask = np.ones(len(df), dtype=bool)
+
+    for condition in conditions or []:
+        parameter = (condition.get("parameter") or "").strip()
+        operator = (condition.get("operator") or "").strip()
+        values = condition.get("values")
+
+        if parameter == "distance_belt" and operator in ("lt", "gt"):
+            if "distance_belt_midpoint_km" not in df.columns:
+                continue
+            try:
+                num = int(values)
+            except (TypeError, ValueError):
+                continue
+            series = pd.to_numeric(
+                df["distance_belt_midpoint_km"], errors="coerce"
+            ).to_numpy(dtype=np.float64)
+            if operator == "lt":
+                mask &= np.nan_to_num(series, nan=np.inf) < num
+            elif operator == "gt":
+                mask &= np.nan_to_num(series, nan=-1.0) > num
+            continue
+
+        column = PARAMETER_COLUMN_MAP.get(parameter)
+        if not column or not operator:
+            continue
+
+        vals = [v for v in _as_list(values) if v is not None and str(v) != ""]
+        if not vals:
+            continue
+
+        dim_column = f"dim_{parameter}" if parameter in {
+            "cargo_group",
+            "cargo_code",
+            "direction",
+            "wagon_kind",
+            "transport_type",
+            "shipment_category",
+            "park_type",
+            "holding",
+        } else None
+
+        if dim_column and dim_column in df.columns and mart_meta is not None:
+            labels = mart_meta.dimension_labels.get(parameter, [])
+            compare_codes = _label_codes(vals, labels)
+            if not compare_codes:
+                mask &= False
+                continue
+            series = df[dim_column].to_numpy(dtype=np.int32, copy=False)
+            if operator == "include":
+                mask &= np.isin(series, compare_codes)
+            elif operator == "exclude":
+                mask &= ~np.isin(series, compare_codes)
+            continue
+
+        if column not in df.columns:
+            continue
+
+        series = df[column]
+        if parameter in {"wagon_kind", "shipment_type", "message_type", "shipper"}:
+            compare_vals: list = []
+            for val in vals:
+                try:
+                    compare_vals.append(int(val))
+                except (TypeError, ValueError):
+                    compare_vals.append(val)
+            arr = series.to_numpy()
+            if operator == "include":
+                mask &= np.isin(arr, compare_vals)
+            elif operator == "exclude":
+                mask &= ~np.isin(arr, compare_vals)
+            continue
+
+        compare_vals = vals
+        arr = series.astype(str).to_numpy()
+        if operator == "include":
+            mask &= np.isin(arr, compare_vals)
+        elif operator == "exclude":
+            mask &= ~np.isin(arr, compare_vals)
+
+    return mask
 
 
 def build_rule_mask(df: pd.DataFrame, conditions: list[dict]) -> pd.Series:
@@ -35,20 +140,22 @@ def build_rule_mask(df: pd.DataFrame, conditions: list[dict]) -> pd.Series:
         operator = (condition.get("operator") or "").strip()
         values = condition.get("values")
 
-        column = PARAMETER_COLUMN_MAP.get(parameter)
-        if not column or not operator or column not in df.columns:
-            continue
-
-        if parameter == "distance_loaded_km":
+        if parameter == "distance_belt" and operator in ("lt", "gt"):
+            if "distance_belt_midpoint_km" not in df.columns:
+                continue
             try:
                 num = int(values)
             except (TypeError, ValueError):
                 continue
-            series = pd.to_numeric(df[column], errors="coerce")
+            series = pd.to_numeric(df["distance_belt_midpoint_km"], errors="coerce")
             if operator == "lt":
                 mask &= series < num
             elif operator == "gt":
                 mask &= series > num
+            continue
+
+        column = PARAMETER_COLUMN_MAP.get(parameter)
+        if not column or not operator or column not in df.columns:
             continue
 
         vals = [v for v in _as_list(values) if v is not None and str(v) != ""]

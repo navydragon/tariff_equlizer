@@ -13,7 +13,7 @@ FIELD_MAP = {
     "message_type": "message_type__id",
     "shipper": "shipper_id",
     "shipper_holding": "shipper__holding",
-    "distance_loaded_km": "distance_loaded_km",
+    "distance_belt": "distance_belt",
 }
 
 
@@ -32,19 +32,19 @@ def apply_tariff_conditions(qs, conditions: list[dict]):
         operator = (condition.get("operator") or "").strip()
         values = condition.get("values")
 
-        field = FIELD_MAP.get(parameter)
-        if not field or not operator:
-            continue
-
-        if parameter == "distance_loaded_km":
+        if parameter == "distance_belt" and operator in ("lt", "gt"):
             try:
                 num = int(values)
             except (TypeError, ValueError):
                 continue
             if operator == "lt":
-                filtered = filtered.filter(**{f"{field}__lt": num})
+                filtered = filtered.filter(distance_belt_midpoint_km__lt=num)
             elif operator == "gt":
-                filtered = filtered.filter(**{f"{field}__gt": num})
+                filtered = filtered.filter(distance_belt_midpoint_km__gt=num)
+            continue
+
+        field = FIELD_MAP.get(parameter)
+        if not field or not operator:
             continue
 
         vals = [v for v in _as_list(values) if v is not None and str(v) != ""]

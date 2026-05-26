@@ -19,7 +19,7 @@ import { renderErrors } from "../lib/errors.js";
     { code: "message_type", label: "Вид сообщения", type: "choice" },
     { code: "shipper", label: "Грузоотправитель", type: "choice" },
     { code: "shipper_holding", label: "Холдинг грузоотправителя", type: "choice" },
-    { code: "distance_loaded_km", label: "Расстояние груж., км", type: "numeric" },
+    { code: "distance_belt", label: "Пояс дальности", type: "choice" },
   ];
 
   const OPERATORS = [
@@ -31,6 +31,95 @@ import { renderErrors } from "../lib/errors.js";
 
   function buildUrl(template, id) {
     return String(template || "").replace("/0/", "/" + String(id) + "/");
+  }
+
+  function parameterLabel(code) {
+    const item = PARAMETERS.find((p) => p.code === code);
+    return item ? item.label : code || "—";
+  }
+
+  function operatorLabel(code) {
+    const item = OPERATORS.find((o) => o.code === code);
+    return item ? item.label : code || "";
+  }
+
+  function isDistanceBeltThreshold(parameter, operator) {
+    return parameter === "distance_belt" && (operator === "lt" || operator === "gt");
+  }
+
+  function usesNumericConditionValue(parameter, operator) {
+    const meta = PARAMETERS.find((p) => p.code === parameter);
+    return (meta && meta.type === "numeric") || isDistanceBeltThreshold(parameter, operator);
+  }
+
+  function formatConditionValues(condition) {
+    const meta = PARAMETERS.find((p) => p.code === condition.parameter);
+    const values = condition.values;
+    if (usesNumericConditionValue(condition.parameter, condition.operator)) {
+      if (values == null || values === "") return "—";
+      return String(values);
+    }
+    const list = Array.isArray(values)
+      ? values
+      : values != null && values !== ""
+        ? [values]
+        : [];
+    if (!list.length) return "—";
+    const text = list.map((v) => String(v)).join(", ");
+    return text.length > 80 ? `${text.slice(0, 77)}…` : text;
+  }
+
+  function formatConditionsSummary(conditions) {
+    if (!conditions || !conditions.length) {
+      return '<span class="text-muted">Все маршруты набора (без фильтра)</span>';
+    }
+    const sorted = [...conditions].sort(
+      (a, b) => (a.position || 0) - (b.position || 0),
+    );
+    return sorted
+      .map((condition) => {
+        const param = escapeHtml(parameterLabel(condition.parameter));
+        const op = escapeHtml(operatorLabel(condition.operator));
+        const vals = escapeHtml(formatConditionValues(condition));
+        return `<div class="tariff-rule-condition-line"><span class="fw-medium">${param}</span> ${op}: ${vals}</div>`;
+      })
+      .join("");
+  }
+
+  function formatYearValuesSummary(yearValues, startYear, endYear) {
+    if (!yearValues || !yearValues.length) {
+      return '<span class="text-muted">—</span>';
+    }
+    const byYear = new Map(
+      yearValues.map((item) => [String(item.year), String(item.coefficient)]),
+    );
+    const years = [];
+    const start = startYear || 2025;
+    const end = endYear || start;
+    for (let year = start; year <= end; year += 1) {
+      years.push(year);
+    }
+
+    const nonDefault = years
+      .map((year) => {
+        const coef = byYear.get(String(year)) || "1";
+        const numeric = parseFloat(coef);
+        const isDefault =
+          !Number.isFinite(numeric) || Math.abs(numeric - 1) < 1e-6;
+        return { year, coef, isDefault };
+      })
+      .filter((item) => !item.isDefault);
+
+    if (!nonDefault.length) {
+      return '<span class="text-muted">1,000 — без изменений</span>';
+    }
+
+    return nonDefault
+      .map(
+        (item) =>
+          `<span class="badge bg-blue-lt me-1 mb-1">${item.year}: ${escapeHtml(item.coef)}</span>`,
+      )
+      .join("");
   }
 
   class TariffRulesController extends Stimulus.Controller {
@@ -94,7 +183,7 @@ import { renderErrors } from "../lib/errors.js";
     }
 
     renderListError(errors) {
-      this.tbodyTarget.innerHTML = `<tr><td colspan="4" class="text-danger">${escapeHtml(
+      this.tbodyTarget.innerHTML = `<tr><td colspan="6" class="text-danger">${escapeHtml(
         (errors || []).join(", "),
       )}</td></tr>`;
       if (this.hasSummaryTarget) this.summaryTarget.textContent = "";
@@ -103,17 +192,28 @@ import { renderErrors } from "../lib/errors.js";
     renderTable() {
       if (!this.state.rules.length) {
         this.tbodyTarget.innerHTML =
-          '<tr><td colspan="4" class="text-muted">Нет тарифных решений</td></tr>';
+          '<tr><td colspan="6" class="text-muted">Нет тарифных решений</td></tr>';
         return;
       }
+
+      const startYear = this.startYearValue || 2025;
+      const endYear = this.endYearValue || startYear;
 
       this.tbodyTarget.innerHTML = this.state.rules
         .map((r, idx) => {
           const bp = r.base_percent != null ? String(r.base_percent) : "";
+          const conditionsHtml = formatConditionsSummary(r.conditions || []);
+          const yearsHtml = formatYearValuesSummary(
+            r.year_values || [],
+            startYear,
+            endYear,
+          );
           return `
             <tr data-rule-id="${r.id}">
               <td class="text-muted">${idx + 1}</td>
-              <td>${escapeHtml(r.name || "")}</td>
+              <td class="fw-medium">${escapeHtml(r.name || "")}</td>
+              <td class="small">${conditionsHtml}</td>
+              <td class="small">${yearsHtml}</td>
               <td>${escapeHtml(bp)}</td>
               <td class="text-end">
                 <div class="btn-list justify-content-end">
@@ -198,7 +298,7 @@ import { renderErrors } from "../lib/errors.js";
 
     addConditionRow(condition) {
       const row = document.createElement("div");
-      row.className = "row g-2 align-items-end mb-2";
+      row.className = "row g-2 align-items-start mb-2 tariff-rule-condition-row";
       row.dataset.conditionRow = "1";
 
       const parameterOptions = PARAMETERS.map(
@@ -209,25 +309,25 @@ import { renderErrors } from "../lib/errors.js";
       ).join("");
 
       row.innerHTML = `
-        <div class="col-md-4">
+        <div class="col-12 col-lg-4">
           <label class="form-label">Параметр</label>
           <select class="form-select" data-condition-parameter>
             <option value="">Выберите...</option>
             ${parameterOptions}
           </select>
         </div>
-        <div class="col-md-3">
+        <div class="col-6 col-lg-2">
           <label class="form-label">Оператор</label>
           <select class="form-select" data-condition-operator>
             ${operatorOptions}
           </select>
         </div>
-        <div class="col-md-4" data-condition-values-wrap>
+        <div class="col-12 col-lg-5" data-condition-values-wrap>
           <label class="form-label">Значения</label>
           <div data-condition-values></div>
         </div>
-        <div class="col-md-1">
-          <button type="button" class="btn btn-outline-danger w-100" data-action="tariff-rules#removeCondition">
+        <div class="col-auto col-lg-1 tariff-rule-condition-delete">
+          <button type="button" class="btn btn-outline-danger" data-action="tariff-rules#removeCondition" title="Удалить условие">
             <i class="ti ti-x"></i>
           </button>
         </div>
@@ -267,8 +367,8 @@ import { renderErrors } from "../lib/errors.js";
     onConditionOperatorChange(row) {
       const parameter = row.querySelector("[data-condition-parameter]").value;
       const operator = row.querySelector("[data-condition-operator]").value;
-      const currentValues = this.readConditionValues(row, parameter);
-      this.renderConditionValueEditor(row, parameter, operator, currentValues);
+      const currentValues = this.readConditionValues(row, parameter, operator);
+      this.renderConditionValueEditor(row, parameter, operator, null);
       this.refreshCoverageDebounced();
     }
 
@@ -289,8 +389,7 @@ import { renderErrors } from "../lib/errors.js";
       container.innerHTML = "";
 
       const paramMeta = PARAMETERS.find((p) => p.code === parameter) || null;
-      const isNumeric = paramMeta && paramMeta.type === "numeric";
-      const numericOp = operator === "lt" || operator === "gt";
+      const isNumeric = usesNumericConditionValue(parameter, operator);
 
       if (!parameter) {
         container.innerHTML = '<div class="text-muted">Сначала выберите параметр</div>';
@@ -301,13 +400,22 @@ import { renderErrors } from "../lib/errors.js";
         const input = document.createElement("input");
         input.type = "number";
         input.className = "form-control";
-        input.placeholder = numericOp ? "Введите число" : "Введите число";
+        input.placeholder = isDistanceBeltThreshold(parameter, operator)
+          ? "Середина пояса, км"
+          : "Введите число";
         input.dataset.conditionNumber = "1";
         input.addEventListener("input", () => this.refreshCoverageDebounced());
         if (values != null && values !== "" && !Array.isArray(values)) {
           input.value = String(values);
         }
         container.appendChild(input);
+        if (isDistanceBeltThreshold(parameter, operator)) {
+          const hint = document.createElement("div");
+          hint.className = "form-text text-muted";
+          hint.textContent =
+            "Сравнивается середина интервала пояса, например 500–1000 → 750 км";
+          container.appendChild(hint);
+        }
         return;
       }
 
@@ -349,9 +457,10 @@ import { renderErrors } from "../lib/errors.js";
       });
     }
 
-    readConditionValues(row, parameter) {
-      const paramMeta = PARAMETERS.find((p) => p.code === parameter) || null;
-      if (paramMeta && paramMeta.type === "numeric") {
+    readConditionValues(row, parameter, operator) {
+      const op =
+        operator || row.querySelector("[data-condition-operator]")?.value || "";
+      if (usesNumericConditionValue(parameter, op)) {
         const input = row.querySelector("[data-condition-number]");
         return input ? input.value : null;
       }
@@ -369,10 +478,8 @@ import { renderErrors } from "../lib/errors.js";
           const parameter = row.querySelector("[data-condition-parameter]").value;
           const operator = row.querySelector("[data-condition-operator]").value;
           if (!parameter) return null;
-          const meta = PARAMETERS.find((p) => p.code === parameter) || null;
-          const values = this.readConditionValues(row, parameter);
-          const normalized =
-            meta && meta.type === "numeric"
+          const values = this.readConditionValues(row, parameter, operator);
+          const normalized = usesNumericConditionValue(parameter, operator)
               ? (values == null || values === "" ? null : Number(values))
               : Array.isArray(values)
                 ? values
@@ -445,8 +552,8 @@ import { renderErrors } from "../lib/errors.js";
       this.yearsTarget.innerHTML = years
         .map(
           (y) => `
-          <div class="col-6 col-md-3">
-            <label class="form-label">${y}</label>
+          <div class="col">
+            <label class="form-label mb-1">${y}</label>
             <input type="number" step="0.0001" class="form-control" value="1" data-year="${y}" />
           </div>
         `,

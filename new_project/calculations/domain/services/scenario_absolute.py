@@ -19,9 +19,9 @@ from calculations.domain.services.scenario_effects_cache import (
     get_payload,
     validate_cache_access,
 )
+from calculations.domain.units import RUB_PER_BLN, TONS_PER_MLN
 from scenarios.models import Scenario
 
-_BLN_DIVISOR = Decimal("1000000")
 _VOLUME_QUANT = Decimal("0.01")
 _BLN_QUANT = Decimal("0.01")
 
@@ -83,7 +83,7 @@ class ScenarioAbsoluteService:
         if payload.compact is not None:
             volume_buckets = aggregate_compact_value(
                 payload.compact,
-                values=payload.compact.volume_mln_tons,
+                values=payload.compact.volume_tons,
                 group_by=request.group_by,
                 group_by_inner=request.group_by_inner,
                 cargo_groups=[],
@@ -98,7 +98,7 @@ class ScenarioAbsoluteService:
                 payload.facts,
                 group_by=request.group_by,
                 group_by_inner=request.group_by_inner,
-                value_fn=lambda fact: fact.volume_mln_tons,
+                value_fn=lambda fact: fact.volume_tons,
             )
             year_values = {
                 key: {year: volume for year in payload.years}
@@ -281,12 +281,13 @@ def _row_from_values(
 
 
 def _format_bln(value: Decimal) -> str:
-    bln = (value / _BLN_DIVISOR).quantize(_BLN_QUANT, rounding=ROUND_HALF_UP)
+    bln = (value / RUB_PER_BLN).quantize(_BLN_QUANT, rounding=ROUND_HALF_UP)
     return format(bln, "f")
 
 
 def _format_volume(value: Decimal) -> str:
-    return format(value.quantize(_VOLUME_QUANT, rounding=ROUND_HALF_UP), "f")
+    mln = (value / TONS_PER_MLN).quantize(_VOLUME_QUANT, rounding=ROUND_HALF_UP)
+    return format(mln, "f")
 
 
 def _total_label(years: list[int]) -> str:

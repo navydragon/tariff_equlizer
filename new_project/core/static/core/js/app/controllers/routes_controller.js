@@ -1,9 +1,17 @@
 import { fetchJson } from "../lib/http.js";
 import { escapeHtml, setVisible } from "../lib/dom.js";
 import { renderErrors } from "../lib/errors.js";
-import { renderPagination } from "../lib/pagination.js";
 
 (function () {
+  const renderPagination = window.renderPagination;
+  const renderPaginationHasNext = window.renderPaginationHasNext;
+  if (!renderPagination || !renderPaginationHasNext) {
+    console.error(
+      "routes controller: pagination.js must be loaded before routes_controller.js",
+    );
+    return;
+  }
+
   const application = window.stimulusApp;
   if (!application || typeof Stimulus === "undefined") {
     console.error("Stimulus application is not initialized for routes.");
@@ -52,6 +60,9 @@ import { renderPagination } from "../lib/pagination.js";
         page: 1,
         pageSize: this.pageSizeDefaultValue || 20,
         totalPages: 1,
+        hasNext: false,
+        total: null,
+        routesLoaded: false,
       };
       this.searchDebounceTimer = null;
       this.cargoSelectInstance = null;
@@ -75,10 +86,12 @@ import { renderPagination } from "../lib/pagination.js";
     onRouteSetChange(event) {
       const val = event.currentTarget.value;
       this.state.routeSetId = val ? parseInt(val, 10) : null;
-      this.loadRoutes(1);
+      this.state.routesLoaded = false;
+      this.showRoutesIdleState();
     }
 
     onPageSizeChange() {
+      if (!this.state.routesLoaded) return;
       this.loadRoutes(1);
     }
 
@@ -87,12 +100,20 @@ import { renderPagination } from "../lib/pagination.js";
         clearTimeout(this.searchDebounceTimer);
       }
       this.searchDebounceTimer = setTimeout(() => {
-        this.loadRoutes(1);
+        if (!this.state.routeSetId) return;
+        const search = this.hasRoutesSearchQueryTarget
+          ? this.routesSearchQueryTarget.value.trim()
+          : "";
+        if (!search && !this.state.routesLoaded) return;
+        this.loadRoutes(1, { includeTotal: Boolean(search) });
       }, 400);
     }
 
     applyFilters() {
-      this.loadRoutes(1);
+      const search = this.hasRoutesSearchQueryTarget
+        ? this.routesSearchQueryTarget.value.trim()
+        : "";
+      this.loadRoutes(1, { includeTotal: Boolean(search) });
     }
 
     resetFilters() {
@@ -102,7 +123,8 @@ import { renderPagination } from "../lib/pagination.js";
       if (this.hasRoutesPageSizeTarget) {
         this.routesPageSizeTarget.value = String(this.pageSizeDefaultValue || 20);
       }
-      this.loadRoutes(1);
+      this.state.routesLoaded = false;
+      this.showRoutesIdleState();
     }
 
     openRouteSetCreate() {
@@ -538,24 +560,38 @@ import { renderPagination } from "../lib/pagination.js";
       if (!items.length) {
         select.innerHTML = '<option value="">Нет наборов</option>';
         this.state.routeSetId = null;
-        this.loadRoutes(1);
+        this.showRoutesIdleState();
         return;
       }
 
-      select.innerHTML = items
-        .map(
-          (it) =>
-            `<option value="${it.id}">${escapeHtml(it.code || "")} — ${escapeHtml(
-              it.name || "",
-            )}</option>`,
-        )
-        .join("");
+      const sorted = [...items].sort(
+        (a, b) => (a.routes_count || 0) - (b.routes_count || 0),
+      );
 
-      if (!this.state.routeSetId) {
-        this.state.routeSetId = items[0].id;
+      const options = [
+        '<option value="">— выберите набор —</option>',
+        ...sorted.map((it) => {
+          const count =
+            it.routes_count != null
+              ? ` (${Number(it.routes_count).toLocaleString("ru-RU")} маршр.)`
+              : "";
+          return `<option value="${it.id}">${escapeHtml(it.code || "")} — ${escapeHtml(
+            it.name || "",
+          )}${count}</option>`;
+        }),
+      ];
+      select.innerHTML = options.join("");
+
+      if (
+        this.state.routeSetId &&
+        sorted.some((it) => it.id === this.state.routeSetId)
+      ) {
+        select.value = String(this.state.routeSetId);
+      } else {
+        this.state.routeSetId = null;
+        select.value = "";
       }
-      select.value = String(this.state.routeSetId);
-      this.loadRoutes(1);
+      this.showRoutesIdleState();
     }
 
     // === Маршруты ===
@@ -577,25 +613,53 @@ import { renderPagination } from "../lib/pagination.js";
         if (search) params.set("search", search);
       }
 
+      if (this.state.includeTotal) {
+        params.set("include_total", "1");
+      }
+
       return params;
     }
 
-    async loadRoutes(page) {
+    showRoutesIdleState() {
+      if (this.hasRoutesTableBodyTarget) {
+        this.routesTableBodyTarget.innerHTML = "";
+      }
+      if (this.hasRoutesLoadingTarget) {
+        setVisible(this.routesLoadingTarget, false);
+      }
+      if (this.hasRoutesPaginationTarget) {
+        this.routesPaginationTarget.innerHTML = "";
+      }
+      if (this.hasRoutesEmptyTarget) {
+        setVisible(this.routesEmptyTarget, true);
+        const title = this.routesEmptyTarget.querySelector(".empty-title");
+        const text = this.routesEmptyTarget.querySelector(".empty-text");
+        if (!this.state.routeSetId) {
+          if (title) title.textContent = "Набор не выбран";
+          if (text) {
+            text.textContent = "Выберите набор маршрутов в списке выше";
+          }
+        } else {
+          if (title) title.textContent = "Маршруты не загружены";
+          if (text) {
+            text.textContent =
+              "Нажмите «Показать», чтобы загрузить первую страницу (без подсчёта всего набора)";
+          }
+        }
+      }
+      this.updateRoutesSummary(null);
+    }
+
+    async loadRoutes(page, options = {}) {
       if (!this.state.routeSetId) {
-        if (this.hasRoutesTableBodyTarget) {
-          this.routesTableBodyTarget.innerHTML = "";
-        }
-        if (this.hasRoutesEmptyTarget) {
-          setVisible(this.routesEmptyTarget, true);
-        }
-        this.updateRoutesSummary(0);
-        if (this.hasRoutesPaginationTarget) {
-          this.routesPaginationTarget.innerHTML = "";
-        }
+        this.showRoutesIdleState();
         return;
       }
 
       if (page) this.state.page = page;
+      this.state.routesLoaded = true;
+      this.state.includeTotal = Boolean(options.includeTotal);
+
       const params = this.buildRoutesParams();
 
       if (this.hasRoutesLoadingTarget) {
@@ -639,14 +703,23 @@ import { renderPagination } from "../lib/pagination.js";
       if (!items.length) {
         tbody.innerHTML = "";
         setVisible(empty, true);
+        const title = empty.querySelector(".empty-title");
+        const text = empty.querySelector(".empty-text");
+        if (title) title.textContent = "Нет маршрутов";
+        if (text) {
+          text.textContent = "По заданным фильтрам ничего не найдено";
+        }
       } else {
         setVisible(empty, false);
         tbody.innerHTML = items.map((it) => this.createRouteRow(it)).join("");
       }
 
       this.state.page = data.page || 1;
-      this.state.totalPages = data.total_pages || 1;
-      this.updateRoutesSummary(data.total || 0);
+      this.state.totalPages = data.total_pages || null;
+      this.state.total =
+        data.total != null && data.total !== undefined ? data.total : null;
+      this.state.hasNext = Boolean(data.has_next);
+      this.updateRoutesSummary(this.state.total, items.length);
       this.updateRoutesPagination();
     }
 
@@ -714,20 +787,43 @@ import { renderPagination } from "../lib/pagination.js";
       `;
     }
 
-    updateRoutesSummary(total) {
+    updateRoutesSummary(total, pageCount = 0) {
       if (!this.hasRoutesSummaryTarget) return;
+      if (total == null) {
+        if (!this.state.routesLoaded) {
+          this.routesSummaryTarget.textContent =
+            "Выберите набор и нажмите «Показать»";
+          return;
+        }
+        const n = pageCount || 0;
+        const page = this.state.page || 1;
+        let text = `Страница ${page}: показано ${n} маршрутов`;
+        if (this.state.hasNext) {
+          text += " (есть ещё)";
+        }
+        this.routesSummaryTarget.textContent = text;
+        return;
+      }
       const from = (this.state.page - 1) * this.state.pageSize + 1;
       const to = Math.min(this.state.page * this.state.pageSize, total || 0);
       this.routesSummaryTarget.textContent = total
-        ? `Показаны ${from}–${to} из ${total} маршрутов`
+        ? `Показаны ${from}–${to} из ${total.toLocaleString("ru-RU")} маршрутов`
         : "Нет маршрутов";
     }
 
     updateRoutesPagination() {
       if (!this.hasRoutesPaginationTarget) return;
-      renderPagination(this.routesPaginationTarget, {
+      if (this.state.totalPages != null && this.state.totalPages > 0) {
+        renderPagination(this.routesPaginationTarget, {
+          page: this.state.page,
+          totalPages: this.state.totalPages,
+          onPage: (p) => this.loadRoutes(p),
+        });
+        return;
+      }
+      renderPaginationHasNext(this.routesPaginationTarget, {
         page: this.state.page,
-        totalPages: this.state.totalPages,
+        hasNext: this.state.hasNext,
         onPage: (p) => this.loadRoutes(p),
       });
     }
@@ -935,12 +1031,12 @@ import { renderPagination } from "../lib/pagination.js";
         it.total_cost_per_ton ?? "";
       document.getElementById("routeMarketPrice").value =
         it.market_price_per_ton ?? "";
-      document.getElementById("routeTransportVolumeMlnTons").value =
-        it.transport_volume_mln_tons ?? "";
-      document.getElementById("routeFreightTurnoverBlnTkm").value =
-        it.freight_turnover_bln_tkm ?? "";
-      document.getElementById("routeFreightChargeThsRub").value =
-        it.freight_charge_ths_rub ?? "";
+      document.getElementById("routeTransportVolumeTons").value =
+        it.transport_volume_tons ?? "";
+      document.getElementById("routeFreightTurnoverTkm").value =
+        it.freight_turnover_tkm ?? "";
+      document.getElementById("routeFreightChargeRub").value =
+        it.freight_charge_rub ?? "";
 
       // Заполняем summary из данных маршрута
       this.summaryState.origin = it.origin_esr_code
@@ -1059,14 +1155,14 @@ import { renderPagination } from "../lib/pagination.js";
         document.getElementById("routeTotalCost").value.trim();
       payload.market_price_per_ton =
         document.getElementById("routeMarketPrice").value.trim();
-      payload.transport_volume_mln_tons = document
-        .getElementById("routeTransportVolumeMlnTons")
+      payload.transport_volume_tons = document
+        .getElementById("routeTransportVolumeTons")
         .value.trim();
-      payload.freight_turnover_bln_tkm = document
-        .getElementById("routeFreightTurnoverBlnTkm")
+      payload.freight_turnover_tkm = document
+        .getElementById("routeFreightTurnoverTkm")
         .value.trim();
-      payload.freight_charge_ths_rub = document
-        .getElementById("routeFreightChargeThsRub")
+      payload.freight_charge_rub = document
+        .getElementById("routeFreightChargeRub")
         .value.trim();
 
       return payload;

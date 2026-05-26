@@ -27,6 +27,13 @@ def clear_routes() -> int:
     return _delete_all(Route)
 
 
+def clear_routes_for_route_set(route_set_id: int) -> int:
+    from core.models import Route
+
+    deleted, _ = Route.objects.filter(route_set_id=route_set_id).delete()
+    return deleted
+
+
 def clear_stations_and_regions() -> tuple[int, int, int]:
     """Маршруты → станции → регионы."""
     from core.models import Region, Station

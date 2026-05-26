@@ -95,6 +95,12 @@ class RouteDTO:
     route_set_id: int
     route_set_code: str
     route_code: str
+    distance_belt: str
+    shipment_category: str
+    park_type: str
+    special_container_type: str
+    cargo_group_cmtp: str
+    cargo_code_izpod: str
     cargo_code: Optional[int]
     cargo_name: str
     origin_esr_code: Optional[int]
@@ -137,9 +143,9 @@ class RouteDTO:
     production_cost_per_ton: Optional[str]
     total_cost_per_ton: Optional[str]
     market_price_per_ton: Optional[str]
-    transport_volume_mln_tons: Optional[str]
-    freight_turnover_bln_tkm: Optional[str]
-    freight_charge_ths_rub: Optional[str]
+    transport_volume_tons: Optional[str]
+    freight_turnover_tkm: Optional[str]
+    freight_charge_rub: Optional[str]
 
     @classmethod
     def from_model(cls, route: Route) -> RouteDTO:
@@ -148,6 +154,12 @@ class RouteDTO:
             route_set_id=route.route_set_id,
             route_set_code=route.route_set.code if route.route_set_id else "",
             route_code=route.route_code,
+            distance_belt=route.distance_belt,
+            shipment_category=route.shipment_category,
+            park_type=route.park_type,
+            special_container_type=route.special_container_type,
+            cargo_group_cmtp=route.cargo_group_cmtp,
+            cargo_code_izpod=route.cargo_code_izpod,
             cargo_code=route.cargo.code if route.cargo_id else None,
             cargo_name=route.cargo.name if route.cargo_id else "",
             origin_esr_code=route.origin_station.esr_code
@@ -238,14 +250,14 @@ class RouteDTO:
             market_price_per_ton=_decimal_to_api_str(route.market_price_per_ton)
             if route.market_price_per_ton is not None
             else None,
-            transport_volume_mln_tons=_decimal_to_api_str(route.transport_volume_mln_tons)
-            if route.transport_volume_mln_tons is not None
+            transport_volume_tons=_decimal_to_api_str(route.transport_volume_tons)
+            if route.transport_volume_tons is not None
             else None,
-            freight_turnover_bln_tkm=_decimal_to_api_str(route.freight_turnover_bln_tkm)
-            if route.freight_turnover_bln_tkm is not None
+            freight_turnover_tkm=_decimal_to_api_str(route.freight_turnover_tkm)
+            if route.freight_turnover_tkm is not None
             else None,
-            freight_charge_ths_rub=_decimal_to_api_str(route.freight_charge_ths_rub)
-            if route.freight_charge_ths_rub is not None
+            freight_charge_rub=_decimal_to_api_str(route.freight_charge_rub)
+            if route.freight_charge_rub is not None
             else None,
         )
 
@@ -255,6 +267,12 @@ class RouteDTO:
             "route_set_id": self.route_set_id,
             "route_set_code": self.route_set_code,
             "route_code": self.route_code,
+            "distance_belt": self.distance_belt,
+            "shipment_category": self.shipment_category,
+            "park_type": self.park_type,
+            "special_container_type": self.special_container_type,
+            "cargo_group_cmtp": self.cargo_group_cmtp,
+            "cargo_code_izpod": self.cargo_code_izpod,
             "cargo_code": self.cargo_code,
             "cargo_name": self.cargo_name,
             "origin_esr_code": self.origin_esr_code,
@@ -297,9 +315,9 @@ class RouteDTO:
             "production_cost_per_ton": self.production_cost_per_ton,
             "total_cost_per_ton": self.total_cost_per_ton,
             "market_price_per_ton": self.market_price_per_ton,
-            "transport_volume_mln_tons": self.transport_volume_mln_tons,
-            "freight_turnover_bln_tkm": self.freight_turnover_bln_tkm,
-            "freight_charge_ths_rub": self.freight_charge_ths_rub,
+            "transport_volume_tons": self.transport_volume_tons,
+            "freight_turnover_tkm": self.freight_turnover_tkm,
+            "freight_charge_rub": self.freight_charge_rub,
         }
 
 
@@ -311,24 +329,32 @@ class RouteListFiltersDTO:
     search: Optional[str] = None
     origin_esr: Optional[str] = None
     destination_esr: Optional[str] = None
+    include_total: bool = False
+    economics_filled: bool = False
 
 
 @dataclass
 class RouteListResultDTO:
     items: list[RouteDTO]
-    total: int
     page: int
     page_size: int
-    total_pages: int
+    total: Optional[int] = None
+    total_pages: Optional[int] = None
+    has_next: Optional[bool] = None
 
     def to_api_dict(self) -> dict[str, Any]:
-        return {
+        payload: dict[str, Any] = {
             "items": [item.to_api_dict() for item in self.items],
-            "total": self.total,
             "page": self.page,
             "page_size": self.page_size,
-            "total_pages": self.total_pages,
         }
+        if self.total is not None:
+            payload["total"] = self.total
+        if self.total_pages is not None:
+            payload["total_pages"] = self.total_pages
+        if self.has_next is not None:
+            payload["has_next"] = self.has_next
+        return payload
 
 
 @dataclass
@@ -418,6 +444,16 @@ class RouteWriteDTO:
 
         payload["route_code"] = (data.get("route_code") or "").strip()
 
+        for name in (
+            "distance_belt",
+            "shipment_category",
+            "park_type",
+            "special_container_type",
+            "cargo_group_cmtp",
+            "cargo_code_izpod",
+        ):
+            payload[name] = (data.get(name) or "").strip()
+
         def parse_int_field(field_name: str) -> int | None:
             raw = data.get(field_name)
             if raw in (None, "", "null"):
@@ -470,9 +506,9 @@ class RouteWriteDTO:
                 payload[name] = value
 
         for name in (
-            "transport_volume_mln_tons",
-            "freight_turnover_bln_tkm",
-            "freight_charge_ths_rub",
+            "transport_volume_tons",
+            "freight_turnover_tkm",
+            "freight_charge_rub",
         ):
             if name not in data:
                 continue

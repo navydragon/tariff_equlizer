@@ -5,10 +5,10 @@ from dataclasses import dataclass, field
 from decimal import Decimal, ROUND_HALF_UP
 
 from calculations.domain.dto.scenario_effects import EffectKpiCardDTO
+from calculations.domain.units import RUB_PER_BLN
 
-_BLN_DIVISOR = Decimal("1000000")
 _PCT_QUANT = Decimal("0.1")
-_THS_QUANT = Decimal("0.01")
+_RUB_QUANT = Decimal("0.01")
 
 
 @dataclass
@@ -19,12 +19,12 @@ class GlobalTotals:
     charge_by_year: dict[int, Decimal] = field(default_factory=lambda: defaultdict(Decimal))
 
 
-def format_ths(value: Decimal) -> str:
-    return format(value.quantize(_THS_QUANT, rounding=ROUND_HALF_UP), "f")
+def format_rub(value: Decimal) -> str:
+    return format(value.quantize(_RUB_QUANT, rounding=ROUND_HALF_UP), "f")
 
 
 def format_bln(value: Decimal) -> str:
-    bln = (value / _BLN_DIVISOR).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
+    bln = (value / RUB_PER_BLN).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
     return format(bln, "f")
 
 

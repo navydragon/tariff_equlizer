@@ -90,6 +90,7 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
       query.set("search", (search || "").trim());
       query.set("page", String(page || 1));
       query.set("page_size", String(this.pageSizeValue || 20));
+      query.set("include_total", "0");
 
       const url = `${this.routesListUrlValue}?${query.toString()}`;
       const requestToken = {};

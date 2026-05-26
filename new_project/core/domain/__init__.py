@@ -1,18 +1,14 @@
-from .cargo import (
-    CargoDTO,
-    CreateCargoDTO,
-    UpdateCargoDTO,
-    CargoListResultDTO,
-    CargoService,
-    CargoRepository,
-)
+"""
+Domain слой `core`.
 
-from .route_analysis import (
-    RouteAnalysisRequestDTO,
-    RouteAnalysisResponseDTO,
-    RouteAnalysisTableRowDTO,
-    EqualizerResponseDTO,
-    EqualizerTypeDTO,
-    RouteAnalysisService,
-)
+Важно: этот пакет используется из разных приложений (в т.ч. при старте Django).
+Не импортируем здесь подмодули с тяжёлыми/сквозными зависимостями, чтобы избежать
+циклических импортов. Импортируйте нужные DTO/сервисы напрямую из подмодулей:
+
+- `core.domain.cargo...`
+- `core.domain.route_analysis...`
+- `core.domain.services...`
+"""
+
+__all__: list[str] = []
 

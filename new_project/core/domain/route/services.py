@@ -43,7 +43,9 @@ class RouteSetService:
         items = [
             RouteSetDTO.from_model(
                 rs,
-                routes_count=self.repository.routes_count(rs.id),
+                routes_count=getattr(rs, "_routes_count", None)
+                if getattr(rs, "_routes_count", None) is not None
+                else self.repository.routes_count(rs.id),
             )
             for rs in page_obj.object_list
         ]
@@ -166,24 +168,42 @@ class RouteService:
 
         page = filters.page if filters.page > 0 else 1
         page_size = filters.page_size if filters.page_size > 0 else 20
+        page_size = min(page_size, 100)
 
         qs = self.repository.list_queryset(filters.route_set_id)
         qs = self.repository.apply_filters(qs, filters)
 
-        paginator = Paginator(qs, page_size)
-        try:
-            page_obj = paginator.page(page)
-        except EmptyPage:
-            page_obj = paginator.page(paginator.num_pages or 1)
+        if filters.include_total:
+            paginator = Paginator(qs, page_size)
+            try:
+                page_obj = paginator.page(page)
+            except EmptyPage:
+                page_obj = paginator.page(paginator.num_pages or 1)
 
-        items = [RouteDTO.from_model(route) for route in page_obj.object_list]
+            items = [RouteDTO.from_model(route) for route in page_obj.object_list]
+            return (
+                RouteListResultDTO(
+                    items=items,
+                    total=paginator.count,
+                    page=page_obj.number,
+                    page_size=page_obj.paginator.per_page,
+                    total_pages=paginator.num_pages,
+                    has_next=page_obj.has_next(),
+                ),
+                [],
+            )
+
+        offset = (page - 1) * page_size
+        chunk = list(qs[offset : offset + page_size + 1])
+        has_next = len(chunk) > page_size
+        page_items = chunk[:page_size]
+        items = [RouteDTO.from_model(route) for route in page_items]
         return (
             RouteListResultDTO(
                 items=items,
-                total=paginator.count,
-                page=page_obj.number,
-                page_size=page_obj.paginator.per_page,
-                total_pages=paginator.num_pages,
+                page=page,
+                page_size=page_size,
+                has_next=has_next,
             ),
             [],
         )

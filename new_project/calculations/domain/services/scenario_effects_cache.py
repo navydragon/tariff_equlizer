@@ -22,8 +22,8 @@ class CompactRouteEffects:
     years: list[int]
     dimensions: dict[str, np.ndarray]
     dimension_labels: dict[str, list[str]]
-    baseline_ths: np.ndarray
-    volume_mln_tons: np.ndarray
+    baseline_rub: np.ndarray
+    volume_tons: np.ndarray
     base_by_year: np.ndarray
     rules_by_year: np.ndarray
     charge_by_year: np.ndarray
@@ -41,8 +41,8 @@ class RouteEffectFact:
     shipment_category: str
     park_type: str
     holding: str
-    baseline_ths: Decimal
-    volume_mln_tons: Decimal = Decimal("0")
+    baseline_rub: Decimal
+    volume_tons: Decimal = Decimal("0")
     base_by_year: dict[int, Decimal] = field(default_factory=dict)
     rules_by_year: dict[int, Decimal] = field(default_factory=dict)
     charge_by_year: dict[int, Decimal] = field(default_factory=dict)

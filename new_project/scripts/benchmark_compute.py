@@ -34,7 +34,7 @@ def main() -> None:
     total = Route.objects.filter(route_set_id=route_set_id).count()
     with_charge = Route.objects.filter(
         route_set_id=route_set_id,
-        freight_charge_ths_rub__gt=0,
+        freight_charge_rub__gt=0,
     ).count()
     print(
         f"scenario_id={scenario.id} routes_total={total} with_charge={with_charge}",
@@ -73,7 +73,7 @@ def main() -> None:
     )
 
     if py_result and pd_result:
-        print(f"baseline python={py_result.baseline_ths_rub} pandas={pd_result.baseline_ths_rub}")
+        print(f"baseline python={py_result.baseline_rub} pandas={pd_result.baseline_rub}")
 
 
 if __name__ == "__main__":

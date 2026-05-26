@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from django.db.models import Q, QuerySet
+from django.db.models import Count, Q, QuerySet
 
 from core.domain.route.dto import RouteListFiltersDTO, RouteWriteDTO
 from core.models import Route, RouteSet
@@ -10,7 +10,7 @@ from core.models import Route, RouteSet
 
 class RouteSetRepository:
     def list_queryset(self, search: Optional[str] = None) -> QuerySet[RouteSet]:
-        qs = RouteSet.objects.all()
+        qs = RouteSet.objects.annotate(_routes_count=Count("routes"))
         if search:
             search = search.strip()
             if search:
@@ -85,6 +85,9 @@ class RouteRepository:
 
         if filters.destination_esr:
             qs = qs.filter(destination_station__esr_code=int(filters.destination_esr))
+
+        if filters.economics_filled:
+            qs = qs.filter(market_price_per_ton__isnull=False)
 
         return qs.order_by("id")
 

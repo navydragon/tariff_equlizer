@@ -156,6 +156,31 @@ python manage.py load_base_btd
 
 ## Маршруты (core)
 
+### `import_rzd_routes`
+
+Импорт маршрутов из SQLite `data/01_2026-05-19.db` (таблица `ИХ_ГП`) в набор **«РЖД 2026»** (`code=RZD_2026`).
+
+Показатели перевозочной работы сохраняются в **номинале** (т, т·км, руб.) — как в колонках SQLite, без деления на млн/млрд/тыс. Экраны «Эффект от решений» и «Куб эффектов» форматируют суммы в млрд руб. и объёмы в млн т при отображении.
+
+После обновления схемы БД перезагрузите маршруты: `python manage.py import_rzd_routes --clear` (миграция только переименовывает поля, данные не пересчитывает).
+
+Перед запуском: `import_railroads`, `import_regions`, `import_stations`, `import_cargo_groups`, `import_cargos`, `init_route_refs`, `import_shippers`.
+
+| Параметр | По умолчанию | Описание |
+|----------|--------------|----------|
+| `--db` | `data/01_2026-05-19.db` | Путь к SQLite |
+| `--route-set-code` | `RZD_2026` | Код `RouteSet` |
+| `--route-set-name` | `РЖД 2026` | Название набора |
+| `--clear` | — | Удалить маршруты набора перед импортом |
+| `--batch-size` | `2000` | Размер пакета `bulk_create` |
+| `--limit` | `0` | Лимит строк (0 = все ~2.1 млн) |
+| `--dry-run` | — | Без записи в БД |
+
+```bash
+python manage.py import_rzd_routes --dry-run --limit 1000
+python manage.py import_rzd_routes --clear
+```
+
 ### `import_total_ipem`
 
 Импорт **реальных** маршрутов из CSV (формат total_ipem, разделитель `;`).
@@ -170,6 +195,50 @@ python manage.py load_base_btd
 
 ```bash
 python manage.py import_total_ipem --file total_ipem.csv --route-set-code DEFAULT_ROUTE_SET
+```
+
+### `export_ipem_rzd_economics_2025`
+
+Экспорт строк `total_ipem.csv`, совпадающих с маршрутами РЖД по **ЕСР отпр. + ЕСР назн. + груз** (fuzzy по имени груза), с полями экономики в CSV.
+
+| Параметр | По умолчанию | Описание |
+|----------|--------------|----------|
+| `--file` | `total_ipem.csv` | Исходный IPEM CSV |
+| `--route-set-code` | `RZD_2026` | Набор маршрутов РЖД |
+| `--output` | `scripts/ipem_rzd_economics_2025.csv` | Выходной CSV |
+| `--similarity-threshold` | `90` | Порог fuzzy для груза |
+
+```bash
+python manage.py export_ipem_rzd_economics_2025 \
+  --file total_ipem.csv \
+  --route-set-code RZD_2026 \
+  --output scripts/ipem_rzd_economics_2025.csv
+```
+
+### `apply_ipem_economics_to_rzd_2025`
+
+Проставить из IPEM расходы РЖД (груж./порожн./итого, руб./т) и блок экономики **во все** совпавшие маршруты `RZD_2026`. Объёмы перевозок РЖД (`transport_volume_tons`, грузооборот, провозная плата) не меняются.
+
+| Параметр | По умолчанию | Описание |
+|----------|--------------|----------|
+| `--file` | `total_ipem.csv` | IPEM или export CSV |
+| `--from-export` | — | Читать файл из `export_ipem_rzd_economics_2025` |
+| `--route-set-code` | `RZD_2026` | Набор маршрутов РЖД |
+| `--similarity-threshold` | `90` | Порог fuzzy (если не `--from-export`) |
+| `--dry-run` | — | Без записи в БД |
+| `--batch-size` | `1000` | Размер пакета `bulk_update` |
+
+```bash
+python manage.py apply_ipem_economics_to_rzd_2025 \
+  --file scripts/ipem_rzd_economics_2025.csv \
+  --from-export \
+  --route-set-code RZD_2026 \
+  --dry-run
+
+python manage.py apply_ipem_economics_to_rzd_2025 \
+  --file scripts/ipem_rzd_economics_2025.csv \
+  --from-export \
+  --route-set-code RZD_2026
 ```
 
 ### `generate_random_routes`

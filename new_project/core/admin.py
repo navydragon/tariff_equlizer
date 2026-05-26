@@ -133,9 +133,9 @@ class RouteAdmin(admin.ModelAdmin):
         "cargo",
         "origin_station",
         "destination_station",
-        "transport_volume_mln_tons",
-        "freight_turnover_bln_tkm",
-        "freight_charge_ths_rub",
+        "transport_volume_tons",
+        "freight_turnover_tkm",
+        "freight_charge_rub",
     )
     list_filter = (
         "route_set",
@@ -145,6 +145,8 @@ class RouteAdmin(admin.ModelAdmin):
         "destination_station__railroad",
         "wagon_kind",
         "shipment_type",
+        "shipment_category",
+        "park_type",
     )
     autocomplete_fields = ("shipper",)
     search_fields = (

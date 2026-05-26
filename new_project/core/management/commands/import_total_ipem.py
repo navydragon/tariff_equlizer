@@ -7,8 +7,13 @@ from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
+from core.management.ipem_economics import (
+    CargoIndexItem,
+    build_cargo_index,
+    match_cargo_fuzzy,
+    normalize_name,
+)
 from core.models import (
-    Cargo,
     MessageType,
     RailRoad,
     Route,
@@ -24,12 +29,6 @@ try:
 except ImportError:  # pragma: no cover
     fuzz = None
     rf_process = None
-
-
-@dataclass
-class CargoIndexItem:
-    name: str
-    cargo: Cargo
 
 
 @dataclass
@@ -118,7 +117,7 @@ class Command(BaseCommand):
                 defaults={"name": route_set_name},
             )
 
-            cargo_index = self._build_cargo_index()
+            cargo_index = build_cargo_index()
             station_index = self._build_station_index()
             wagon_by_name = self._build_simple_dict(WagonKind.objects.all())
             shipment_by_name = self._build_simple_dict(ShipmentType.objects.all())
@@ -158,15 +157,6 @@ class Command(BaseCommand):
                 joined = "; ".join(reasons)
                 self.stdout.write(f"index={index_value}: {joined}")
 
-    def _normalize_name(self, value: str) -> str:
-        return (value or "").strip().casefold()
-
-    def _build_cargo_index(self) -> List[CargoIndexItem]:
-        items: List[CargoIndexItem] = []
-        for cargo in Cargo.objects.all():
-            items.append(CargoIndexItem(name=self._normalize_name(cargo.name), cargo=cargo))
-        return items
-
     def _build_station_index(self) -> List[StationIndexItem]:
         items: List[StationIndexItem] = []
         stations = Station.objects.select_related("railroad")
@@ -174,7 +164,7 @@ class Command(BaseCommand):
             railroad_code = st.railroad.code if st.railroad_id else ""
             items.append(
                 StationIndexItem(
-                    full_name=self._normalize_name(st.full_name),
+                    full_name=normalize_name(st.full_name),
                     railroad_code=(railroad_code or "").strip(),
                     station=st,
                 )
@@ -184,35 +174,10 @@ class Command(BaseCommand):
     def _build_simple_dict(self, qs: Iterable[Any]) -> Dict[str, Any]:
         result: Dict[str, Any] = {}
         for obj in qs:
-            key = self._normalize_name(getattr(obj, "name", ""))
+            key = normalize_name(getattr(obj, "name", ""))
             if key:
                 result[key] = obj
         return result
-
-    def _match_cargo_fuzzy(
-        self,
-        raw_name: str,
-        cargo_index: List[CargoIndexItem],
-        similarity_threshold: int,
-    ) -> Optional[Cargo]:
-        name_norm = self._normalize_name(raw_name)
-        if not name_norm:
-            return None
-
-        choices = [item.name for item in cargo_index]
-        best = rf_process.extractOne(
-            name_norm,
-            choices,
-            scorer=fuzz.WRatio,
-            score_cutoff=similarity_threshold,
-        )
-        if not best:
-            return None
-
-        _, _, idx = best
-        if idx is None:
-            return None
-        return cargo_index[idx].cargo
 
     def _match_station_by_esr_or_fuzzy(
         self,
@@ -233,7 +198,7 @@ class Command(BaseCommand):
             except ValueError:
                 pass
 
-        name_norm = self._normalize_name(raw_station_name)
+        name_norm = normalize_name(raw_station_name)
         if not name_norm:
             return None
 
@@ -322,7 +287,7 @@ class Command(BaseCommand):
                 reasons: List[str] = []
 
                 raw_cargo_name = (row.get("Груз") or "").strip()
-                cargo = self._match_cargo_fuzzy(
+                cargo = match_cargo_fuzzy(
                     raw_cargo_name, cargo_index, similarity_threshold
                 )
                 if cargo is None:
@@ -349,12 +314,12 @@ class Command(BaseCommand):
                     reasons.append("Не найдена станция назначения")
 
                 wagon_raw = (row.get("Род вагона") or "").strip()
-                wagon = wagon_by_name.get(self._normalize_name(wagon_raw))
+                wagon = wagon_by_name.get(normalize_name(wagon_raw))
                 if wagon is None:
                     reasons.append(f"Не найден Род вагона '{wagon_raw}'")
 
                 shipment_raw = (row.get("Тип отправки") or "").strip()
-                shipment = shipment_by_name.get(self._normalize_name(shipment_raw))
+                shipment = shipment_by_name.get(normalize_name(shipment_raw))
                 if shipment is None:
                     reasons.append(f"Не найден Тип отправки '{shipment_raw}'")
 
@@ -362,7 +327,7 @@ class Command(BaseCommand):
                 message_raw = (row.get("vid") or "").strip()
                 message: Optional[MessageType] = None
                 if message_raw:
-                    message = message_by_name.get(self._normalize_name(message_raw))
+                    message = message_by_name.get(normalize_name(message_raw))
                     if message is None:
                         reasons.append(f"Не найден вид сообщения '{message_raw}'")
 

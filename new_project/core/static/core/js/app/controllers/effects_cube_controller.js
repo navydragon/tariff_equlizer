@@ -12,7 +12,6 @@ import { clearToasts, showToast } from "../lib/toast.js";
   class EffectsCubeController extends Stimulus.Controller {
     static targets = [
       "scenarioSelect",
-      "engineSelect",
       "groupBySelect",
       "groupByInnerSelect",
       "cargoFilterSelect",
@@ -42,9 +41,6 @@ import { clearToasts, showToast } from "../lib/toast.js";
         cubeTimer: null,
         suppressFilterEvents: false,
         computing: false,
-        computeEngine: this.hasEngineSelectTarget
-          ? this.engineSelectTarget.value || "pandas"
-          : "pandas",
         groupByInnerLabel: null,
         groupByLabel: "Группа груза",
       };
@@ -61,14 +57,6 @@ import { clearToasts, showToast } from "../lib/toast.js";
         ? this.scenarioSelectTarget.value
         : "";
       this.state.selectedScenarioId = raw ? Number(raw) : null;
-      this.state.cacheKey = null;
-      this._computeEffects();
-    }
-
-    onEngineChange() {
-      if (this.hasEngineSelectTarget) {
-        this.state.computeEngine = this.engineSelectTarget.value || "pandas";
-      }
       this.state.cacheKey = null;
       this._computeEffects();
     }
@@ -166,13 +154,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
     }
 
     _resolveComputeUrl() {
-      if (
-        this.state.computeEngine === "pandas" &&
-        this.computePandasUrlValue
-      ) {
-        return this.computePandasUrlValue;
-      }
-      return this.computeUrlValue;
+      return this.computePandasUrlValue || this.computeUrlValue;
     }
 
     async _computeEffects() {
@@ -476,16 +458,12 @@ import { clearToasts, showToast } from "../lib/toast.js";
       const chargeCount = Number(routesWithoutCharge) || 0;
       const volumeCount = Number(routesWithoutVolume) || 0;
 
-      if (meta.engine) {
-        const elapsed =
-          meta.elapsed_ms === undefined || meta.elapsed_ms === null
-            ? ""
-            : `, ${meta.elapsed_ms} мс`;
+      if (meta.elapsed_ms != null) {
         showToast(
-          `Движок расчёта: ${meta.engine}${elapsed}.`,
+          `Расчёт выполнен за ${meta.elapsed_ms} мс.`,
           this._toastOptions({
             variant: "info",
-            title: "Расчёт выполнен",
+            title: "Готово",
             delay: 7000,
           }),
         );

@@ -1883,6 +1883,7 @@ def route_list_api(request):
         page_size = int(request.GET.get("page_size", "20"))
     except (TypeError, ValueError):
         page_size = 20
+    page_size = min(max(page_size, 1), 100)
 
     try:
         route_set_id = int(request.GET.get("route_set_id", "0"))
@@ -1890,6 +1891,10 @@ def route_list_api(request):
         route_set_id = 0
 
     search = (request.GET.get("search") or "").strip() or None
+    include_total_raw = (request.GET.get("include_total") or "").strip().lower()
+    include_total = include_total_raw in ("1", "true", "yes")
+    economics_filled_raw = (request.GET.get("economics_filled") or "").strip().lower()
+    economics_filled = economics_filled_raw in ("1", "true", "yes")
     filters = RouteListFiltersDTO(
         route_set_id=route_set_id,
         page=page,
@@ -1897,6 +1902,8 @@ def route_list_api(request):
         search=search,
         origin_esr=request.GET.get("origin_esr") or None,
         destination_esr=request.GET.get("destination_esr") or None,
+        include_total=include_total,
+        economics_filled=economics_filled,
     )
 
     service = RouteService()

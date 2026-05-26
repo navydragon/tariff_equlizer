@@ -29,7 +29,7 @@ from calculations.domain.services.scenario_effects_formatting import (
     GlobalTotals as _GlobalTotals,
     build_cards_from_totals,
     format_bln as _format_bln,
-    format_ths as _format_ths,
+    format_rub as _format_rub,
     pct as _pct,
 )
 from calculations.domain.services.tariff_load import TariffLoadService
@@ -87,7 +87,7 @@ class ScenarioEffectsService:
                 cache_key=cache_key,
                 scenario_id=scenario.id,
                 years=years,
-                baseline_ths_rub=_format_ths(global_totals.baseline_total),
+                baseline_rub=_format_rub(global_totals.baseline_total),
                 routes_without_charge=skipped_charge,
                 routes_without_volume=skipped_volume,
                 cards=cards,
@@ -226,7 +226,7 @@ class ScenarioEffectsService:
             ScenarioEffectsResponseDTO(
                 scenario_id=compute_result.scenario_id,
                 years=compute_result.years,
-                baseline_ths_rub=compute_result.baseline_ths_rub,
+                baseline_rub=compute_result.baseline_rub,
                 routes_without_charge=compute_result.routes_without_charge,
                 cards=compute_result.cards,
                 filter_options=compute_result.filter_options,
@@ -245,7 +245,7 @@ class ScenarioEffectsService:
             route_set_id=scenario.route_set_id,
         )
         routes_qs = all_routes_qs.filter(
-            freight_charge_ths_rub__gt=0,
+            freight_charge_rub__gt=0,
         ).select_related(
             "cargo__cargo_group",
             "shipper",
@@ -257,7 +257,7 @@ class ScenarioEffectsService:
 
         skipped_charge = all_routes_qs.count() - routes_qs.count()
         skipped_volume = all_routes_qs.exclude(
-            transport_volume_mln_tons__gt=0,
+            transport_volume_tons__gt=0,
         ).count()
         rule_match_sets = self._tariff_load.build_rule_match_sets(
             routes_qs,
@@ -279,8 +279,8 @@ class ScenarioEffectsService:
                 continue
 
             dimensions = _route_dimensions(route)
-            baseline = route.freight_charge_ths_rub or Decimal("0")
-            volume = route.transport_volume_mln_tons or Decimal("0")
+            baseline = route.freight_charge_rub or Decimal("0")
+            volume = route.transport_volume_tons or Decimal("0")
 
             global_totals.baseline_total += baseline
             for year in years:
@@ -310,8 +310,8 @@ class ScenarioEffectsService:
                     shipment_category=dimensions.shipment_category,
                     park_type=dimensions.park_type,
                     holding=dimensions.holding,
-                    baseline_ths=baseline,
-                    volume_mln_tons=volume,
+                    baseline_rub=baseline,
+                    volume_tons=volume,
                     base_by_year=dict(effects.base_by_year),
                     rules_by_year=dict(effects.rules_by_year),
                     charge_by_year=dict(effects.charge_by_year),
@@ -381,7 +381,7 @@ class ScenarioEffectsService:
     def _collect_filter_options_from_db(scenario: Scenario) -> dict[str, list[str]]:
         qs = Route.objects.filter(
             route_set_id=scenario.route_set_id,
-            freight_charge_ths_rub__gt=0,
+            freight_charge_rub__gt=0,
         )
 
         cargo_groups = {
@@ -524,10 +524,8 @@ def _route_dimensions(route: Route) -> _RouteDimensions:
     else:
         transport_type = "—"
 
-    if route.shipment_type_id:
-        shipment_category = route.shipment_type.name
-    else:
-        shipment_category = "—"
+    shipment_category = (route.shipment_category or "").strip() or "—"
+    park_type = (route.park_type or "").strip() or "—"
 
     holding = "Прочие"
     if route.shipper_id:
@@ -540,7 +538,7 @@ def _route_dimensions(route: Route) -> _RouteDimensions:
         wagon_kind=wagon_kind,
         transport_type=transport_type,
         shipment_category=shipment_category,
-        park_type="—",
+        park_type=park_type,
         holding=holding,
     )
 
@@ -555,10 +553,10 @@ def _bucket_to_row(
     return EffectTableRowDTO(
         label=label,
         is_subtotal=is_subtotal,
-        base_ths_rub=_format_ths(bucket.base),
+        base_rub=_format_rub(bucket.base),
         base_pct=_pct(bucket.base, prev),
-        rules_ths_rub=_format_ths(bucket.rules),
+        rules_rub=_format_rub(bucket.rules),
         rules_pct=_pct(bucket.rules, prev),
-        total_ths_rub=_format_ths(bucket.total),
+        total_rub=_format_rub(bucket.total),
         total_pct=_pct(bucket.total, prev),
     )

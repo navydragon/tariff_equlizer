@@ -105,22 +105,22 @@ class EffectKpiCardDTO:
 class EffectTableRowDTO:
     label: str
     is_subtotal: bool
-    base_ths_rub: str
+    base_rub: str
     base_pct: str
-    rules_ths_rub: str
+    rules_rub: str
     rules_pct: str
-    total_ths_rub: str
+    total_rub: str
     total_pct: str
 
     def to_api_dict(self) -> dict[str, Any]:
         return {
             "label": self.label,
             "is_subtotal": self.is_subtotal,
-            "base_ths_rub": self.base_ths_rub,
+            "base_rub": self.base_rub,
             "base_pct": self.base_pct,
-            "rules_ths_rub": self.rules_ths_rub,
+            "rules_rub": self.rules_rub,
             "rules_pct": self.rules_pct,
-            "total_ths_rub": self.total_ths_rub,
+            "total_rub": self.total_rub,
             "total_pct": self.total_pct,
         }
 
@@ -144,7 +144,7 @@ class ScenarioEffectsComputeResponseDTO:
     cache_key: str
     scenario_id: int
     years: list[int]
-    baseline_ths_rub: str
+    baseline_rub: str
     routes_without_charge: int
     routes_without_volume: int
     cards: list[EffectKpiCardDTO]
@@ -155,7 +155,7 @@ class ScenarioEffectsComputeResponseDTO:
             "cache_key": self.cache_key,
             "scenario_id": self.scenario_id,
             "years": self.years,
-            "baseline_ths_rub": self.baseline_ths_rub,
+            "baseline_rub": self.baseline_rub,
             "routes_without_charge": self.routes_without_charge,
             "routes_without_volume": self.routes_without_volume,
             "cards": [card.to_api_dict() for card in self.cards],
@@ -179,7 +179,7 @@ class ScenarioEffectsAggregateResponseDTO:
 class ScenarioEffectsResponseDTO:
     scenario_id: int
     years: list[int]
-    baseline_ths_rub: str
+    baseline_rub: str
     routes_without_charge: int
     cards: list[EffectKpiCardDTO]
     filter_options: dict[str, list[str]]
@@ -190,7 +190,7 @@ class ScenarioEffectsResponseDTO:
         return {
             "scenario_id": self.scenario_id,
             "years": self.years,
-            "baseline_ths_rub": self.baseline_ths_rub,
+            "baseline_rub": self.baseline_rub,
             "routes_without_charge": self.routes_without_charge,
             "cards": [card.to_api_dict() for card in self.cards],
             "filter_options": self.filter_options,

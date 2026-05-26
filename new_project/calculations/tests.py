@@ -1,6 +1,7 @@
 import json
 from decimal import Decimal
 
+import pandas as pd
 from django.contrib.auth import get_user_model
 from django.test import Client, TestCase
 from django.urls import reverse
@@ -20,6 +21,11 @@ from calculations.domain.services import (
     ScenarioEffectsService,
     TariffLoadService,
 )
+from calculations.domain.services.pandas_tariff_conditions import (
+    build_rule_mask,
+    build_rule_mask_numpy,
+)
+from scenarios.domain.utils.tariff_conditions import apply_tariff_conditions
 from core.domain.services.app_settings import SHARE_MODE_ALL, SHARE_MODE_OWN, SHARE_SCENARIOS_CODE
 from core.models import (
     Cargo,
@@ -326,8 +332,8 @@ class ScenarioEffectsServiceTests(TariffLoadServiceTestMixin, TestCase):
     def setUp(self) -> None:
         super().setUp()
         self.effects_service = ScenarioEffectsService()
-        self.route.freight_charge_ths_rub = Decimal("1000000.00")
-        self.route.save(update_fields=["freight_charge_ths_rub"])
+        self.route.freight_charge_rub = Decimal("1000000000.00")
+        self.route.save(update_fields=["freight_charge_rub"])
 
     def _setup_btd(self, coef_2026: str = "1.1000") -> None:
         category = BTDCategory.objects.create(
@@ -415,10 +421,10 @@ class ScenarioEffectsServiceTests(TariffLoadServiceTestMixin, TestCase):
         context = self.service.build_scenario_context(self.scenario)
         effects = self.service.compute_freight_charge_effects(self.route, context)
         assert effects is not None
-        self.assertEqual(effects.rules_by_year[2026], Decimal("50000.00"))
+        self.assertEqual(effects.rules_by_year[2026], Decimal("50000000.00"))
         self.assertEqual(
             effects.rule_by_year[rule.id][2026],
-            Decimal("50000.00"),
+            Decimal("50000000.00"),
         )
 
     def test_holding_filter_affects_table_not_kpi(self) -> None:
@@ -443,9 +449,9 @@ class ScenarioEffectsServiceTests(TariffLoadServiceTestMixin, TestCase):
             cargo_code=1002,
             route_code="R-002",
         )
-        route2.freight_charge_ths_rub = Decimal("2000000.00")
+        route2.freight_charge_rub = Decimal("2000000000.00")
         route2.shipper = shipper_beta
-        route2.save(update_fields=["freight_charge_ths_rub", "shipper"])
+        route2.save(update_fields=["freight_charge_rub", "shipper"])
 
         compute_result, compute_errors = self.effects_service.compute(
             scenario=self.scenario,
@@ -468,7 +474,7 @@ class ScenarioEffectsServiceTests(TariffLoadServiceTestMixin, TestCase):
         assert aggregate_result is not None
         total_row = aggregate_result.table_rows[0]
         self.assertEqual(total_row.label, "ИТОГО")
-        self.assertEqual(total_row.base_ths_rub, "100000.00")
+        self.assertEqual(total_row.base_rub, "100000000.00")
 
     def test_group_by_cargo_group_table(self) -> None:
         self._setup_btd("1.1000")
@@ -484,8 +490,8 @@ class ScenarioEffectsServiceTests(TariffLoadServiceTestMixin, TestCase):
             cargo_code=1002,
             route_code="R-002",
         )
-        route2.freight_charge_ths_rub = Decimal("500000.00")
-        route2.save(update_fields=["freight_charge_ths_rub"])
+        route2.freight_charge_rub = Decimal("500000000.00")
+        route2.save(update_fields=["freight_charge_rub"])
 
         response, errors = self.effects_service.calculate(
             scenario=self.scenario,
@@ -509,8 +515,8 @@ class ScenarioEffectsApiTests(TariffLoadServiceTestMixin, TestCase):
         super().setUp()
         self.client = Client()
         self.client.force_login(self.user)
-        self.route.freight_charge_ths_rub = Decimal("1000000.00")
-        self.route.save(update_fields=["freight_charge_ths_rub"])
+        self.route.freight_charge_rub = Decimal("1000000000.00")
+        self.route.save(update_fields=["freight_charge_rub"])
         category = BTDCategory.objects.create(
             name="Индексация",
             scenario=self.scenario,
@@ -627,10 +633,10 @@ class ScenarioAbsoluteServiceTests(TariffLoadServiceTestMixin, TestCase):
         super().setUp()
         self.effects_service = ScenarioEffectsService()
         self.absolute_service = ScenarioAbsoluteService()
-        self.route.freight_charge_ths_rub = Decimal("1000000.00")
-        self.route.transport_volume_mln_tons = Decimal("1.5000")
+        self.route.freight_charge_rub = Decimal("1000000000.00")
+        self.route.transport_volume_tons = Decimal("1500000")
         self.route.save(
-            update_fields=["freight_charge_ths_rub", "transport_volume_mln_tons"],
+            update_fields=["freight_charge_rub", "transport_volume_tons"],
         )
 
     def _setup_btd(self, coef_2026: str = "1.1000") -> None:
@@ -725,13 +731,13 @@ class ScenarioAbsoluteServiceTests(TariffLoadServiceTestMixin, TestCase):
             cargo_code=1002,
             route_code="R-002",
         )
-        route2.freight_charge_ths_rub = Decimal("2000000.00")
-        route2.transport_volume_mln_tons = Decimal("2.0000")
+        route2.freight_charge_rub = Decimal("2000000000.00")
+        route2.transport_volume_tons = Decimal("2000000")
         route2.shipper = shipper_beta
         route2.save(
             update_fields=[
-                "freight_charge_ths_rub",
-                "transport_volume_mln_tons",
+                "freight_charge_rub",
+                "transport_volume_tons",
                 "shipper",
             ],
         )
@@ -764,8 +770,8 @@ class ScenarioEffectsPandasParityTests(TariffLoadServiceTestMixin, TestCase):
         super().setUp()
         self.python_service = ScenarioEffectsService()
         self.pandas_service = ScenarioEffectsPandasService()
-        self.route.freight_charge_ths_rub = Decimal("1000000.00")
-        self.route.save(update_fields=["freight_charge_ths_rub"])
+        self.route.freight_charge_rub = Decimal("1000000000.00")
+        self.route.save(update_fields=["freight_charge_rub"])
 
     def _setup_btd(self, coef_2026: str = "1.1000") -> None:
         category = BTDCategory.objects.create(
@@ -817,8 +823,8 @@ class ScenarioEffectsPandasParityTests(TariffLoadServiceTestMixin, TestCase):
         assert python_aggregate is not None
         assert pandas_aggregate is not None
         self.assertEqual(
-            python_aggregate.table_rows[0].total_ths_rub,
-            pandas_aggregate.table_rows[0].total_ths_rub,
+            python_aggregate.table_rows[0].total_rub,
+            pandas_aggregate.table_rows[0].total_rub,
         )
 
     def test_parity_btd_only(self) -> None:
@@ -837,7 +843,7 @@ class ScenarioEffectsPandasParityTests(TariffLoadServiceTestMixin, TestCase):
         self.assertEqual(pandas_errors, [])
         assert python_result is not None
         assert pandas_result is not None
-        self.assertEqual(python_result.baseline_ths_rub, pandas_result.baseline_ths_rub)
+        self.assertEqual(python_result.baseline_rub, pandas_result.baseline_rub)
         self.assertEqual(python_result.cards[0].base_bln, pandas_result.cards[0].base_bln)
         self.assertEqual(python_result.cards[0].rules_bln, pandas_result.cards[0].rules_bln)
         self.assertEqual(meta["engine"], "pandas")
@@ -890,13 +896,90 @@ class ScenarioEffectsPandasParityTests(TariffLoadServiceTestMixin, TestCase):
             user_id=self.user.id,
         )
 
-        self.assertFalse(meta_first.get("cache_hit"))
-        self.assertTrue(meta_second.get("cache_hit"))
-        self.assertEqual(meta_first.get("data_version"), meta_second.get("data_version"))
-        self.assertLess(
-            meta_second["timings"]["load_ms"],
-            meta_first["timings"]["load_ms"],
+        self.assertFalse(meta_first.get("scenario_compute_cache_hit"))
+        self.assertTrue(meta_second.get("scenario_compute_cache_hit"))
+        self.assertIn("data_version", meta_second)
+        self.assertEqual(meta_second["timings"]["compute_ms"], 0)
+
+    def test_route_mart_parquet_cache_hit(self) -> None:
+        from calculations.domain.services.scenario_compute_store import (
+            scenario_compute_dir,
         )
+
+        self._setup_btd("1.1000")
+        scenario = Scenario.objects.select_related("route_set").get(
+            pk=self.scenario.pk,
+        )
+        _, _, meta_first = self.pandas_service.compute_pandas(
+            scenario=scenario,
+            user_id=self.user.id,
+        )
+        data_version = meta_first.get("data_version")
+        assert data_version
+        import shutil
+
+        shutil.rmtree(
+            scenario_compute_dir(scenario_id=scenario.id, data_version=data_version),
+            ignore_errors=True,
+        )
+
+        _, _, meta_second = self.pandas_service.compute_pandas(
+            scenario=scenario,
+            user_id=self.user.id,
+        )
+
+        self.assertFalse(meta_first.get("route_mart_cache_hit"))
+        self.assertTrue(meta_second.get("route_mart_cache_hit"))
+        self.assertFalse(meta_second.get("scenario_compute_cache_hit"))
+        self.assertGreater(meta_second["timings"].get("parquet_read_ms", 0), 0)
+
+    def test_rule_mask_cache_hit(self) -> None:
+        from calculations.domain.services.route_effects_loader import (
+            fetch_routes_dataframe_cached_timed,
+        )
+        from calculations.domain.services.route_mask_cache import (
+            build_or_load_rule_mask,
+            try_load_rule_mask,
+        )
+        from calculations.domain.services.tariff_load import TariffLoadService
+
+        self._setup_btd("1.1000")
+        scenario = Scenario.objects.select_related("route_set").get(
+            pk=self.scenario.pk,
+        )
+        rule = TariffRule.objects.create(
+            scenario=scenario,
+            name="Mask cache rule",
+            base_percent=Decimal("100"),
+            position=1,
+        )
+        TariffRuleYearValue.objects.create(
+            tariff_rule=rule,
+            year=2026,
+            coefficient=Decimal("1.0500"),
+        )
+
+        df, mart_meta, _timings = fetch_routes_dataframe_cached_timed(
+            scenario.route_set_id,
+        )
+        tariff_load = TariffLoadService()
+        conditions = tariff_load._rule_conditions_payload(rule)
+
+        build_or_load_rule_mask(
+            route_set_id=scenario.route_set_id,
+            rule_id=rule.id,
+            conditions=conditions,
+            df=df,
+            mart_meta=mart_meta,
+        )
+        cached = try_load_rule_mask(
+            route_set_id=scenario.route_set_id,
+            rule_id=rule.id,
+            conditions=conditions,
+            n_routes=len(df),
+        )
+        self.assertIsNotNone(cached)
+        self.assertEqual(cached.shape, (len(df),))
 
 
 class ScenarioEffectsComputePandasApiTests(TariffLoadServiceTestMixin, TestCase):
@@ -904,8 +987,8 @@ class ScenarioEffectsComputePandasApiTests(TariffLoadServiceTestMixin, TestCase)
         super().setUp()
         self.client = Client()
         self.client.force_login(self.user)
-        self.route.freight_charge_ths_rub = Decimal("1000000.00")
-        self.route.save(update_fields=["freight_charge_ths_rub"])
+        self.route.freight_charge_rub = Decimal("1000000000.00")
+        self.route.save(update_fields=["freight_charge_rub"])
         category = BTDCategory.objects.create(
             name="Индексация",
             scenario=self.scenario,
@@ -938,6 +1021,16 @@ class ScenarioEffectsComputePandasApiTests(TariffLoadServiceTestMixin, TestCase)
         self.assertEqual(payload["engine"], "pandas")
         self.assertIn("elapsed_ms", payload)
         self.assertIn("cache_key", payload)
+        self.assertIn("data_version", payload)
+        self.assertIn("scenario_compute_cache_hit", payload)
+
+        response_repeat = self.client.post(
+            url,
+            data=json.dumps({"scenario_id": self.scenario.id}),
+            content_type="application/json",
+        )
+        repeat_payload = response_repeat.json()
+        self.assertTrue(repeat_payload["scenario_compute_cache_hit"])
 
 
 class ScenarioAbsoluteApiTests(TariffLoadServiceTestMixin, TestCase):
@@ -945,10 +1038,10 @@ class ScenarioAbsoluteApiTests(TariffLoadServiceTestMixin, TestCase):
         super().setUp()
         self.client = Client()
         self.client.force_login(self.user)
-        self.route.freight_charge_ths_rub = Decimal("1000000.00")
-        self.route.transport_volume_mln_tons = Decimal("1.0000")
+        self.route.freight_charge_rub = Decimal("1000000000.00")
+        self.route.transport_volume_tons = Decimal("1000000")
         self.route.save(
-            update_fields=["freight_charge_ths_rub", "transport_volume_mln_tons"],
+            update_fields=["freight_charge_rub", "transport_volume_tons"],
         )
         category = BTDCategory.objects.create(
             name="Индексация",
@@ -1037,8 +1130,8 @@ class ScenarioEffectsCubeApiTests(TariffLoadServiceTestMixin, TestCase):
         self.client = Client()
         self.client.force_login(self.user)
         self.cube_service = ScenarioEffectsCubeService()
-        self.route.freight_charge_ths_rub = Decimal("1000000.00")
-        self.route.save(update_fields=["freight_charge_ths_rub"])
+        self.route.freight_charge_rub = Decimal("1000000000.00")
+        self.route.save(update_fields=["freight_charge_rub"])
         category = BTDCategory.objects.create(
             name="Индексация",
             scenario=self.scenario,
@@ -1227,3 +1320,160 @@ class ShareScenariosCalculationsApiTests(TariffLoadServiceTestMixin, TestCase):
             content_type="application/json",
         )
         self.assertEqual(response.status_code, 404)
+
+
+class DistanceBeltTariffConditionsTests(TariffLoadServiceTestMixin, TestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.route_near = self._create_route(
+            rzd=Decimal("100.00"),
+            route_code="R-NEAR",
+        )
+        self.route_near.distance_belt = "0-500"
+        self.route_near.save(update_fields=["distance_belt"])
+
+        self.route_far = self._create_route(
+            rzd=Decimal("200.00"),
+            route_code="R-FAR",
+        )
+        self.route_far.distance_belt = "500-1000"
+        self.route_far.save(update_fields=["distance_belt"])
+
+        self.route_empty = self._create_route(
+            rzd=Decimal("300.00"),
+            route_code="R-EMPTY",
+        )
+        self.route_empty.distance_belt = ""
+        self.route_empty.save(update_fields=["distance_belt"])
+
+    def test_apply_tariff_conditions_include_distance_belt(self) -> None:
+        qs = Route.objects.filter(route_set=self.route_set)
+        conditions = [
+            {
+                "parameter": "distance_belt",
+                "operator": "include",
+                "values": ["0-500"],
+            }
+        ]
+        matched = apply_tariff_conditions(qs, conditions)
+        self.assertEqual(matched.count(), 1)
+        self.assertEqual(matched.get().id, self.route_near.id)
+
+    def test_apply_tariff_conditions_exclude_distance_belt(self) -> None:
+        qs = Route.objects.filter(route_set=self.route_set)
+        conditions = [
+            {
+                "parameter": "distance_belt",
+                "operator": "exclude",
+                "values": ["500-1000"],
+            }
+        ]
+        matched = apply_tariff_conditions(qs, conditions)
+        ids = set(matched.values_list("id", flat=True))
+        self.assertIn(self.route_near.id, ids)
+        self.assertIn(self.route_empty.id, ids)
+        self.assertNotIn(self.route_far.id, ids)
+
+    def test_build_rule_mask_distance_belt(self) -> None:
+        df = pd.DataFrame(
+            {
+                "id": [1, 2, 3],
+                "distance_belt": ["0-500", "500-1000", ""],
+            }
+        )
+        conditions = [
+            {
+                "parameter": "distance_belt",
+                "operator": "include",
+                "values": ["0-500", "500-1000"],
+            }
+        ]
+        mask = build_rule_mask(df, conditions)
+        self.assertTrue(mask.iloc[0])
+        self.assertTrue(mask.iloc[1])
+        self.assertFalse(mask.iloc[2])
+
+    def test_build_rule_mask_numpy_distance_belt_exclude(self) -> None:
+        df = pd.DataFrame(
+            {
+                "id": [1, 2],
+                "distance_belt": ["0-500", "500-1000"],
+            }
+        )
+        conditions = [
+            {
+                "parameter": "distance_belt",
+                "operator": "exclude",
+                "values": ["500-1000"],
+            }
+        ]
+        mask = build_rule_mask_numpy(df, conditions)
+        self.assertTrue(mask[0])
+        self.assertFalse(mask[1])
+
+    def test_apply_tariff_conditions_distance_belt_gt_threshold(self) -> None:
+        qs = Route.objects.filter(route_set=self.route_set)
+        conditions = [
+            {
+                "parameter": "distance_belt",
+                "operator": "gt",
+                "values": 100,
+            }
+        ]
+        matched = apply_tariff_conditions(qs, conditions)
+        ids = set(matched.values_list("id", flat=True))
+        self.assertIn(self.route_near.id, ids)
+        self.assertIn(self.route_far.id, ids)
+        self.assertNotIn(self.route_empty.id, ids)
+
+    def test_apply_tariff_conditions_distance_belt_lt_threshold(self) -> None:
+        qs = Route.objects.filter(route_set=self.route_set)
+        conditions = [
+            {
+                "parameter": "distance_belt",
+                "operator": "lt",
+                "values": 500,
+            }
+        ]
+        matched = apply_tariff_conditions(qs, conditions)
+        self.assertEqual(matched.count(), 1)
+        self.assertEqual(matched.get().id, self.route_near.id)
+
+    def test_build_rule_mask_distance_belt_gt_threshold(self) -> None:
+        df = pd.DataFrame(
+            {
+                "id": [1, 2, 3],
+                "distance_belt": ["0-500", "500-1000", ""],
+                "distance_belt_midpoint_km": [250, 750, None],
+            }
+        )
+        conditions = [
+            {
+                "parameter": "distance_belt",
+                "operator": "gt",
+                "values": 100,
+            }
+        ]
+        mask = build_rule_mask(df, conditions)
+        self.assertTrue(mask.iloc[0])
+        self.assertTrue(mask.iloc[1])
+        self.assertFalse(mask.iloc[2])
+
+    def test_build_rule_mask_numpy_distance_belt_lt_threshold(self) -> None:
+        df = pd.DataFrame(
+            {
+                "id": [1, 2],
+                "distance_belt": ["0-500", "500-1000"],
+                "distance_belt_midpoint_km": [250, 750],
+            }
+        )
+        conditions = [
+            {
+                "parameter": "distance_belt",
+                "operator": "lt",
+                "values": 500,
+            }
+        ]
+        mask = build_rule_mask_numpy(df, conditions)
+        self.assertTrue(mask[0])
+        self.assertFalse(mask[1])

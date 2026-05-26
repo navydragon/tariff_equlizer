@@ -284,6 +284,8 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
       query.set("search", (search || "").trim());
       query.set("page", String(page || 1));
       query.set("page_size", String(this.pageSizeValue || 20));
+      query.set("include_total", "0");
+      query.set("economics_filled", "1");
 
       const url = `${this.routesUrlValue}?${query.toString()}`;
       const requestToken = {};

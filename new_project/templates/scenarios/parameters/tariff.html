@@ -1,3 +1,27 @@
+<style>
+  .tariff-rule-condition-line + .tariff-rule-condition-line {
+    margin-top: 0.35rem;
+  }
+
+  .tariff-rules-modal .modal-body {
+    padding-bottom: 2rem;
+  }
+
+  .tariff-rules-modal .tariff-rules-years-block {
+    margin-bottom: 0.5rem;
+  }
+
+  .tariff-rule-condition-row .tariff-rule-condition-delete {
+    padding-top: 1.875rem;
+  }
+
+  .tariff-rule-condition-row [data-condition-values-wrap] .form-text {
+    margin-top: 0.25rem;
+    margin-bottom: 0;
+    line-height: 1.35;
+  }
+</style>
+
 <div class="card">
   <div class="card-header">
     <h3 class="card-title">Отдельные тарифные решения</h3>
@@ -29,14 +53,16 @@
           <thead>
             <tr>
               <th style="width: 56px;">#</th>
-              <th>Название</th>
-              <th style="width: 160px;">Покрытие, %</th>
-              <th class="text-end" style="width: 180px;">Действия</th>
+              <th style="min-width: 180px;">Название</th>
+              <th style="min-width: 280px;">Условия (категории маршрутов)</th>
+              <th style="min-width: 160px;">Коэффициенты по годам</th>
+              <th style="width: 120px;">% базы</th>
+              <th class="text-end" style="width: 200px;">Действия</th>
             </tr>
           </thead>
           <tbody data-tariff-rules-target="tbody">
             <tr>
-              <td colspan="4" class="text-muted">Загрузка...</td>
+              <td colspan="6" class="text-muted">Загрузка...</td>
             </tr>
           </tbody>
         </table>
@@ -44,7 +70,7 @@
 
       {# Modal #}
       <div class="modal fade" tabindex="-1" aria-hidden="true" data-tariff-rules-target="modal">
-        <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-dialog modal-xl modal-dialog-scrollable tariff-rules-modal">
           <div class="modal-content">
             <div class="modal-header">
               <h5 class="modal-title" data-tariff-rules-target="modalTitle">Добавить тарифное решение</h5>
@@ -84,9 +110,9 @@
                 </div>
               </div>
 
-              <div class="mb-2">
+              <div class="mb-2 tariff-rules-years-block">
                 <h4 class="mb-2">Коэффициенты по годам</h4>
-                <div class="row g-2" data-tariff-rules-target="years"></div>
+                <div class="row g-2 row-cols-2 row-cols-sm-4 row-cols-lg-4" data-tariff-rules-target="years"></div>
               </div>
             </div>
             <div class="modal-footer">

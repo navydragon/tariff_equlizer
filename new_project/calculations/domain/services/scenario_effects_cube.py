@@ -23,9 +23,9 @@ from calculations.domain.services.scenario_effects_cache import (
     get_payload,
     validate_cache_access,
 )
+from calculations.domain.units import RUB_PER_BLN
 from scenarios.models import Scenario, TariffRule
 
-_BLN_DIVISOR = Decimal("1000000")
 _BLN_QUANT = Decimal("0.001")
 
 _EFFECT_BASE = "Базовая индексация"
@@ -33,7 +33,7 @@ _EFFECT_RULES_TOTAL = "Отдельные тарифные решения"
 
 
 def _format_bln(value: Decimal) -> str:
-    bln = (value / _BLN_DIVISOR).quantize(_BLN_QUANT, rounding=ROUND_HALF_UP)
+    bln = (value / RUB_PER_BLN).quantize(_BLN_QUANT, rounding=ROUND_HALF_UP)
     return format(bln, "f")
 
 

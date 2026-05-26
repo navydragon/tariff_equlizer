@@ -8,8 +8,8 @@
 EXPLAIN (ANALYZE, BUFFERS)
 SELECT
     r.id,
-    r.freight_charge_ths_rub,
-    r.transport_volume_mln_tons,
+    r.freight_charge_rub,
+    r.transport_volume_tons,
     r.shipper_holding,
     r.cargo_id,
     r.origin_station_id,
@@ -38,5 +38,5 @@ LEFT JOIN core_wagonkind wk ON r.wagon_kind_id = wk.id
 LEFT JOIN core_shipmenttype st ON r.shipment_type_id = st.id
 LEFT JOIN core_messagetype mt ON r.message_type_id = mt.id
 WHERE r.route_set_id = :route_set_id
-  AND r.freight_charge_ths_rub IS NOT NULL
-  AND r.freight_charge_ths_rub > 0;
+  AND r.freight_charge_rub IS NOT NULL
+  AND r.freight_charge_rub > 0;

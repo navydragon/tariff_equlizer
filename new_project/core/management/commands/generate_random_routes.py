@@ -4,6 +4,7 @@ from typing import List
 
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
+from django.utils import timezone
 
 from core.models import (
     Cargo,
@@ -84,6 +85,8 @@ class Command(BaseCommand):
                     f"{deleted_count}"
                 )
             )
+            # QuerySet.delete может не давать надёжной инвалидации на уровне набора
+            RouteSet.objects.filter(pk=route_set.pk).update(updated_at=timezone.now())
 
         self.stdout.write("Загрузка справочников...")
         cargos: List[Cargo] = list(Cargo.objects.all())
@@ -161,6 +164,9 @@ class Command(BaseCommand):
                 Route.objects.bulk_create(batch, batch_size=batch_size)
             created_total += len(batch)
             self.stdout.write(f"  … {created_total:,} / {count:,} (100%)")
+
+        # bulk_create не триггерит сигналы — обновляем версию набора вручную
+        RouteSet.objects.filter(pk=route_set.pk).update(updated_at=timezone.now())
 
         self.stdout.write(
             self.style.SUCCESS(
@@ -247,16 +253,14 @@ class Command(BaseCommand):
 
         shipper_obj = random.choice(shippers) if shippers else None
 
-        volume = Decimal(str(round(random.uniform(0.1, 30.0), 4)))
-        turnover = (volume * Decimal(str(round(random.uniform(0.1, 2.5), 4)))).quantize(
-            Decimal("0.0001")
-        )
-        charge = (turnover * Decimal(str(round(random.uniform(80, 400), 2)))).quantize(
-            Decimal("0.01")
-        )
-        transport_volume_mln_tons = volume
-        freight_turnover_bln_tkm = turnover
-        freight_charge_ths_rub = charge
+        volume = Decimal(str(round(random.uniform(100_000, 30_000_000), 4)))
+        factor = Decimal(str(round(random.uniform(0.1, 2.5), 4)))
+        turnover = (volume * factor * Decimal("1000")).quantize(Decimal("0.0001"))
+        rate = Decimal(str(round(random.uniform(80, 400), 2)))
+        charge = (turnover * rate / Decimal("1000000")).quantize(Decimal("0.01"))
+        transport_volume_tons = volume
+        freight_turnover_tkm = turnover
+        freight_charge_rub = charge
 
         return Route(
             route_set=route_set,
@@ -285,8 +289,8 @@ class Command(BaseCommand):
             production_cost_per_ton=production_cost_per_ton,
             total_cost_per_ton=total_cost_per_ton,
             market_price_per_ton=market_price_per_ton,
-            transport_volume_mln_tons=transport_volume_mln_tons,
-            freight_turnover_bln_tkm=freight_turnover_bln_tkm,
-            freight_charge_ths_rub=freight_charge_ths_rub,
+            transport_volume_tons=transport_volume_tons,
+            freight_turnover_tkm=freight_turnover_tkm,
+            freight_charge_rub=freight_charge_rub,
         )
 

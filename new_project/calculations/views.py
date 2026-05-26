@@ -167,6 +167,8 @@ def scenario_effects_compute_pandas_api(request):
             "engine": meta.get("engine"),
             "elapsed_ms": meta.get("elapsed_ms"),
             "cache_hit": meta.get("cache_hit", False),
+            "route_mart_cache_hit": meta.get("route_mart_cache_hit", False),
+            "scenario_compute_cache_hit": meta.get("scenario_compute_cache_hit", False),
             "data_version": meta.get("data_version"),
             "timings": meta.get("timings"),
         },
