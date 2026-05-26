@@ -1,16 +1,12 @@
 import { fetchJson } from "../lib/http.js";
 import { escapeHtml, setVisible } from "../lib/dom.js";
 import { renderErrors } from "../lib/errors.js";
+import {
+  renderPagination,
+  renderPaginationHasNext,
+} from "../lib/pagination.js";
 
 (function () {
-  const renderPagination = window.renderPagination;
-  const renderPaginationHasNext = window.renderPaginationHasNext;
-  if (!renderPagination || !renderPaginationHasNext) {
-    console.error(
-      "routes controller: pagination.js must be loaded before routes_controller.js",
-    );
-    return;
-  }
 
   const application = window.stimulusApp;
   if (!application || typeof Stimulus === "undefined") {
