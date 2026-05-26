@@ -6,18 +6,30 @@ PROJECT_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 
 cd "$PROJECT_DIR"
 
-if [[ ! -d ".git" ]]; then
-  echo "ERROR: Не найден .git в ${PROJECT_DIR}. Запустите скрипт в каталоге проекта." >&2
-  exit 1
+GIT_ROOT=""
+_dir="$PROJECT_DIR"
+for _ in {1..5}; do
+  if [[ -d "${_dir}/.git" ]]; then
+    GIT_ROOT="$_dir"
+    break
+  fi
+  _dir="$(dirname "$_dir")"
+done
+
+if [[ -z "${SKIP_GIT_PULL:-}" && -n "$GIT_ROOT" ]]; then
+  echo "==> Обновляем код (git pull в ${GIT_ROOT})"
+  (cd "$GIT_ROOT" && git pull)
+elif [[ -n "${SKIP_GIT_PULL:-}" ]]; then
+  echo "==> git pull пропущен (SKIP_GIT_PULL=1)"
+else
+  echo "WARNING: .git не найден рядом с проектом. git pull пропущен."
+  echo "         Ищем от ${PROJECT_DIR} вверх до 5 уровней."
 fi
 
 if [[ ! -f ".venv/bin/activate" ]]; then
   echo "ERROR: Не найдено виртуальное окружение: ${PROJECT_DIR}/.venv/bin/activate" >&2
   exit 1
 fi
-
-echo "==> Обновляем код (git pull)"
-git pull
 
 echo "==> Активируем venv"
 # shellcheck disable=SC1091
