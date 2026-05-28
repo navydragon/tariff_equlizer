@@ -360,25 +360,46 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
         setVisible(emptyEl, !append && items.length === 0);
       }
 
+      const badge = (text, icon, variant) => {
+        if (!text) return "";
+        const v = variant || "azure";
+        return `
+          <span class="badge bg-${v}-lt text-${v}">
+            <i class="ti ${escapeHtml(icon)} me-1"></i>
+            ${escapeHtml(text)}
+          </span>
+        `;
+      };
+
       for (const route of items) {
         const el = document.createElement("button");
         el.type = "button";
         el.className = "list-group-item list-group-item-action text-start";
 
         const cargo = route.cargo_name || "";
+        const cargoGroup = route.cargo_group_name || "";
+        const holding = route.shipper_holding || "";
         const origin = route.origin_station_name || "";
         const destination = route.destination_station_name || "";
         const msgType = route.message_type_name || "";
         const routeCode = route.route_code || "";
 
+        const cargoGroupBadge = badge(cargoGroup, "ti-category", "teal");
+        const holdingBadge = badge(holding, "ti-building", "indigo");
+        const msgTypeBadge = badge(msgType, "ti-message", "azure");
+
         el.innerHTML = `
-          <div class="d-flex w-100 justify-content-between gap-2">
-            <div>
-              <div class="fw-medium">${escapeHtml(routeCode)}</div>
-              <div class="text-muted small">${escapeHtml(cargo)}</div>
-              <div class="text-muted small">${escapeHtml(origin)} → ${escapeHtml(destination)}</div>
+          <div class="d-flex w-100 justify-content-between align-items-stretch gap-2">
+            <div class="d-flex flex-column gap-1 flex-grow-1 min-w-0">
+              <div class="fw-medium text-truncate">${escapeHtml(routeCode)}</div>
+              <div class="text-muted small text-truncate">${escapeHtml(cargo)}</div>
+              <div class="text-muted small text-truncate">${escapeHtml(origin)} → ${escapeHtml(destination)}</div>
             </div>
-            <div class="text-muted small text-end">${escapeHtml(msgType)}</div>
+            <div class="d-flex flex-column justify-content-between align-items-end text-end gap-1 flex-shrink-0">
+              <div>${cargoGroupBadge}</div>
+              ${holdingBadge ? `<div>${holdingBadge}</div>` : ""}
+              <div>${msgTypeBadge}</div>
+            </div>
           </div>
         `;
 
@@ -410,16 +431,19 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
 
       const routeCode = (route.route_code || "").trim();
       const cargo = (route.cargo_name || "").trim();
+      const cargoGroup = (route.cargo_group_name || "").trim();
+      const holding = (route.shipper_holding || "").trim();
       const origin = (route.origin_station_name || "").trim();
       const destination = (route.destination_station_name || "").trim();
       const msgType = (route.message_type_name || "").trim();
       const wagonKind = (route.wagon_kind_name || "").trim();
       const shipmentType = (route.shipment_type_name || "").trim();
 
-      const pill = (text, icon) => {
+      const pill = (text, icon, variant) => {
         if (!text) return "";
+        const v = variant || "azure";
         return `
-          <span class="badge bg-azure-lt text-azure me-2 mb-2">
+          <span class="badge bg-${v}-lt text-${v} me-2 mb-2">
             <i class="ti ${escapeHtml(icon)} me-1"></i>
             ${escapeHtml(text)}
           </span>
@@ -441,6 +465,14 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
         `;
       };
 
+      const headerBadges = [
+        pill(cargoGroup, "ti-category", "teal"),
+        pill(holding, "ti-building", "indigo"),
+        pill(msgType, "ti-message", "azure"),
+      ]
+        .filter(Boolean)
+        .join("");
+
       detailsEl.classList.remove("text-muted");
       detailsEl.innerHTML = `
         <div class="border rounded-3 p-3 bg-light-subtle">
@@ -450,7 +482,7 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
               <div class="fw-bold">${escapeHtml(routeCode || "—")}</div>
             </div>
             <div class="text-end">
-              ${pill(msgType, "ti-message")}
+              ${headerBadges}
             </div>
           </div>
 

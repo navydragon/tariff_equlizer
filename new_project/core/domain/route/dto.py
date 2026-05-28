@@ -103,6 +103,8 @@ class RouteDTO:
     cargo_code_izpod: str
     cargo_code: Optional[int]
     cargo_name: str
+    cargo_group_code: Optional[int]
+    cargo_group_name: str
     origin_esr_code: Optional[int]
     origin_station_name: str
     destination_esr_code: Optional[int]
@@ -162,6 +164,12 @@ class RouteDTO:
             cargo_code_izpod=route.cargo_code_izpod,
             cargo_code=route.cargo.code if route.cargo_id else None,
             cargo_name=route.cargo.name if route.cargo_id else "",
+            cargo_group_code=route.cargo.cargo_group.code
+            if route.cargo_id and route.cargo.cargo_group_id
+            else None,
+            cargo_group_name=route.cargo.cargo_group.name
+            if route.cargo_id and route.cargo.cargo_group_id
+            else "",
             origin_esr_code=route.origin_station.esr_code
             if route.origin_station_id
             else None,
@@ -275,6 +283,8 @@ class RouteDTO:
             "cargo_code_izpod": self.cargo_code_izpod,
             "cargo_code": self.cargo_code,
             "cargo_name": self.cargo_name,
+            "cargo_group_code": self.cargo_group_code,
+            "cargo_group_name": self.cargo_group_name,
             "origin_esr_code": self.origin_esr_code,
             "origin_station_name": self.origin_station_name,
             "destination_esr_code": self.destination_esr_code,
