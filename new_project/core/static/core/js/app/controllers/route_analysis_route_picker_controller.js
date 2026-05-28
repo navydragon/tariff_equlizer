@@ -53,8 +53,13 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
         modalEl: null,
         boundSearchHandler: null,
         boundConfirmHandler: null,
+        boundScrollHandler: null,
         searchTimeout: null,
         routesRequestInFlight: null,
+        routesPage: 1,
+        routesHasNext: false,
+        routesIsLoadingMore: false,
+        routesLastSearch: "",
         scenarioById: new Map(),
         selectedScenario: null,
         selectedScenarioId: null,
@@ -121,6 +126,8 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
 
     onSearchInput() {
       clearTimeout(this.state.searchTimeout);
+      this.state.routesPage = 1;
+      this.state.routesHasNext = false;
       // eslint-disable-next-line no-console
       console.info("[route-analysis] onSearchInput", {
         selectedScenarioId: this.state.selectedScenarioId,
@@ -131,6 +138,7 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
         this._loadRoutes({
           search: this._getSearchInputEl() ? this._getSearchInputEl().value : "",
           page: 1,
+          append: false,
         });
       }, this.searchDebounceMsValue || 400);
     }
@@ -261,9 +269,18 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
       }
       if (this.hasEmptyTarget) setVisible(this.emptyTarget, false);
       this._setLoading(false);
+      this._resetRoutesPagination();
     }
 
-    async _loadRoutes({ search, page }) {
+    _resetRoutesPagination() {
+      this.state.routesPage = 1;
+      this.state.routesHasNext = false;
+      this.state.routesIsLoadingMore = false;
+      this.state.routesLastSearch = "";
+      this._removeLoadMoreSentinel();
+    }
+
+    async _loadRoutes({ search, page, append = false }) {
       if (!this.routesUrlValue) return;
       if (!this.state.selectedRouteSetId) {
         this._showErrors(["У выбранного сценария не задан набор маршрутов"]);
@@ -292,31 +309,56 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
       this.state.routesRequestInFlight = requestToken;
 
       this._showErrors([]);
-      this._setLoading(true);
+      if (append) {
+        this.state.routesIsLoadingMore = true;
+        this._showLoadMoreSentinel();
+      } else {
+        const listEl = this._getRouteListEl();
+        if (listEl) listEl.innerHTML = "";
+        this._setLoading(true);
+      }
 
       const { data } = await fetchJson(url);
       if (this.state.routesRequestInFlight !== requestToken) return;
 
       if (!data || !data.success) {
         this._showErrors((data && data.errors) || ["Ошибка загрузки маршрутов"]);
-        this._setLoading(false);
+        if (append) {
+          this.state.routesIsLoadingMore = false;
+          this._removeLoadMoreSentinel();
+        } else {
+          this._setLoading(false);
+        }
         return;
       }
 
       const items = data.items || [];
-      this._renderRouteList(items);
-      this._setLoading(false);
+      const normalizedSearch = (search || "").trim();
+      this.state.routesLastSearch = normalizedSearch;
+      this.state.routesPage = page || 1;
+      this.state.routesHasNext = Boolean(data.has_next);
+      this._renderRouteList(items, { append });
+      if (append) {
+        this.state.routesIsLoadingMore = false;
+        this._removeLoadMoreSentinel();
+      } else {
+        this._setLoading(false);
+      }
     }
 
-    _renderRouteList(items) {
+    _renderRouteList(items, { append = false } = {}) {
       const listEl = this._getRouteListEl();
       if (!listEl) return;
-      listEl.innerHTML = "";
+      if (!append) {
+        listEl.innerHTML = "";
+        this.state.pendingSelectedRoute = null;
+        this._setConfirmEnabled(false);
+      }
 
       const emptyEl = this._getEmptyEl();
-      if (emptyEl) setVisible(emptyEl, items.length === 0);
-      this.state.pendingSelectedRoute = null;
-      this._setConfirmEnabled(false);
+      if (emptyEl) {
+        setVisible(emptyEl, !append && items.length === 0);
+      }
 
       for (const route of items) {
         const el = document.createElement("button");
@@ -1291,6 +1333,48 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
       if (listEl) listEl.innerHTML = "";
       this._setConfirmEnabled(false);
       this.state.pendingSelectedRoute = null;
+      this._resetRoutesPagination();
+    }
+
+    _onRouteListScroll() {
+      const listEl = this._getRouteListEl();
+      if (!listEl) return;
+      if (!this.state.routesHasNext || this.state.routesIsLoadingMore) return;
+
+      const threshold = 80;
+      const distanceToBottom =
+        listEl.scrollHeight - listEl.scrollTop - listEl.clientHeight;
+      if (distanceToBottom > threshold) return;
+
+      this._loadRoutes({
+        search: this.state.routesLastSearch,
+        page: this.state.routesPage + 1,
+        append: true,
+      });
+    }
+
+    _showLoadMoreSentinel() {
+      const listEl = this._getRouteListEl();
+      if (!listEl) return;
+      this._removeLoadMoreSentinel();
+      const sentinel = document.createElement("div");
+      sentinel.className =
+        "list-group-item text-center py-3 text-muted route-list-loadmore";
+      sentinel.setAttribute("data-route-list-loadmore", "");
+      sentinel.innerHTML = `
+        <div class="spinner-border spinner-border-sm me-2" role="status">
+          <span class="visually-hidden">Загрузка...</span>
+        </div>
+        Загрузка…
+      `;
+      listEl.appendChild(sentinel);
+    }
+
+    _removeLoadMoreSentinel() {
+      const listEl = this._getRouteListEl();
+      if (!listEl) return;
+      const sentinel = listEl.querySelector("[data-route-list-loadmore]");
+      if (sentinel) sentinel.remove();
     }
 
     _ensureModalHandlers() {
@@ -1309,6 +1393,15 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
         }
         okBtn.removeEventListener("click", this.state.boundConfirmHandler);
         okBtn.addEventListener("click", this.state.boundConfirmHandler);
+      }
+
+      const listEl = this._getRouteListEl();
+      if (listEl) {
+        if (!this.state.boundScrollHandler) {
+          this.state.boundScrollHandler = this._onRouteListScroll.bind(this);
+        }
+        listEl.removeEventListener("scroll", this.state.boundScrollHandler);
+        listEl.addEventListener("scroll", this.state.boundScrollHandler);
       }
     }
 

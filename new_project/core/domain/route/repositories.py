@@ -54,6 +54,7 @@ class RouteRepository:
         return Route.objects.select_related(
             "route_set",
             "cargo",
+            "cargo__cargo_group",
             "origin_station",
             "destination_station",
             "origin_station__railroad",
@@ -108,6 +109,8 @@ class RouteRepository:
         s = search.casefold()
         q = (
             Q(cargo__name__icontains=search)
+            | Q(cargo__cargo_group__name_search__contains=s)
+            | Q(shipper__holding_search__contains=s)
             | Q(origin_station__short_name_search__contains=s)
             | Q(origin_station__full_name_search__contains=s)
             | Q(destination_station__short_name_search__contains=s)

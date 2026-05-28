@@ -75,6 +75,12 @@ class CargoGroup(models.Model):
     code = models.PositiveSmallIntegerField("Код", primary_key=True)
     name = models.CharField("Название", max_length=255)
     position = models.PositiveIntegerField("Позиция")
+    name_search = models.CharField(
+        max_length=255,
+        editable=False,
+        default="",
+        db_index=True,
+    )
 
     class Meta:
         verbose_name = "Группа груза"
@@ -83,6 +89,10 @@ class CargoGroup(models.Model):
 
     def __str__(self) -> str:
         return self.name
+
+    def save(self, *args, **kwargs):
+        self.name_search = (self.name or "").casefold()
+        return super().save(*args, **kwargs)
 
 
 class Cargo(models.Model):
@@ -328,6 +338,12 @@ class Shipper(models.Model):
         default="",
         db_index=True,
     )
+    holding_search = models.CharField(
+        max_length=255,
+        editable=False,
+        default="",
+        db_index=True,
+    )
 
     class Meta:
         verbose_name = "Грузоотправитель"
@@ -345,6 +361,7 @@ class Shipper(models.Model):
 
     def save(self, *args, **kwargs):
         self.name_search = (self.name or "").casefold()
+        self.holding_search = (self.holding or "").casefold()
         self.inn = (self.inn or "").strip()
         return super().save(*args, **kwargs)
 

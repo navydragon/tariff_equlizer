@@ -261,7 +261,7 @@ def scenario_edit_view(request, scenario_id):
         return HttpResponse("Нет прав на редактирование этого сценария", status=403)
 
     breadcrumbs = [
-        {"title": "Экономика грузов", "url": reverse("home")},
+        {"title": "Главная", "url": reverse("home")},
         {"title": "Сценарии", "url": reverse("scenarios:management")},
         {"title": "Управление сценариями", "url": reverse("scenarios:management")},
         {"title": f"Редактирование: {scenario.name}", "url": None},

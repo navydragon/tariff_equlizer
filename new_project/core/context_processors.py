@@ -8,7 +8,7 @@ def breadcrumbs(request):
     if not view_name:
         return {"breadcrumbs": []}
 
-    home_title = "Экономика грузов"
+    home_title = "Главная"
     refs_title = "Справочники"
     home_url = reverse("home")
     refs_url = reverse("references")
@@ -19,7 +19,8 @@ def breadcrumbs(request):
             {"title": home_title, "url": None},
         ],
         "route_analysis": [
-            {"title": home_title, "url": None},
+            {"title": home_title, "url": home_url},
+            {"title": "Экономика грузов", "url": None},
         ],
         "dashboard_1": [
             {"title": home_title, "url": home_url},
