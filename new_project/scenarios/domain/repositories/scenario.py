@@ -139,3 +139,10 @@ class ScenarioRepository:
             if year_values:
                 TariffRuleYearValue.objects.bulk_create(year_values)
 
+            if conditions:
+                from calculations.domain.services.rule_mask_prewarm import (
+                    prewarm_rule_mask,
+                )
+
+                prewarm_rule_mask(rule=new_rule)
+

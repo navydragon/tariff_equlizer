@@ -941,8 +941,141 @@ class ScenarioEffectsPandasParityTests(TariffLoadServiceTestMixin, TestCase):
         self.assertFalse(meta_second.get("scenario_compute_cache_hit"))
         self.assertIn(
             meta_second["timings"].get("mart_read_mode"),
-            ("charge_npy", "parquet_columns", "parquet_full"),
+            ("charge_npy", "sidecar_npz", "parquet_columns", "parquet_full"),
         )
+
+    def test_dims_sidecar_load_with_rules(self) -> None:
+        from calculations.domain.services.route_mart_store import (
+            dims_npz_path,
+            masks_npz_path,
+            resolve_mart_parquet_path,
+            route_mart_cache_dir,
+        )
+        import shutil
+
+        self._setup_btd("1.1000")
+        scenario = Scenario.objects.select_related("route_set").get(
+            pk=self.scenario.pk,
+        )
+        rule = TariffRule.objects.create(
+            scenario=scenario,
+            name="Sidecar rule",
+            base_percent=Decimal("100"),
+            position=1,
+        )
+        TariffRuleYearValue.objects.create(
+            tariff_rule=rule,
+            year=2026,
+            coefficient=Decimal("1.0500"),
+        )
+
+        shutil.rmtree(
+            route_mart_cache_dir(route_set_id=scenario.route_set_id),
+            ignore_errors=True,
+        )
+        _, _, meta_first = self.pandas_service.compute_pandas(
+            scenario=scenario,
+            user_id=self.user.id,
+        )
+        parquet_path = resolve_mart_parquet_path(route_set_id=scenario.route_set_id)
+        self.assertTrue(dims_npz_path(parquet_path).is_file())
+        self.assertTrue(masks_npz_path(parquet_path).is_file())
+
+        _, _, meta_second = self.pandas_service.compute_pandas(
+            scenario=scenario,
+            user_id=self.user.id,
+        )
+        self.assertEqual(meta_second["timings"].get("mart_read_mode"), "sidecar_npz")
+        self.assertIn("dims_npz_read_ms", meta_second["timings"])
+        self.assertFalse(meta_first.get("route_mart_cache_hit"))
+        self.assertTrue(meta_second.get("route_mart_cache_hit"))
+
+    def test_prewarm_rule_mask_on_create(self) -> None:
+        from calculations.domain.services.route_effects_loader import (
+            fetch_routes_dataframe_cached_timed,
+        )
+        from calculations.domain.services.route_mask_cache import try_load_rule_mask
+        from calculations.domain.services.rule_mask_prewarm import prewarm_rule_mask
+        from calculations.domain.services.tariff_load import TariffLoadService
+        from scenarios.domain.dto import CreateTariffRuleDTO
+        from scenarios.domain.services import TariffRuleService
+
+        self._setup_btd("1.1000")
+        scenario = Scenario.objects.select_related("route_set").get(
+            pk=self.scenario.pk,
+        )
+        fetch_routes_dataframe_cached_timed(scenario.route_set_id)
+
+        service = TariffRuleService()
+        dto = CreateTariffRuleDTO(
+            scenario_id=scenario.id,
+            name="Prewarm rule",
+            base_percent="100",
+            position=1,
+            conditions=[
+                {
+                    "parameter": "cargo_group",
+                    "operator": "include",
+                    "values": ["—"],
+                },
+            ],
+            year_values={"2026": "1.0500"},
+        )
+        created, errors = service.create_rule(dto, self.user)
+        self.assertEqual(errors, [])
+        assert created is not None
+
+        rule = TariffRule.objects.get(pk=created.id)
+        df, _mart_meta, _ = fetch_routes_dataframe_cached_timed(scenario.route_set_id)
+        conditions = TariffLoadService._rule_conditions_payload(rule)
+        cached = try_load_rule_mask(
+            route_set_id=scenario.route_set_id,
+            rule_id=rule.id,
+            conditions=conditions,
+            n_routes=len(df),
+        )
+        self.assertIsNotNone(cached)
+
+        self.assertTrue(prewarm_rule_mask(rule=rule))
+
+    def test_compute_masks_cache_hit_after_prewarm(self) -> None:
+        from calculations.domain.services.route_effects_loader import (
+            fetch_routes_dataframe_cached_timed,
+        )
+        from calculations.domain.services.rule_mask_prewarm import prewarm_rule_mask
+
+        self._setup_btd("1.1000")
+        scenario = Scenario.objects.select_related("route_set").get(
+            pk=self.scenario.pk,
+        )
+        rule = TariffRule.objects.create(
+            scenario=scenario,
+            name="Mask prewarm rule",
+            base_percent=Decimal("100"),
+            position=1,
+        )
+        TariffRuleCondition.objects.create(
+            tariff_rule=rule,
+            parameter="cargo_group",
+            operator="include",
+            values=["—"],
+            position=1,
+        )
+        TariffRuleYearValue.objects.create(
+            tariff_rule=rule,
+            year=2026,
+            coefficient=Decimal("1.0500"),
+        )
+
+        fetch_routes_dataframe_cached_timed(scenario.route_set_id)
+        self.assertTrue(prewarm_rule_mask(rule=rule))
+
+        _, _, meta = self.pandas_service.compute_pandas(
+            scenario=scenario,
+            user_id=self.user.id,
+        )
+        self.assertEqual(meta["timings"].get("masks_ms"), 0)
+        self.assertEqual(meta["timings"].get("mart_read_mode"), "sidecar_npz")
 
     def test_rule_mask_cache_hit(self) -> None:
         from calculations.domain.services.route_effects_loader import (

@@ -18,6 +18,8 @@ from core.models import RouteSet, Setting
 
 META_SUFFIX = ".meta.json"
 CHARGE_NPY_SUFFIX = ".charge.npy"
+DIMS_NPZ_SUFFIX = ".dims.npz"
+MASKS_NPZ_SUFFIX = ".masks.npz"
 
 MART_COMPUTE_BASE_COLUMNS = ("freight_charge_rub",)
 
@@ -131,6 +133,20 @@ def mart_meta_path(parquet_path: Path) -> Path:
 
 def charge_npy_path(parquet_path: Path) -> Path:
     return parquet_path.with_name(parquet_path.stem + CHARGE_NPY_SUFFIX)
+
+
+def dims_npz_path(parquet_path: Path) -> Path:
+    return parquet_path.with_name(parquet_path.stem + DIMS_NPZ_SUFFIX)
+
+
+def masks_npz_path(parquet_path: Path) -> Path:
+    return parquet_path.with_name(parquet_path.stem + MASKS_NPZ_SUFFIX)
+
+
+def is_rules_light_mart_columns(columns: list[str] | None) -> bool:
+    if columns is None:
+        return False
+    return columns == resolve_light_mart_columns(has_rules=True)
 
 
 def resolve_light_mart_columns(*, has_rules: bool) -> list[str]:
@@ -290,6 +306,145 @@ def ensure_charge_npy(parquet_path: Path) -> np.ndarray | None:
     return charge_df["freight_charge_rub"].to_numpy(dtype=np.float64, copy=False)
 
 
+def _mask_fallback_columns_in_df(df: pd.DataFrame) -> list[str]:
+    return [
+        column
+        for column in MART_RULE_MASK_FALLBACK_COLUMNS
+        if column in df.columns
+    ]
+
+
+def save_dims_npz(df: pd.DataFrame, parquet_path: Path) -> None:
+    arrays: dict[str, np.ndarray] = {}
+    for column in _DIMENSION_COLUMNS:
+        dim_column = f"dim_{column}"
+        if dim_column not in df.columns:
+            continue
+        arrays[dim_column] = df[dim_column].to_numpy(dtype=np.int32, copy=False)
+    if not arrays:
+        return
+    out_path = dims_npz_path(parquet_path)
+    tmp_path = out_path.parent / (out_path.stem + ".write.npz")
+    np.savez(tmp_path, **arrays)
+    _atomic_replace(tmp_path, out_path)
+
+
+def save_masks_npz(df: pd.DataFrame, parquet_path: Path) -> None:
+    arrays: dict[str, np.ndarray] = {}
+    for column in _mask_fallback_columns_in_df(df):
+        series = df[column]
+        if pd.api.types.is_numeric_dtype(series):
+            arrays[column] = series.to_numpy(copy=False)
+        else:
+            max_len = max((len(str(value)) for value in series), default=1)
+            arrays[column] = series.astype(str).to_numpy(dtype=f"U{max_len}")
+    if not arrays:
+        return
+    out_path = masks_npz_path(parquet_path)
+    tmp_path = out_path.parent / (out_path.stem + ".write.npz")
+    np.savez(tmp_path, **arrays)
+    _atomic_replace(tmp_path, out_path)
+
+
+def load_dims_npz(parquet_path: Path) -> dict[str, np.ndarray]:
+    path = dims_npz_path(parquet_path)
+    if not path.is_file():
+        return {}
+    with np.load(path, allow_pickle=False) as data:
+        return {key: data[key] for key in data.files}
+
+
+def load_masks_npz(parquet_path: Path) -> dict[str, np.ndarray]:
+    path = masks_npz_path(parquet_path)
+    if not path.is_file():
+        return {}
+    with np.load(path, allow_pickle=False) as data:
+        return {key: data[key] for key in data.files}
+
+
+def _sidecars_complete(parquet_path: Path) -> bool:
+    return (
+        charge_npy_path(parquet_path).is_file()
+        and dims_npz_path(parquet_path).is_file()
+        and masks_npz_path(parquet_path).is_file()
+    )
+
+
+def ensure_compute_sidecars(parquet_path: Path) -> bool:
+    """Гарантирует charge.npy + dims.npz + masks.npz для витрины."""
+    if _sidecars_complete(parquet_path):
+        return True
+    if not parquet_path.is_file():
+        return False
+
+    columns = resolve_light_mart_columns(has_rules=True)
+    df = load_route_mart_parquet(
+        parquet_path,
+        columns=_filter_existing_columns(parquet_path, columns),
+    )
+    if df.empty:
+        return False
+
+    if not charge_npy_path(parquet_path).is_file():
+        save_charge_npy(df, parquet_path)
+    if not dims_npz_path(parquet_path).is_file():
+        save_dims_npz(df, parquet_path)
+    if not masks_npz_path(parquet_path).is_file():
+        save_masks_npz(df, parquet_path)
+    return _sidecars_complete(parquet_path)
+
+
+def load_mart_sidecar_dataframe(
+    parquet_path: Path,
+    *,
+    include_charge: bool = True,
+) -> tuple[pd.DataFrame, dict[str, int]]:
+    """Собирает DataFrame из sidecar без чтения parquet."""
+    timings: dict[str, int] = {}
+    columns: dict[str, np.ndarray] = {}
+
+    if include_charge:
+        t_charge = time.perf_counter()
+        charge = load_charge_npy(parquet_path)
+        if charge is None:
+            charge = ensure_charge_npy(parquet_path)
+        if charge is not None:
+            columns["freight_charge_rub"] = charge
+        timings["charge_npy_read_ms"] = int((time.perf_counter() - t_charge) * 1000)
+
+    t_dims = time.perf_counter()
+    columns.update(load_dims_npz(parquet_path))
+    timings["dims_npz_read_ms"] = int((time.perf_counter() - t_dims) * 1000)
+
+    t_masks = time.perf_counter()
+    columns.update(load_masks_npz(parquet_path))
+    timings["masks_npz_read_ms"] = int((time.perf_counter() - t_masks) * 1000)
+
+    if not columns:
+        return pd.DataFrame(), timings
+    return pd.DataFrame(columns), timings
+
+
+def _cleanup_stale_sidecar_files(
+    *,
+    cache_dir: Path,
+    keep_stem: str,
+    suffix: str,
+) -> int:
+    removed = 0
+    pattern = f"*{suffix}"
+    keep_name = f"{keep_stem}{suffix}"
+    for entry in cache_dir.glob(pattern):
+        if entry.name == keep_name:
+            continue
+        try:
+            entry.unlink()
+            removed += 1
+        except OSError:
+            pass
+    return removed
+
+
 def save_route_mart_parquet(df: pd.DataFrame, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_suffix(path.suffix + ".tmp")
@@ -343,6 +498,22 @@ def try_load_route_mart(
             timings["mart_cache_size_mb"] = int(path.stat().st_size / (1024 * 1024))
             return df, meta, timings
 
+    if is_rules_light_mart_columns(columns):
+        if ensure_compute_sidecars(path):
+            df, sidecar_timings = load_mart_sidecar_dataframe(path, include_charge=True)
+            if not df.empty and "freight_charge_rub" in df.columns:
+                timings.update(sidecar_timings)
+                total_read = (
+                    timings.get("charge_npy_read_ms", 0)
+                    + timings.get("dims_npz_read_ms", 0)
+                    + timings.get("masks_npz_read_ms", 0)
+                )
+                timings["parquet_read_ms"] = total_read
+                timings["mart_read_mode"] = "sidecar_npz"
+                timings["cache_hit"] = 1
+                timings["mart_cache_size_mb"] = int(path.stat().st_size / (1024 * 1024))
+                return df, meta, timings
+
     df = load_route_mart_parquet(path, columns=columns)
     t_done = time.perf_counter()
 
@@ -383,6 +554,8 @@ def save_route_mart(
     )
     save_route_mart_parquet(df, path)
     save_charge_npy(df, path)
+    save_dims_npz(df, path)
+    save_masks_npz(df, path)
     t_write = time.perf_counter()
     timings["parquet_write_ms"] = int((t_write - t0) * 1000)
     timings["mart_cache_size_mb"] = int(path.stat().st_size / (1024 * 1024))
@@ -391,15 +564,20 @@ def save_route_mart(
         cache_dir=path.parent,
         keep_path=path,
     )
-    keep_charge = charge_npy_path(path)
-    if keep_charge.is_file():
-        for entry in path.parent.glob(f"*{CHARGE_NPY_SUFFIX}"):
-            if entry.resolve() == keep_charge.resolve():
-                continue
-            try:
-                entry.unlink()
-                removed += 1
-            except OSError:
-                pass
+    keep_stem = path.stem
+    for suffix in (CHARGE_NPY_SUFFIX, DIMS_NPZ_SUFFIX, MASKS_NPZ_SUFFIX):
+        removed += _cleanup_stale_sidecar_files(
+            cache_dir=path.parent,
+            keep_stem=keep_stem,
+            suffix=suffix,
+        )
     timings["mart_cache_cleanup_removed"] = removed
+
+    from calculations.domain.services.rule_mask_prewarm import (
+        prewarm_rules_for_route_set,
+    )
+
+    timings["rule_masks_prewarmed"] = prewarm_rules_for_route_set(
+        route_set_id=route_set_id,
+    )
     return timings

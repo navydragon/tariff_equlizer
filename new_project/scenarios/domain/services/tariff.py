@@ -83,6 +83,10 @@ class TariffRuleService:
             )
 
         refreshed = self.repository.get_by_id(rule.id)
+        if refreshed is not None and dto.conditions is not None:
+            from calculations.domain.services.rule_mask_prewarm import prewarm_rule_mask
+
+            prewarm_rule_mask(rule=refreshed)
         return TariffRuleDTO.from_model(refreshed), []
 
     @transaction.atomic
@@ -130,6 +134,10 @@ class TariffRuleService:
             )
 
         refreshed = self.repository.get_by_id(rule_id)
+        if refreshed is not None and dto.conditions is not None:
+            from calculations.domain.services.rule_mask_prewarm import prewarm_rule_mask
+
+            prewarm_rule_mask(rule=refreshed)
         return TariffRuleDTO.from_model(refreshed), []
 
     def delete_rule(self, rule_id: int, user: User) -> tuple[bool, list[str]]:
