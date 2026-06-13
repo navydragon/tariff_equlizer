@@ -159,8 +159,26 @@ def make_cache_key(*, user_id: int, scenario_id: int) -> str:
     return f"{CACHE_PREFIX}:{user_id}:{scenario_id}:{token}"
 
 
+def _payload_for_redis(payload: ScenarioEffectsCachePayload) -> ScenarioEffectsCachePayload:
+    """Compact хранится только на диске (arrays.npz); в Redis — метаданные сессии."""
+    if payload.compact is None:
+        return payload
+    return ScenarioEffectsCachePayload(
+        user_id=payload.user_id,
+        scenario_id=payload.scenario_id,
+        years=payload.years,
+        routes_without_charge=payload.routes_without_charge,
+        routes_without_volume=payload.routes_without_volume,
+        baseline_total=payload.baseline_total,
+        facts=payload.facts,
+        compact=None,
+        compact_pending=payload.compact_pending,
+        data_version=payload.data_version,
+    )
+
+
 def store_payload(*, cache_key: str, payload: ScenarioEffectsCachePayload) -> None:
-    cache.set(cache_key, payload, CACHE_TIMEOUT_SECONDS)
+    cache.set(cache_key, _payload_for_redis(payload), CACHE_TIMEOUT_SECONDS)
 
 
 def _hydrate_payload_from_disk(
@@ -229,12 +247,13 @@ def update_payload_compact(
     cache_key: str,
     compact: CompactRouteEffects,
 ) -> None:
+    del compact
     payload = cache.get(cache_key)
     if not isinstance(payload, ScenarioEffectsCachePayload):
         return
-    payload.compact = compact
+    payload.compact = None
     payload.compact_pending = False
-    cache.set(cache_key, payload, CACHE_TIMEOUT_SECONDS)
+    cache.set(cache_key, _payload_for_redis(payload), CACHE_TIMEOUT_SECONDS)
 
 
 def validate_cache_access(
@@ -271,11 +290,24 @@ def get_scenario_effects_revision(*, scenario_id: int) -> str | None:
 
 
 def get_compact_status(*, cache_key: str) -> dict[str, object]:
-    payload = get_payload(cache_key)
-    if payload is None:
+    payload = cache.get(cache_key)
+    if not isinstance(payload, ScenarioEffectsCachePayload):
         return {"compact_ready": False, "data_version": None}
-    compact_ready = payload.compact is not None or not payload.compact_pending
+
+    data_version = payload.data_version
+    if payload.compact_pending and data_version:
+        from calculations.domain.services.scenario_compute_store import (
+            is_scenario_compact_on_disk,
+        )
+
+        if is_scenario_compact_on_disk(
+            scenario_id=payload.scenario_id,
+            data_version=data_version,
+        ):
+            return {"compact_ready": True, "data_version": data_version}
+
+    compact_ready = not payload.compact_pending
     return {
         "compact_ready": compact_ready,
-        "data_version": payload.data_version,
+        "data_version": data_version,
     }

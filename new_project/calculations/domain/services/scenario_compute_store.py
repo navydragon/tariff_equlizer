@@ -240,6 +240,17 @@ def save_scenario_compute(
     return cache_dir
 
 
+def is_scenario_compact_on_disk(*, scenario_id: int, data_version: str) -> bool:
+    cache_dir = scenario_compute_dir(scenario_id=scenario_id, data_version=data_version)
+    meta_path = cache_dir / METADATA_FILENAME
+    if not meta_path.is_file():
+        return False
+    metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+    if metadata.get("kpi_only"):
+        return False
+    return (cache_dir / NPZ_FILENAME).is_file()
+
+
 def try_load_scenario_compute(
     *,
     scenario_id: int,
