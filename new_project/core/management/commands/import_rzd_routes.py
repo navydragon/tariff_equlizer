@@ -189,6 +189,26 @@ class Command(BaseCommand):
 
         caches = self._build_caches()
 
+        if options.get("backfill_shippers"):
+            route_set, _ = RouteSet.objects.get_or_create(
+                code=route_set_code,
+                defaults={"name": route_set_name},
+            )
+            stats = self._backfill_shippers(
+                db_path=db_path,
+                route_set=route_set,
+                caches=caches,
+                batch_size=batch_size,
+                dry_run=dry_run,
+            )
+            self.stdout.write(
+                self.style.SUCCESS(
+                    "Дозаполнение грузоотправителей завершено. "
+                    f"Обработано: {stats['processed']}, обновлено: {stats['updated']}."
+                )
+            )
+            return
+
         with transaction.atomic():
             route_set, _ = RouteSet.objects.get_or_create(
                 code=route_set_code,
@@ -197,24 +217,6 @@ class Command(BaseCommand):
             if route_set.name != route_set_name:
                 route_set.name = route_set_name
                 route_set.save(update_fields=["name"])
-
-            if options.get("backfill_shippers"):
-                stats = self._backfill_shippers(
-                    db_path=db_path,
-                    route_set=route_set,
-                    caches=caches,
-                    batch_size=batch_size,
-                    dry_run=dry_run,
-                )
-                if dry_run:
-                    transaction.set_rollback(True)
-                self.stdout.write(
-                    self.style.SUCCESS(
-                        "Дозаполнение грузоотправителей завершено. "
-                        f"Обработано: {stats['processed']}, обновлено: {stats['updated']}."
-                    )
-                )
-                return
 
             if options.get("clear"):
                 deleted = clear_routes_for_route_set(route_set.id)
@@ -352,21 +354,23 @@ class Command(BaseCommand):
         batch_size: int,
         dry_run: bool,
     ) -> dict[str, int]:
-        routes = {
-            route.route_code: route
-            for route in Route.objects.filter(
-                route_set=route_set,
-                shipper__isnull=True,
-            ).only("id", "route_code")
-        }
-        if not routes:
+        pending_qs = Route.objects.filter(
+            route_set=route_set,
+            shipper__isnull=True,
+        )
+        self.stdout.write("Считаем маршруты без грузоотправителя…", ending="\n")
+        self.stdout.flush()
+        pending_count = pending_qs.count()
+        self.stdout.write(
+            f"Маршрутов без грузоотправителя: {pending_count:,}".replace(",", " "),
+            ending="\n",
+        )
+        self.stdout.flush()
+        if pending_count == 0:
             return {"processed": 0, "updated": 0}
 
         conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row
-        updates: list[Route] = []
-        processed = 0
-        route_codes = list(routes.keys())
         lookup_batch_size = 500
         select_by_index_sql = f"""
             SELECT
@@ -378,17 +382,24 @@ class Command(BaseCommand):
             FROM [{RZD_TABLE}]
             WHERE [{COL_INDEX}] IN ({{placeholders}})
         """
+        processed = 0
+        updated = 0
+        routes_batch: dict[str, Route] = {}
 
-        try:
-            for offset in range(0, len(route_codes), lookup_batch_size):
-                chunk = route_codes[offset : offset + lookup_batch_size]
-                placeholders = ",".join("?" * len(chunk))
-                sql = select_by_index_sql.format(placeholders=placeholders)
-                for row in conn.execute(sql, chunk):
+        def flush_batch() -> None:
+            nonlocal processed, updated
+            if not routes_batch:
+                return
+
+            placeholders = ",".join("?" * len(routes_batch))
+            sql = select_by_index_sql.format(placeholders=placeholders)
+            batch_updates: list[Route] = []
+            try:
+                for row in conn.execute(sql, list(routes_batch.keys())):
                     route_code = (
                         str(row[COL_INDEX]).strip() if row[COL_INDEX] is not None else ""
                     )
-                    route = routes.get(route_code)
+                    route = routes_batch.get(route_code)
                     if route is None:
                         continue
                     processed += 1
@@ -396,14 +407,36 @@ class Command(BaseCommand):
                     if shipper is None:
                         continue
                     route.shipper_id = shipper.id
-                    updates.append(route)
+                    batch_updates.append(route)
+            finally:
+                routes_batch.clear()
+
+            if batch_updates and not dry_run:
+                with transaction.atomic():
+                    Route.objects.bulk_update(
+                        batch_updates,
+                        ["shipper_id"],
+                        batch_size=batch_size,
+                    )
+            updated += len(batch_updates)
+            self.stdout.write(
+                f"  … обработано {processed:,}, обновлено {updated:,}".replace(",", " "),
+                ending="\n",
+            )
+            self.stdout.flush()
+
+        try:
+            for route in pending_qs.only("id", "route_code").iterator(
+                chunk_size=lookup_batch_size,
+            ):
+                routes_batch[route.route_code] = route
+                if len(routes_batch) >= lookup_batch_size:
+                    flush_batch()
+            flush_batch()
         finally:
             conn.close()
 
-        if updates and not dry_run:
-            Route.objects.bulk_update(updates, ["shipper_id"], batch_size=batch_size)
-
-        return {"processed": processed, "updated": len(updates)}
+        return {"processed": processed, "updated": updated}
 
     def _resolve_ref(
         self,
