@@ -51,6 +51,8 @@ from scenarios.models import (
     TariffRuleCondition,
     TariffRuleYearValue,
 )
+from scenarios.domain.dto import CreateTariffRuleDTO, UpdateTariffRuleDTO
+from scenarios.domain.services import TariffRuleService
 
 User = get_user_model()
 
@@ -1094,10 +1096,11 @@ class ScenarioEffectsPandasParityTests(TariffLoadServiceTestMixin, TestCase):
             scenario=scenario,
             user_id=self.user.id,
         )
-        self.assertEqual(meta_second["timings"].get("mart_read_mode"), "sidecar_npz")
-        self.assertIn("dims_npz_read_ms", meta_second["timings"])
+        self.assertTrue(meta_second.get("scenario_compute_cache_hit"))
+        self.assertIsNone(meta_second["timings"].get("mart_read_mode"))
+        self.assertNotIn("dims_npz_read_ms", meta_second["timings"])
         self.assertFalse(meta_first.get("route_mart_cache_hit"))
-        self.assertTrue(meta_second.get("route_mart_cache_hit"))
+        self.assertFalse(meta_second.get("route_mart_cache_hit"))
 
     def test_masks_sidecar_minimal_columns(self) -> None:
         import numpy as np
@@ -1189,7 +1192,8 @@ class ScenarioEffectsPandasParityTests(TariffLoadServiceTestMixin, TestCase):
             ],
             year_values={"2026": "1.0500"},
         )
-        created, errors = service.create_rule(dto, self.user)
+        with self.captureOnCommitCallbacks(execute=True):
+            created, errors = service.create_rule(dto, self.user)
         self.assertEqual(errors, [])
         assert created is not None
 
@@ -1203,8 +1207,6 @@ class ScenarioEffectsPandasParityTests(TariffLoadServiceTestMixin, TestCase):
             n_routes=len(df),
         )
         self.assertIsNotNone(cached)
-
-        self.assertTrue(prewarm_rule_mask(rule=rule))
 
     def test_compute_masks_cache_hit_after_prewarm(self) -> None:
         from calculations.domain.services.route_effects_loader import (
@@ -1292,6 +1294,279 @@ class ScenarioEffectsPandasParityTests(TariffLoadServiceTestMixin, TestCase):
         )
         self.assertIsNotNone(cached)
         self.assertEqual(cached.shape, (len(df),))
+
+
+class ScenarioRuleWarmTests(TariffLoadServiceTestMixin, TestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.pandas_service = ScenarioEffectsPandasService()
+        self.tariff_rule_service = TariffRuleService()
+        self.route.freight_charge_rub = Decimal("1000000000.00")
+        self.route.save(update_fields=["freight_charge_rub"])
+        cache.clear()
+        from calculations.domain.services.scenario_compute_store import (
+            scenario_compute_cache_root,
+        )
+        import shutil
+
+        shutil.rmtree(scenario_compute_cache_root(), ignore_errors=True)
+
+    def _setup_btd(self, coef_2026: str = "1.1000") -> None:
+        category = BTDCategory.objects.create(
+            name="Индексация",
+            scenario=self.scenario,
+            position=1,
+        )
+        BTDCategoryValue.objects.create(
+            scenario=self.scenario,
+            category=category,
+            year=2025,
+            value=Decimal("1.0000"),
+        )
+        BTDCategoryValue.objects.create(
+            scenario=self.scenario,
+            category=category,
+            year=2026,
+            value=Decimal(coef_2026),
+        )
+
+    def _build_mart(self) -> None:
+        from calculations.domain.services.route_effects_loader import (
+            fetch_routes_dataframe_cached_timed,
+        )
+
+        fetch_routes_dataframe_cached_timed(self.scenario.route_set_id)
+
+    def test_warm_after_rule_create_saves_kpi_snapshot(self) -> None:
+        from calculations.domain.services.scenario_effects_cache import (
+            compute_scenario_data_version,
+        )
+        from calculations.domain.services.scenario_compute_store import (
+            try_load_scenario_compute,
+        )
+        from scenarios.domain.dto import CreateTariffRuleDTO
+
+        self._setup_btd()
+        self._build_mart()
+        scenario = Scenario.objects.select_related("route_set").get(pk=self.scenario.pk)
+        dto = CreateTariffRuleDTO(
+            scenario_id=scenario.id,
+            name="Warm rule",
+            base_percent="100",
+            position=1,
+            conditions=[],
+            year_values={"2026": "1.0500"},
+        )
+        with self.captureOnCommitCallbacks(execute=True):
+            created, errors = self.tariff_rule_service.create_rule(dto, self.user)
+        self.assertEqual(errors, [])
+        assert created is not None
+
+        context = self.pandas_service._tariff_load.build_scenario_context(scenario)
+        data_version = compute_scenario_data_version(
+            scenario=scenario,
+            base_coef_by_year=context.base_coef_by_year,
+            rules=context.rules,
+        )
+        bundle = try_load_scenario_compute(
+            scenario_id=scenario.id,
+            data_version=data_version,
+        )
+        self.assertIsNotNone(bundle)
+        assert bundle is not None
+        self.assertIsNone(bundle.compact)
+        self.assertGreater(bundle.global_totals.baseline_total, 0)
+
+    def test_compute_pandas_hits_kpi_only_snapshot(self) -> None:
+        from scenarios.domain.dto import CreateTariffRuleDTO
+
+        self._setup_btd()
+        self._build_mart()
+        scenario = Scenario.objects.select_related("route_set").get(pk=self.scenario.pk)
+        dto = CreateTariffRuleDTO(
+            scenario_id=scenario.id,
+            name="KPI snapshot rule",
+            base_percent="100",
+            position=1,
+            conditions=[],
+            year_values={"2026": "1.0500"},
+        )
+        with self.captureOnCommitCallbacks(execute=True):
+            self.tariff_rule_service.create_rule(dto, self.user)
+
+        _, _, meta = self.pandas_service.compute_pandas(
+            scenario=scenario,
+            user_id=self.user.id,
+        )
+        self.assertTrue(meta.get("scenario_compute_cache_hit"))
+        self.assertFalse(meta.get("compact_ready"))
+        self.assertEqual(meta["timings"].get("compute_ms"), 0)
+
+    def test_prewarm_on_create_without_conditions_field(self) -> None:
+        from calculations.domain.services.route_effects_loader import (
+            fetch_routes_dataframe_cached_timed,
+        )
+        from calculations.domain.services.route_mask_cache import try_load_rule_mask
+        from calculations.domain.services.tariff_load import TariffLoadService
+        from scenarios.domain.dto import CreateTariffRuleDTO
+
+        self._setup_btd()
+        self._build_mart()
+        scenario = Scenario.objects.select_related("route_set").get(pk=self.scenario.pk)
+        dto = CreateTariffRuleDTO(
+            scenario_id=scenario.id,
+            name="Empty conditions rule",
+            base_percent="100",
+            position=1,
+            conditions=[],
+            year_values={"2026": "1.0500"},
+        )
+        with self.captureOnCommitCallbacks(execute=True):
+            created, errors = self.tariff_rule_service.create_rule(dto, self.user)
+        self.assertEqual(errors, [])
+        assert created is not None
+
+        rule = TariffRule.objects.get(pk=created.id)
+        df, _mart_meta, _ = fetch_routes_dataframe_cached_timed(scenario.route_set_id)
+        conditions = TariffLoadService._rule_conditions_payload(rule)
+        cached = try_load_rule_mask(
+            route_set_id=scenario.route_set_id,
+            rule_id=rule.id,
+            conditions=conditions,
+            n_routes=len(df),
+        )
+        self.assertIsNotNone(cached)
+
+    def test_update_coef_triggers_kpi_warm_not_mask(self) -> None:
+        from unittest.mock import patch
+
+        from calculations.domain.services.scenario_effects_cache import (
+            compute_scenario_data_version,
+        )
+        from calculations.domain.services.scenario_compute_store import (
+            try_load_scenario_compute,
+        )
+        from scenarios.domain.dto import CreateTariffRuleDTO, UpdateTariffRuleDTO
+
+        self._setup_btd()
+        self._build_mart()
+        scenario = Scenario.objects.select_related("route_set").get(pk=self.scenario.pk)
+        create_dto = CreateTariffRuleDTO(
+            scenario_id=scenario.id,
+            name="Coef update rule",
+            base_percent="100",
+            position=1,
+            conditions=[
+                {
+                    "parameter": "cargo_group",
+                    "operator": "include",
+                    "values": ["—"],
+                },
+            ],
+            year_values={"2026": "1.0500"},
+        )
+        with self.captureOnCommitCallbacks(execute=True):
+            created, errors = self.tariff_rule_service.create_rule(create_dto, self.user)
+        self.assertEqual(errors, [])
+        assert created is not None
+
+        context_before = self.pandas_service._tariff_load.build_scenario_context(scenario)
+        version_before = compute_scenario_data_version(
+            scenario=scenario,
+            base_coef_by_year=context_before.base_coef_by_year,
+            rules=context_before.rules,
+        )
+
+        with patch(
+            "calculations.domain.services.scenario_effects_warm.prewarm_rule_mask",
+        ) as prewarm_mock:
+            with self.captureOnCommitCallbacks(execute=True):
+                updated, errors = self.tariff_rule_service.update_rule(
+                    created.id,
+                    UpdateTariffRuleDTO(year_values={"2026": "1.0800"}),
+                    self.user,
+                )
+        self.assertEqual(errors, [])
+        assert updated is not None
+        prewarm_mock.assert_not_called()
+
+        context_after = self.pandas_service._tariff_load.build_scenario_context(scenario)
+        version_after = compute_scenario_data_version(
+            scenario=scenario,
+            base_coef_by_year=context_after.base_coef_by_year,
+            rules=context_after.rules,
+        )
+        self.assertNotEqual(version_before, version_after)
+        bundle = try_load_scenario_compute(
+            scenario_id=scenario.id,
+            data_version=version_after,
+        )
+        self.assertIsNotNone(bundle)
+
+    def test_delete_rule_purges_stale_snapshot(self) -> None:
+        from unittest.mock import patch
+
+        from calculations.domain.services.scenario_effects_cache import (
+            compute_scenario_data_version,
+        )
+        from calculations.domain.services.scenario_compute_store import (
+            scenario_compute_dir,
+            try_load_scenario_compute,
+        )
+
+        self._setup_btd()
+        self._build_mart()
+        scenario = Scenario.objects.select_related("route_set").get(pk=self.scenario.pk)
+        dto = CreateTariffRuleDTO(
+            scenario_id=scenario.id,
+            name="Delete warm rule",
+            base_percent="100",
+            position=1,
+            conditions=[],
+            year_values={"2026": "1.0500"},
+        )
+        with patch(
+            "calculations.domain.services.scenario_effects_warm.schedule_deferred_full_compute",
+        ):
+            with self.captureOnCommitCallbacks(execute=True):
+                created, errors = self.tariff_rule_service.create_rule(dto, self.user)
+        self.assertEqual(errors, [])
+        assert created is not None
+
+        context = self.pandas_service._tariff_load.build_scenario_context(scenario)
+        old_version = compute_scenario_data_version(
+            scenario=scenario,
+            base_coef_by_year=context.base_coef_by_year,
+            rules=context.rules,
+        )
+        old_dir = scenario_compute_dir(
+            scenario_id=scenario.id,
+            data_version=old_version,
+        )
+        self.assertTrue(old_dir.is_dir())
+
+        with self.captureOnCommitCallbacks(execute=True):
+            ok, delete_errors = self.tariff_rule_service.delete_rule(
+                created.id,
+                self.user,
+            )
+        self.assertEqual(delete_errors, [])
+        self.assertTrue(ok)
+        self.assertFalse(old_dir.is_dir())
+
+        scenario = Scenario.objects.select_related("route_set").get(pk=self.scenario.pk)
+        context = self.pandas_service._tariff_load.build_scenario_context(scenario)
+        new_version = compute_scenario_data_version(
+            scenario=scenario,
+            base_coef_by_year=context.base_coef_by_year,
+            rules=context.rules,
+        )
+        self.assertNotEqual(old_version, new_version)
+        bundle = try_load_scenario_compute(
+            scenario_id=scenario.id,
+            data_version=new_version,
+        )
+        self.assertIsNotNone(bundle)
 
 
 class ScenarioEffectsComputePandasApiTests(TariffLoadServiceTestMixin, TestCase):
@@ -1499,7 +1774,9 @@ class ScenarioEffectsCubeApiTests(TariffLoadServiceTestMixin, TestCase):
             data=json.dumps({"scenario_id": self.scenario.id}),
             content_type="application/json",
         )
-        return response.json()["cache_key"]
+        cache_key = response.json()["cache_key"]
+        get_payload_ready(cache_key)
+        return cache_key
 
     def test_cube_api_success(self) -> None:
         cache_key = self._compute_cache_key()
@@ -1596,6 +1873,7 @@ class ScenarioEffectsCubeApiTests(TariffLoadServiceTestMixin, TestCase):
         )
         self.assertEqual(errors, [])
         assert compute_result is not None
+        get_payload_ready(compute_result.cache_key)
 
         cube_result, cube_errors = self.cube_service.aggregate(
             scenario=self.scenario,

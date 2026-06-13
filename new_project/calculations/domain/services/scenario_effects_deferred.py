@@ -32,6 +32,9 @@ from calculations.domain.services.scenario_effects_formatting import GlobalTotal
 
 logger = logging.getLogger(__name__)
 
+_deferred_locks_guard = threading.Lock()
+_deferred_locks: dict[tuple[int, str], threading.Lock] = {}
+
 
 @dataclass
 class DeferredFullComputeJob:
@@ -51,8 +54,29 @@ class DeferredFullComputeJob:
     routes_without_volume: int
 
 
+def _job_data_version_stale(job: DeferredFullComputeJob) -> bool:
+    from calculations.domain.services.scenario_compute_store import (
+        METADATA_FILENAME,
+        scenario_compute_cache_root,
+    )
+
+    scenario_dir = scenario_compute_cache_root() / str(job.scenario_id)
+    if not scenario_dir.is_dir():
+        return False
+
+    for child in scenario_dir.iterdir():
+        if not child.is_dir() or child.name == job.data_version:
+            continue
+        if (child / METADATA_FILENAME).is_file():
+            return True
+    return False
+
+
 def _run_deferred_full_compute(job: DeferredFullComputeJob) -> None:
     try:
+        if _job_data_version_stale(job):
+            return
+
         parquet_path = Path(job.parquet_path)
         df, _sidecar_timings = load_mart_sidecar_dataframe(
             parquet_path,
@@ -94,6 +118,8 @@ def _run_deferred_full_compute(job: DeferredFullComputeJob) -> None:
             dimension_labels=dimension_labels,
             volume=volume,
         )
+        if _job_data_version_stale(job):
+            return
         save_scenario_compute(
             scenario_id=job.scenario_id,
             data_version=job.data_version,
@@ -114,9 +140,25 @@ def _run_deferred_full_compute(job: DeferredFullComputeJob) -> None:
         )
 
 
+def _deferred_lock_for(job: DeferredFullComputeJob) -> threading.Lock:
+    key = (job.scenario_id, job.data_version)
+    with _deferred_locks_guard:
+        lock = _deferred_locks.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _deferred_locks[key] = lock
+        return lock
+
+
+def _run_deferred_full_compute_guarded(job: DeferredFullComputeJob) -> None:
+    lock = _deferred_lock_for(job)
+    with lock:
+        _run_deferred_full_compute(job)
+
+
 def schedule_deferred_full_compute(job: DeferredFullComputeJob) -> None:
     thread = threading.Thread(
-        target=_run_deferred_full_compute,
+        target=_run_deferred_full_compute_guarded,
         args=(job,),
         name=f"full-compute-{job.scenario_id}",
         daemon=True,

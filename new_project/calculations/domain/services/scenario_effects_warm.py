@@ -1,0 +1,140 @@
+from __future__ import annotations
+
+import logging
+from decimal import Decimal
+from pathlib import Path
+from typing import Literal
+
+from calculations.domain.services.route_effects_loader import fetch_route_set_stats
+from calculations.domain.services.route_mask_cache import mask_cache_dir
+from calculations.domain.services.route_mart_store import (
+    ensure_compute_sidecars,
+    load_mart_meta,
+    load_mart_sidecar_dataframe,
+    mart_meta_path,
+    resolve_mart_parquet_path,
+)
+from calculations.domain.services.rule_mask_prewarm import prewarm_rule_mask
+from calculations.domain.services.scenario_compute_store import (
+    purge_stale_scenario_compute,
+    save_scenario_compute_kpi_only,
+)
+from calculations.domain.services.scenario_effects_cache import compute_scenario_data_version
+from calculations.domain.services.scenario_effects_compute import (
+    compute_kpi_totals,
+    rule_specs_from_context,
+)
+from calculations.domain.services.scenario_effects_deferred import (
+    DeferredFullComputeJob,
+    schedule_deferred_full_compute,
+)
+from calculations.domain.services.scenario_effects_pandas import ScenarioEffectsPandasService
+from calculations.domain.services.tariff_load import TariffLoadService
+from scenarios.models import Scenario, TariffRule
+
+logger = logging.getLogger(__name__)
+
+
+def _resolve_ready_parquet_path(*, route_set_id: int) -> Path | None:
+    parquet_path = resolve_mart_parquet_path(route_set_id=route_set_id)
+    if not parquet_path.is_file() or not mart_meta_path(parquet_path).is_file():
+        return None
+    if not ensure_compute_sidecars(parquet_path):
+        return None
+    return parquet_path
+
+
+def warm_scenario_after_rule_change(
+    *,
+    scenario_id: int,
+    change: Literal["create", "update", "delete"],
+    rule_id: int | None = None,
+    mask_changed: bool = False,
+) -> None:
+    try:
+        scenario = Scenario.objects.select_related("route_set").get(pk=scenario_id)
+    except Scenario.DoesNotExist:
+        return
+
+    if not scenario.route_set_id:
+        return
+
+    if mask_changed and rule_id is not None:
+        try:
+            rule = TariffRule.objects.get(pk=rule_id, scenario_id=scenario_id)
+            prewarm_rule_mask(rule=rule)
+        except TariffRule.DoesNotExist:
+            pass
+
+    parquet_path = _resolve_ready_parquet_path(route_set_id=scenario.route_set_id)
+    if parquet_path is None:
+        logger.debug(
+            "Skip scenario warm: mart not ready scenario_id=%s change=%s",
+            scenario_id,
+            change,
+        )
+        return
+
+    tariff_load = TariffLoadService()
+    context = tariff_load.build_scenario_context(scenario)
+    years = context.years
+    rule_specs = rule_specs_from_context(tariff_load, context)
+    data_version = compute_scenario_data_version(
+        scenario=scenario,
+        base_coef_by_year=context.base_coef_by_year,
+        rules=context.rules,
+    )
+
+    df, _sidecar_timings = load_mart_sidecar_dataframe(parquet_path, include_charge=True)
+    if df.empty:
+        return
+
+    mart_meta = load_mart_meta(parquet_path)
+    global_totals, _compute_timings = compute_kpi_totals(
+        df,
+        years=years,
+        base_coef_by_year=context.base_coef_by_year,
+        rule_specs=rule_specs,
+        route_set_id=scenario.route_set_id,
+        mart_meta=mart_meta,
+    )
+    filter_options = ScenarioEffectsPandasService._collect_filter_options(df, mart_meta)
+    if mart_meta is not None:
+        skipped_charge = mart_meta.skipped_charge
+        skipped_volume = mart_meta.routes_without_volume
+    else:
+        skipped_charge, skipped_volume = fetch_route_set_stats(scenario.route_set_id)
+
+    save_scenario_compute_kpi_only(
+        scenario_id=scenario.id,
+        data_version=data_version,
+        years=years,
+        global_totals=global_totals,
+        filter_options=filter_options,
+        skipped_charge=skipped_charge,
+        routes_without_volume=skipped_volume,
+    )
+    purge_stale_scenario_compute(
+        scenario_id=scenario.id,
+        keep_data_version=data_version,
+    )
+
+    base_coef_by_year: dict[int, Decimal] = context.base_coef_by_year
+    schedule_deferred_full_compute(
+        DeferredFullComputeJob(
+            cache_key="",
+            scenario_id=scenario.id,
+            route_set_id=scenario.route_set_id,
+            data_version=data_version,
+            years=years,
+            base_coef_by_year=base_coef_by_year,
+            rule_specs=rule_specs,
+            parquet_path=str(parquet_path),
+            mask_cache_dir_path=str(mask_cache_dir(route_set_id=scenario.route_set_id)),
+            mart_meta=mart_meta,
+            global_totals=global_totals,
+            filter_options=filter_options,
+            skipped_charge=skipped_charge,
+            routes_without_volume=skipped_volume,
+        ),
+    )

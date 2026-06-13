@@ -87,6 +87,21 @@ def save_rule_mask(
     os.replace(tmp_path, path)
 
 
+def delete_rule_mask(
+    *,
+    route_set_id: int,
+    rule_id: int,
+    conditions: list[dict],
+    cache_dir: Path | None = None,
+) -> bool:
+    resolved_dir = cache_dir or mask_cache_dir(route_set_id=route_set_id)
+    path = mask_path(cache_dir=resolved_dir, rule_id=rule_id, conditions=conditions)
+    if not path.is_file():
+        return False
+    path.unlink()
+    return True
+
+
 def build_or_load_rule_mask(
     *,
     route_set_id: int,

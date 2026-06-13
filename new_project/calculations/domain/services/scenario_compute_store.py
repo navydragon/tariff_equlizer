@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
+import time
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
@@ -20,7 +22,7 @@ METADATA_FILENAME = "metadata.json"
 
 @dataclass
 class ScenarioComputeBundle:
-    compact: CompactRouteEffects
+    compact: CompactRouteEffects | None
     global_totals: GlobalTotals
     filter_options: dict[str, list[str]]
     skipped_charge: int
@@ -72,8 +74,22 @@ def _compact_arrays_for_store(compact: CompactRouteEffects) -> dict[str, np.ndar
     return arrays
 
 
-def _atomic_replace(tmp_path: Path, final_path: Path) -> None:
-    os.replace(tmp_path, final_path)
+def _atomic_replace(tmp_path: Path, final_path: Path, *, max_attempts: int = 12) -> None:
+    final_path.parent.mkdir(parents=True, exist_ok=True)
+    last_error: OSError | None = None
+    for attempt in range(max_attempts):
+        try:
+            if final_path.exists():
+                final_path.unlink()
+            os.replace(tmp_path, final_path)
+            return
+        except OSError as exc:
+            last_error = exc
+            if attempt + 1 >= max_attempts:
+                break
+            time.sleep(0.05 * (attempt + 1))
+    if last_error is not None:
+        raise last_error
 
 
 def _save_rule_by_year(path: Path, rule_by_year: np.ndarray) -> None:
@@ -94,6 +110,56 @@ def _load_rule_by_year(cache_dir: Path, data) -> np.ndarray | None:
     return None
 
 
+def _write_metadata(cache_dir: Path, metadata: dict) -> None:
+    meta_path = cache_dir / METADATA_FILENAME
+    tmp_meta = cache_dir / (METADATA_FILENAME + ".tmp")
+    tmp_meta.write_text(json.dumps(metadata, ensure_ascii=False), encoding="utf-8")
+    _atomic_replace(tmp_meta, meta_path)
+
+
+def save_scenario_compute_kpi_only(
+    *,
+    scenario_id: int,
+    data_version: str,
+    years: list[int],
+    global_totals: GlobalTotals,
+    filter_options: dict[str, list[str]],
+    skipped_charge: int,
+    routes_without_volume: int,
+) -> Path:
+    cache_dir = scenario_compute_dir(scenario_id=scenario_id, data_version=data_version)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    metadata = {
+        "kpi_only": True,
+        "years": years,
+        "filter_options": filter_options,
+        "global_totals": _global_totals_to_json(global_totals),
+        "skipped_charge": skipped_charge,
+        "routes_without_volume": routes_without_volume,
+    }
+    _write_metadata(cache_dir, metadata)
+    return cache_dir
+
+
+def purge_stale_scenario_compute(
+    *,
+    scenario_id: int,
+    keep_data_version: str,
+) -> int:
+    scenario_dir = scenario_compute_cache_root() / str(scenario_id)
+    if not scenario_dir.is_dir():
+        return 0
+
+    removed = 0
+    for child in scenario_dir.iterdir():
+        if not child.is_dir() or child.name == keep_data_version:
+            continue
+        shutil.rmtree(child, ignore_errors=True)
+        removed += 1
+    return removed
+
+
 def save_scenario_compute(
     *,
     scenario_id: int,
@@ -104,16 +170,22 @@ def save_scenario_compute(
     cache_dir.mkdir(parents=True, exist_ok=True)
 
     compact = bundle.compact
+    if compact is None:
+        raise ValueError("save_scenario_compute requires a compact bundle")
     arrays = _compact_arrays_for_store(compact)
 
     tmp_path = cache_dir / "arrays.write.npz"
-    np.savez(tmp_path, **arrays)
+    with open(tmp_path, "wb") as handle:
+        np.savez(handle, **arrays)
+        handle.flush()
+        os.fsync(handle.fileno())
     _atomic_replace(tmp_path, cache_dir / NPZ_FILENAME)
 
     if compact.rule_by_year is not None:
         _save_rule_by_year(cache_dir / RULE_BY_YEAR_FILENAME, compact.rule_by_year)
 
     metadata = {
+        "kpi_only": False,
         "years": compact.years,
         "dimension_labels": compact.dimension_labels,
         "rule_meta": [[rule_id, name] for rule_id, name in compact.rule_meta],
@@ -122,10 +194,7 @@ def save_scenario_compute(
         "skipped_charge": bundle.skipped_charge,
         "routes_without_volume": bundle.routes_without_volume,
     }
-    meta_path = cache_dir / METADATA_FILENAME
-    tmp_meta = cache_dir / (METADATA_FILENAME + ".tmp")
-    tmp_meta.write_text(json.dumps(metadata, ensure_ascii=False), encoding="utf-8")
-    _atomic_replace(tmp_meta, meta_path)
+    _write_metadata(cache_dir, metadata)
     return cache_dir
 
 
@@ -137,10 +206,22 @@ def try_load_scenario_compute(
     cache_dir = scenario_compute_dir(scenario_id=scenario_id, data_version=data_version)
     npz_path = cache_dir / NPZ_FILENAME
     meta_path = cache_dir / METADATA_FILENAME
-    if not npz_path.is_file() or not meta_path.is_file():
+    if not meta_path.is_file():
         return None
 
     metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+    if metadata.get("kpi_only") and not npz_path.is_file():
+        return ScenarioComputeBundle(
+            compact=None,
+            global_totals=_global_totals_from_json(metadata["global_totals"]),
+            filter_options=metadata.get("filter_options") or {},
+            skipped_charge=int(metadata.get("skipped_charge", 0)),
+            routes_without_volume=int(metadata.get("routes_without_volume", 0)),
+        )
+
+    if not npz_path.is_file():
+        return None
+
     with np.load(npz_path, allow_pickle=False) as data:
         rule_by_year = _load_rule_by_year(cache_dir, data)
         dimensions = {

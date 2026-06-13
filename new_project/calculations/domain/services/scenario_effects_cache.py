@@ -179,6 +179,11 @@ def _hydrate_payload_from_disk(
     if bundle is None:
         return payload
 
+    compact = bundle.compact
+    compact_pending = payload.compact_pending
+    if compact is not None:
+        compact_pending = False
+
     return ScenarioEffectsCachePayload(
         user_id=payload.user_id,
         scenario_id=payload.scenario_id,
@@ -187,7 +192,8 @@ def _hydrate_payload_from_disk(
         routes_without_volume=payload.routes_without_volume,
         baseline_total=payload.baseline_total,
         facts=payload.facts,
-        compact=bundle.compact,
+        compact=compact,
+        compact_pending=compact_pending,
         data_version=payload.data_version,
     )
 

@@ -1,5 +1,5 @@
 from decimal import Decimal, InvalidOperation
-from typing import Optional
+from typing import Literal, Optional
 
 from django.db import transaction
 
@@ -14,6 +14,27 @@ from scenarios.domain.services.scenario_access import ScenarioAccessHelper
 
 
 ERR_RULE_NOT_FOUND = "Тарифное решение не найдено"
+
+
+def _schedule_scenario_warm(
+    *,
+    scenario_id: int,
+    change: Literal["create", "update", "delete"],
+    rule_id: int | None = None,
+    mask_changed: bool = False,
+) -> None:
+    from calculations.domain.services.scenario_effects_warm import (
+        warm_scenario_after_rule_change,
+    )
+
+    transaction.on_commit(
+        lambda: warm_scenario_after_rule_change(
+            scenario_id=scenario_id,
+            change=change,
+            rule_id=rule_id,
+            mask_changed=mask_changed,
+        ),
+    )
 
 
 class TariffRuleService:
@@ -83,10 +104,13 @@ class TariffRuleService:
             )
 
         refreshed = self.repository.get_by_id(rule.id)
-        if refreshed is not None and dto.conditions is not None:
-            from calculations.domain.services.rule_mask_prewarm import prewarm_rule_mask
-
-            prewarm_rule_mask(rule=refreshed)
+        if refreshed is not None:
+            _schedule_scenario_warm(
+                scenario_id=scenario.id,
+                change="create",
+                rule_id=refreshed.id,
+                mask_changed=True,
+            )
         return TariffRuleDTO.from_model(refreshed), []
 
     @transaction.atomic
@@ -134,21 +158,50 @@ class TariffRuleService:
             )
 
         refreshed = self.repository.get_by_id(rule_id)
-        if refreshed is not None and dto.conditions is not None:
-            from calculations.domain.services.rule_mask_prewarm import prewarm_rule_mask
-
-            prewarm_rule_mask(rule=refreshed)
+        affects_compute = (
+            dto.conditions is not None
+            or dto.year_values is not None
+            or dto.base_percent is not None
+        )
+        if refreshed is not None and affects_compute:
+            _schedule_scenario_warm(
+                scenario_id=scenario.id,
+                change="update",
+                rule_id=refreshed.id,
+                mask_changed=dto.conditions is not None,
+            )
         return TariffRuleDTO.from_model(refreshed), []
 
+    @transaction.atomic
     def delete_rule(self, rule_id: int, user: User) -> tuple[bool, list[str]]:
         rule = self.repository.get_by_id(rule_id)
         if not rule:
             return False, [ERR_RULE_NOT_FOUND]
-        _scenario, errors = self._access.require_scenario_write(rule.scenario_id, user)
+        scenario, errors = self._access.require_scenario_write(rule.scenario_id, user)
         if errors:
             return False, errors
+
+        from calculations.domain.services.route_mask_cache import delete_rule_mask
+        from calculations.domain.services.tariff_load import TariffLoadService
+
+        scenario_id = rule.scenario_id
+        route_set_id = scenario.route_set_id
+        conditions = TariffLoadService._rule_conditions_payload(rule)
+
         ok = self.repository.delete(rule_id)
-        return (True, []) if ok else (False, ["Ошибка при удалении тарифного решения"])
+        if not ok:
+            return False, ["Ошибка при удалении тарифного решения"]
+
+        if route_set_id:
+            transaction.on_commit(
+                lambda: delete_rule_mask(
+                    route_set_id=route_set_id,
+                    rule_id=rule_id,
+                    conditions=conditions,
+                ),
+            )
+        _schedule_scenario_warm(scenario_id=scenario_id, change="delete")
+        return True, []
 
     def _upsert_year_values_checked(
         self, rule, year_values: dict, start_year: int, end_year: int

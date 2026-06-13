@@ -139,10 +139,14 @@ class ScenarioRepository:
             if year_values:
                 TariffRuleYearValue.objects.bulk_create(year_values)
 
-            if conditions:
-                from calculations.domain.services.rule_mask_prewarm import (
-                    prewarm_rule_mask,
-                )
+        from calculations.domain.services.scenario_effects_warm import (
+            warm_scenario_after_rule_change,
+        )
 
-                prewarm_rule_mask(rule=new_rule)
-
+        transaction.on_commit(
+            lambda target_id=new_scenario.id: warm_scenario_after_rule_change(
+                scenario_id=target_id,
+                change="create",
+                mask_changed=False,
+            ),
+        )

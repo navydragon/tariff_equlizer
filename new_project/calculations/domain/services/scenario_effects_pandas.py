@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 from decimal import Decimal
-
+from pathlib import Path
 import pandas as pd
 
 from calculations.domain.dto.scenario_effects import ScenarioEffectsComputeResponseDTO
@@ -30,6 +30,8 @@ from calculations.domain.services.scenario_effects_formatting import (
     format_rub,
 )
 from calculations.domain.services.scenario_compute_store import (
+    purge_stale_scenario_compute,
+    save_scenario_compute_kpi_only,
     try_load_scenario_compute,
 )
 from calculations.domain.services.route_effects_loader import (
@@ -39,7 +41,9 @@ from calculations.domain.services.route_effects_loader import (
 from calculations.domain.services.route_mask_cache import mask_cache_dir
 from calculations.domain.services.route_mart_store import (
     MartMeta,
+    load_mart_meta,
     resolve_light_mart_columns,
+    resolve_mart_parquet_path,
 )
 from calculations.domain.services.tariff_load import TariffLoadService
 from scenarios.models import Scenario
@@ -87,7 +91,30 @@ class ScenarioEffectsPandasService:
             filter_options = scenario_bundle.filter_options
             skipped_charge = scenario_bundle.skipped_charge
             skipped_volume = scenario_bundle.routes_without_volume
+            compact_ready = compact is not None
             t_load = t_compute = t_post_compute = time.perf_counter()
+            if compact is None:
+                parquet_path = resolve_mart_parquet_path(
+                    route_set_id=scenario.route_set_id,
+                )
+                mart_meta = (
+                    load_mart_meta(parquet_path)
+                    if parquet_path.is_file()
+                    else None
+                )
+                deferred_job = self._build_deferred_job(
+                    scenario=scenario,
+                    context=context,
+                    years=years,
+                    rule_specs=rule_specs,
+                    data_version=data_version,
+                    global_totals=global_totals,
+                    filter_options=filter_options,
+                    skipped_charge=skipped_charge,
+                    routes_without_volume=skipped_volume,
+                    parquet_path=parquet_path,
+                    mart_meta=mart_meta,
+                )
         else:
             light_columns = resolve_light_mart_columns(has_rules=bool(context.rules))
             df, mart_meta, load_timings = self._load_routes_df(
@@ -116,23 +143,36 @@ class ScenarioEffectsPandasService:
             )
             t_post_compute = time.perf_counter()
 
-            deferred_job = DeferredFullComputeJob(
-                cache_key="",
+            t_snapshot_save = time.perf_counter()
+            save_scenario_compute_kpi_only(
                 scenario_id=scenario.id,
-                route_set_id=scenario.route_set_id,
                 data_version=data_version,
                 years=years,
-                base_coef_by_year=context.base_coef_by_year,
-                rule_specs=rule_specs,
-                parquet_path=str(load_timings.get("mart_cache_path") or ""),
-                mask_cache_dir_path=str(
-                    mask_cache_dir(route_set_id=scenario.route_set_id),
-                ),
-                mart_meta=mart_meta,
                 global_totals=global_totals,
                 filter_options=filter_options,
                 skipped_charge=skipped_charge,
                 routes_without_volume=skipped_volume,
+            )
+            purge_stale_scenario_compute(
+                scenario_id=scenario.id,
+                keep_data_version=data_version,
+            )
+            scenario_snapshot_save_ms = int(
+                (time.perf_counter() - t_snapshot_save) * 1000,
+            )
+
+            deferred_job = self._build_deferred_job(
+                scenario=scenario,
+                context=context,
+                years=years,
+                rule_specs=rule_specs,
+                data_version=data_version,
+                global_totals=global_totals,
+                filter_options=filter_options,
+                skipped_charge=skipped_charge,
+                routes_without_volume=skipped_volume,
+                parquet_path=Path(str(load_timings.get("mart_cache_path") or "")),
+                mart_meta=mart_meta,
             )
 
         cards = build_cards_from_totals(global_totals, years)
@@ -243,6 +283,38 @@ class ScenarioEffectsPandasService:
         skipped_charge, skipped_volume = fetch_route_set_stats(scenario.route_set_id)
         load_timings["stats_ms"] = int((time.perf_counter() - t_stats) * 1000)
         return skipped_charge, skipped_volume
+
+    @staticmethod
+    def _build_deferred_job(
+        *,
+        scenario: Scenario,
+        context,
+        years: list[int],
+        rule_specs,
+        data_version: str,
+        global_totals: GlobalTotals,
+        filter_options: dict[str, list[str]],
+        skipped_charge: int,
+        routes_without_volume: int,
+        parquet_path: Path,
+        mart_meta: MartMeta | None,
+    ) -> DeferredFullComputeJob:
+        return DeferredFullComputeJob(
+            cache_key="",
+            scenario_id=scenario.id,
+            route_set_id=scenario.route_set_id,
+            data_version=data_version,
+            years=years,
+            base_coef_by_year=context.base_coef_by_year,
+            rule_specs=rule_specs,
+            parquet_path=str(parquet_path),
+            mask_cache_dir_path=str(mask_cache_dir(route_set_id=scenario.route_set_id)),
+            mart_meta=mart_meta,
+            global_totals=global_totals,
+            filter_options=filter_options,
+            skipped_charge=skipped_charge,
+            routes_without_volume=routes_without_volume,
+        )
 
     def _compute_arrays(
         self,
