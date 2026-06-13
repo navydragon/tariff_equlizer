@@ -2,9 +2,13 @@ from __future__ import annotations
 
 from collections import defaultdict
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
+
+if TYPE_CHECKING:
+    from calculations.domain.services.route_mart_store import MartMeta
 
 from calculations.domain.services.scenario_effects_cache import CompactRouteEffects
 
@@ -41,6 +45,39 @@ def _as_float32(array: np.ndarray) -> np.ndarray:
     if array.dtype == _FLOAT_DTYPE:
         return array
     return array.astype(_FLOAT_DTYPE, copy=False)
+
+
+def prepare_compact_inputs(
+    df: pd.DataFrame,
+    mart_meta: MartMeta | None,
+) -> tuple[dict[str, np.ndarray], dict[str, list[str]], np.ndarray]:
+    dimensions: dict[str, np.ndarray] = {}
+    dimension_labels: dict[str, list[str]] = {}
+
+    if mart_meta is not None and mart_meta.dimension_labels:
+        dimensions = {
+            column: df[f"dim_{column}"].to_numpy(dtype=np.int32, copy=False)
+            for column in _DIMENSION_COLUMNS
+            if f"dim_{column}" in df.columns
+        }
+        dimension_labels = mart_meta.dimension_labels
+    else:
+        for column in _DIMENSION_COLUMNS:
+            dim_column = f"dim_{column}"
+            if dim_column in df.columns:
+                dimensions[column] = df[dim_column].to_numpy(dtype=np.int32, copy=False)
+                if mart_meta and mart_meta.dimension_labels.get(column):
+                    dimension_labels[column] = mart_meta.dimension_labels[column]
+                else:
+                    dimension_labels[column] = df[column].astype(str).unique().tolist()
+            elif column in df.columns:
+                series = df[column].astype(str)
+                codes, uniques = pd.factorize(series, sort=False)
+                dimensions[column] = codes.astype(np.int32, copy=False)
+                dimension_labels[column] = uniques.tolist()
+
+    volume = extract_volume_array(df)
+    return dimensions, dimension_labels, volume
 
 
 def build_compact_from_arrays(

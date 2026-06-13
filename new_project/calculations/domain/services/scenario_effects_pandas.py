@@ -17,9 +17,7 @@ from calculations.domain.services.scenario_effects_cache import (
 )
 from calculations.domain.services.scenario_effects_compact import (
     _COMPUTE_DTYPE,
-    _DIMENSION_COLUMNS,
-    _FLOAT_DTYPE,
-    extract_volume_array,
+    prepare_compact_inputs,
 )
 from calculations.domain.services.scenario_effects_deferred import (
     DeferredCompactJob,
@@ -153,9 +151,8 @@ class ScenarioEffectsPandasService:
                     charge_by_year=deferred_job.charge_by_year,
                     rule_meta=deferred_job.rule_meta,
                     rule_by_year=deferred_job.rule_by_year,
-                    dimensions=deferred_job.dimensions,
-                    dimension_labels=deferred_job.dimension_labels,
-                    volume=deferred_job.volume,
+                    df=deferred_job.df,
+                    mart_meta=deferred_job.mart_meta,
                     global_totals=global_totals,
                     filter_options=filter_options,
                     skipped_charge=skipped_charge,
@@ -349,33 +346,6 @@ class ScenarioEffectsPandasService:
             global_totals.rules_by_year[year] = _to_decimal(float(rules_sums[year_index]))
         timings["totals_ms"] = int((time.perf_counter() - t_totals) * 1000)
 
-        dimensions: dict[str, np.ndarray] = {}
-        dimension_labels: dict[str, list[str]] = {}
-        if mart_meta is not None and mart_meta.dimension_labels:
-            dimensions = {
-                column: df[f"dim_{column}"].to_numpy(dtype=np.int32, copy=False)
-                for column in _DIMENSION_COLUMNS
-                if f"dim_{column}" in df.columns
-            }
-            dimension_labels = mart_meta.dimension_labels
-        else:
-            for column in _DIMENSION_COLUMNS:
-                dim_column = f"dim_{column}"
-                if dim_column in df.columns:
-                    dimensions[column] = df[dim_column].to_numpy(
-                        dtype=np.int32,
-                        copy=False,
-                    )
-                    dimension_labels[column] = (
-                        df[column].astype(str).unique().tolist()
-                    )
-                elif column in df.columns:
-                    series = df[column].astype(str)
-                    codes, uniques = pd.factorize(series, sort=False)
-                    dimensions[column] = codes.astype(np.int32, copy=False)
-                    dimension_labels[column] = uniques.tolist()
-
-        volume = extract_volume_array(df)
         deferred_job = DeferredCompactJob(
             cache_key="",
             scenario_id=scenario.id,
@@ -387,9 +357,8 @@ class ScenarioEffectsPandasService:
             charge_by_year=charge_by_year,
             rule_meta=rule_meta,
             rule_by_year=rule_by_year_arr,
-            dimensions=dimensions,
-            dimension_labels=dimension_labels,
-            volume=volume,
+            df=df,
+            mart_meta=mart_meta,
             global_totals=global_totals,
             filter_options={},
             skipped_charge=0,
@@ -445,6 +414,12 @@ class ScenarioEffectsPandasService:
             return None, global_totals, timings
 
         t_compact = time.perf_counter()
+        dimensions, dimension_labels, volume = prepare_compact_inputs(
+            df,
+            mart_meta,
+        )
+        timings["compact_prep_ms"] = int((time.perf_counter() - t_compact) * 1000)
+        t_build = time.perf_counter()
         compact = build_compact_from_arrays(
             years=deferred_job.years,
             initial=deferred_job.initial,
@@ -453,9 +428,9 @@ class ScenarioEffectsPandasService:
             charge_by_year=deferred_job.charge_by_year,
             rule_meta=deferred_job.rule_meta,
             rule_by_year=deferred_job.rule_by_year,
-            dimensions=deferred_job.dimensions,
-            dimension_labels=deferred_job.dimension_labels,
-            volume=deferred_job.volume,
+            dimensions=dimensions,
+            dimension_labels=dimension_labels,
+            volume=volume,
         )
-        timings["compact_build_ms"] = int((time.perf_counter() - t_compact) * 1000)
+        timings["compact_build_ms"] = int((time.perf_counter() - t_build) * 1000)
         return compact, global_totals, timings

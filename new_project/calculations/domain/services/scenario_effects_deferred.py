@@ -5,7 +5,9 @@ import threading
 from dataclasses import dataclass
 
 import numpy as np
+import pandas as pd
 
+from calculations.domain.services.route_mart_store import MartMeta
 from calculations.domain.services.scenario_compute_store import (
     ScenarioComputeBundle,
     save_scenario_compute,
@@ -15,13 +17,14 @@ from calculations.domain.services.scenario_effects_cache import (
 )
 from calculations.domain.services.scenario_effects_compact import (
     build_compact_from_arrays,
+    prepare_compact_inputs,
 )
 from calculations.domain.services.scenario_effects_formatting import GlobalTotals
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True)
+@dataclass
 class DeferredCompactJob:
     cache_key: str
     scenario_id: int
@@ -33,9 +36,8 @@ class DeferredCompactJob:
     charge_by_year: np.ndarray
     rule_meta: list[tuple[int, str]]
     rule_by_year: np.ndarray | None
-    dimensions: dict[str, np.ndarray]
-    dimension_labels: dict[str, list[str]]
-    volume: np.ndarray
+    df: pd.DataFrame
+    mart_meta: MartMeta | None
     global_totals: GlobalTotals
     filter_options: dict[str, list[str]]
     skipped_charge: int
@@ -44,6 +46,10 @@ class DeferredCompactJob:
 
 def _run_deferred_compact(job: DeferredCompactJob) -> None:
     try:
+        dimensions, dimension_labels, volume = prepare_compact_inputs(
+            job.df,
+            job.mart_meta,
+        )
         compact = build_compact_from_arrays(
             years=job.years,
             initial=job.initial,
@@ -52,9 +58,9 @@ def _run_deferred_compact(job: DeferredCompactJob) -> None:
             charge_by_year=job.charge_by_year,
             rule_meta=job.rule_meta,
             rule_by_year=job.rule_by_year,
-            dimensions=job.dimensions,
-            dimension_labels=job.dimension_labels,
-            volume=job.volume,
+            dimensions=dimensions,
+            dimension_labels=dimension_labels,
+            volume=volume,
         )
         save_scenario_compute(
             scenario_id=job.scenario_id,
