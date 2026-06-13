@@ -59,6 +59,7 @@ class ScenarioEffectsCachePayload:
     baseline_total: Decimal
     facts: list[RouteEffectFact] = field(default_factory=list)
     compact: CompactRouteEffects | None = None
+    data_version: str | None = None
 
 
 @dataclass
@@ -157,11 +158,41 @@ def store_payload(*, cache_key: str, payload: ScenarioEffectsCachePayload) -> No
     cache.set(cache_key, payload, CACHE_TIMEOUT_SECONDS)
 
 
+def _hydrate_payload_from_disk(
+    payload: ScenarioEffectsCachePayload,
+) -> ScenarioEffectsCachePayload:
+    if payload.compact is not None or not payload.data_version:
+        return payload
+
+    from calculations.domain.services.scenario_compute_store import (
+        try_load_scenario_compute,
+    )
+
+    bundle = try_load_scenario_compute(
+        scenario_id=payload.scenario_id,
+        data_version=payload.data_version,
+    )
+    if bundle is None:
+        return payload
+
+    return ScenarioEffectsCachePayload(
+        user_id=payload.user_id,
+        scenario_id=payload.scenario_id,
+        years=payload.years,
+        routes_without_charge=payload.routes_without_charge,
+        routes_without_volume=payload.routes_without_volume,
+        baseline_total=payload.baseline_total,
+        facts=payload.facts,
+        compact=bundle.compact,
+        data_version=payload.data_version,
+    )
+
+
 def get_payload(cache_key: str) -> ScenarioEffectsCachePayload | None:
     payload = cache.get(cache_key)
-    if isinstance(payload, ScenarioEffectsCachePayload):
-        return payload
-    return None
+    if not isinstance(payload, ScenarioEffectsCachePayload):
+        return None
+    return _hydrate_payload_from_disk(payload)
 
 
 def validate_cache_access(

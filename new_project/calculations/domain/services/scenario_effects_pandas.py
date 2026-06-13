@@ -133,7 +133,8 @@ class ScenarioEffectsPandasService:
                 routes_without_volume=skipped_volume,
                 baseline_total=global_totals.baseline_total,
                 facts=[],
-                compact=compact,
+                compact=None,
+                data_version=data_version,
             ),
         )
         t_cache = time.perf_counter()

@@ -3,6 +3,7 @@ from decimal import Decimal
 
 import pandas as pd
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from django.test import Client, TestCase
 from django.urls import reverse
 
@@ -21,6 +22,7 @@ from calculations.domain.services import (
     ScenarioEffectsService,
     TariffLoadService,
 )
+from calculations.domain.services.scenario_effects_cache import get_payload
 from calculations.domain.services.pandas_tariff_conditions import (
     build_rule_mask,
     build_rule_mask_numpy,
@@ -1032,8 +1034,26 @@ class ScenarioEffectsComputePandasApiTests(TariffLoadServiceTestMixin, TestCase)
         repeat_payload = response_repeat.json()
         self.assertTrue(repeat_payload["scenario_compute_cache_hit"])
 
+    def test_pandas_session_payload_is_lightweight_and_hydrates_from_disk(self) -> None:
+        url = reverse("calculations:scenario_effects_compute_pandas_api")
+        response = self.client.post(
+            url,
+            data=json.dumps({"scenario_id": self.scenario.id}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        cache_key = response.json()["cache_key"]
 
-class ScenarioAbsoluteApiTests(TariffLoadServiceTestMixin, TestCase):
+        cached = cache.get(cache_key)
+        self.assertIsNotNone(cached)
+        self.assertIsNone(cached.compact)
+        self.assertTrue(cached.data_version)
+
+        resolved = get_payload(cache_key)
+        self.assertIsNotNone(resolved)
+        self.assertIsNotNone(resolved.compact)
+        self.assertGreater(len(resolved.compact.baseline_rub), 0)
+
     def setUp(self) -> None:
         super().setUp()
         self.client = Client()
