@@ -1,0 +1,246 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Управление задачами · Цифровой тарифный инструментарий{% endblock %}
+
+{% block extra_css %}
+<style>
+  .kanban-scroll {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 0.5rem;
+  }
+
+  .kanban-scroll .kanban-col {
+    min-width: 260px;
+    max-width: 320px;
+    flex: 0 0 auto;
+  }
+
+  .kanban-scroll .kanban-column {
+    min-height: 120px;
+    background: var(--tblr-bg-surface-secondary, #f8fafc);
+    border-radius: var(--tblr-border-radius, 4px);
+  }
+
+  .kanban-scroll .kanban-column .card-sm {
+    cursor: grab;
+  }
+
+  .kanban-scroll .kanban-column .card-sm:active {
+    cursor: grabbing;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div
+  data-controller="task-board"
+  data-task-board-list-url-value="{% url 'support:api_task_list' %}"
+  data-task-board-status-url-template-value="/support/api/tasks/0/status/"
+  data-task-board-tags-url-value="{% url 'support:api_tags' %}"
+  data-task-board-users-url-value="{% url 'support:api_users' %}"
+  data-task-board-scenarios-url-value="{% url 'support:api_scenarios' %}"
+  data-task-board-detail-url-template-value="/support/tasks/0/"
+  data-task-board-kanban-statuses-value='{{ kanban_statuses_json }}'
+  data-task-board-status-labels-value='{{ status_labels_json }}'
+>
+  <div class="page-header d-print-none">
+    <div class="row align-items-center">
+      <div class="col">
+        <h2 class="page-title">Управление задачами</h2>
+        <div class="text-muted mt-1">Трекер задач от пользователей сервиса</div>
+      </div>
+      <div class="col-auto">
+        <button type="button" class="btn btn-primary" data-action="click->task-board#openCreateModal">
+          <i class="ti ti-plus"></i>
+          Создать задачу
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-2 mb-3" data-task-board-target="stats">
+    <div class="col-auto">
+      <span class="badge bg-blue-lt">Открытые: <span data-stat="open">0</span></span>
+    </div>
+    <div class="col-auto">
+      <span class="badge bg-green-lt">Мои: <span data-stat="mine">0</span></span>
+    </div>
+    <div class="col-auto">
+      <span class="badge bg-red-lt">Просроченные: <span data-stat="overdue">0</span></span>
+    </div>
+    <div class="col-auto">
+      <span class="badge bg-yellow-lt">Без исполнителя: <span data-stat="unassigned">0</span></span>
+    </div>
+  </div>
+
+  <div class="card mb-3">
+    <div class="card-body">
+      <div class="row g-2 align-items-end">
+        <div class="col-md-3">
+          <label class="form-label">Поиск</label>
+          <input type="text" class="form-control" placeholder="Заголовок или описание"
+                 data-task-board-target="searchInput"
+                 data-action="input->task-board#debouncedLoad">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">Область</label>
+          <select class="form-select" data-task-board-target="scopeSelect" data-action="change->task-board#loadTasks">
+            <option value="all">Все</option>
+            <option value="mine">Мои</option>
+            <option value="authored">Созданные мной</option>
+            <option value="watching">Отслеживаемые</option>
+          </select>
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">Статус</label>
+          <select class="form-select" data-task-board-target="statusSelect" data-action="change->task-board#loadTasks">
+            <option value="">Все</option>
+            {% for code, label in statuses.items %}
+              <option value="{{ code }}">{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">Приоритет</label>
+          <select class="form-select" data-task-board-target="prioritySelect" data-action="change->task-board#loadTasks">
+            <option value="">Все</option>
+            {% for code, label in priorities.items %}
+              <option value="{{ code }}">{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">Тип</label>
+          <select class="form-select" data-task-board-target="typeSelect" data-action="change->task-board#loadTasks">
+            <option value="">Все</option>
+            {% for code, label in types.items %}
+              <option value="{{ code }}">{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-1">
+          <div class="btn-group w-100" role="group">
+            <button type="button" class="btn btn-outline-primary active" data-task-board-target="viewTableBtn"
+                    data-action="click->task-board#showTable">
+              <i class="ti ti-table"></i>
+            </button>
+            <button type="button" class="btn btn-outline-primary" data-task-board-target="viewKanbanBtn"
+                    data-action="click->task-board#showKanban">
+              <i class="ti ti-layout-kanban"></i>
+            </button>
+          </div>
+        </div>
+      </div>
+      <div class="mt-2">
+        <label class="form-check form-check-inline">
+          <input class="form-check-input" type="checkbox" data-task-board-target="overdueCheck"
+                 data-action="change->task-board#loadTasks">
+          <span class="form-check-label">Только просроченные</span>
+        </label>
+        <label class="form-check form-check-inline">
+          <input class="form-check-input" type="checkbox" data-task-board-target="unassignedCheck"
+                 data-action="change->task-board#loadTasks">
+          <span class="form-check-label">Без исполнителя</span>
+        </label>
+      </div>
+    </div>
+  </div>
+
+  <div data-task-board-target="loading" class="text-center py-5" style="display:none;">
+    <div class="spinner-border text-primary" role="status"></div>
+  </div>
+
+  <div data-task-board-target="tableView" class="card">
+    <div class="table-responsive">
+      <table class="table table-vcenter card-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Заголовок</th>
+            <th>Статус</th>
+            <th>Приоритет</th>
+            <th>Автор</th>
+            <th>Исполнитель</th>
+            <th>Дедлайн</th>
+            <th>Обновлена</th>
+          </tr>
+        </thead>
+        <tbody data-task-board-target="tableBody"></tbody>
+      </table>
+    </div>
+    <div data-task-board-target="tableEmpty" class="empty py-5" style="display:none;">
+      <p class="empty-title">Нет задач</p>
+      <p class="empty-subtitle text-muted">Создайте первую задачу или измените фильтры</p>
+    </div>
+  </div>
+
+  <div class="kanban-scroll" data-task-board-target="kanbanView" style="display:none;"></div>
+
+  <div class="modal modal-blur fade" id="createTaskModal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Новая задача</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <form data-task-board-target="createForm" data-action="submit->task-board#createTask">
+          <div class="mb-3">
+            <label class="form-label required">Заголовок</label>
+            <input type="text" class="form-control" name="title" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Описание</label>
+            <textarea class="form-control" name="description" rows="4"></textarea>
+          </div>
+          <div class="row">
+            <div class="col-md-4 mb-3">
+              <label class="form-label">Приоритет</label>
+              <select class="form-select" name="priority">
+                {% for code, label in priorities.items %}
+                  <option value="{{ code }}" {% if code == "medium" %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-md-4 mb-3">
+              <label class="form-label">Тип</label>
+              <select class="form-select" name="task_type">
+                {% for code, label in types.items %}
+                  <option value="{{ code }}" {% if code == "question" %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-md-4 mb-3">
+              <label class="form-label">Дедлайн</label>
+              <input type="datetime-local" class="form-control" name="deadline">
+            </div>
+          </div>
+          <div class="row">
+            <div class="col-md-6 mb-3">
+              <label class="form-label">Исполнитель</label>
+              <select class="form-select" name="assignee_id" data-task-board-target="assigneeSelect">
+                <option value="">Не назначен</option>
+              </select>
+            </div>
+            <div class="col-md-6 mb-3">
+              <label class="form-label">Сценарий</label>
+              <select class="form-select" name="scenario_id" data-task-board-target="scenarioSelect">
+                <option value="">Не указан</option>
+              </select>
+            </div>
+          </div>
+          <div class="alert alert-danger" data-task-board-target="createError" style="display:none;"></div>
+          <div class="text-end">
+            <button type="button" class="btn btn-link" data-bs-dismiss="modal">Отмена</button>
+            <button type="submit" class="btn btn-primary">Создать</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+  </div>
+</div>
+{% endblock %}
+

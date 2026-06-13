@@ -90,6 +90,18 @@ def _parse_int(value: Any) -> Optional[int]:
         return None
 
 
+def _normalize_inn(value: Any) -> str:
+    raw = str(value).strip() if value is not None else ""
+    if raw in ("-", "0"):
+        return ""
+    return raw
+
+
+def _is_missing_ref(value: str) -> bool:
+    v = (value or "").strip()
+    return not v or v in ("-", "0")
+
+
 def _parse_decimal(value: Any) -> Optional[Decimal]:
     if value is None:
         return None
@@ -149,6 +161,11 @@ class Command(BaseCommand):
             action="store_true",
             help="Проверка без записи в БД",
         )
+        parser.add_argument(
+            "--backfill-shippers",
+            action="store_true",
+            help="Проставить грузоотправителей существующим маршрутам набора из БД РЖД",
+        )
 
     def handle(self, *args, **options) -> None:
         db_path = Path(options["db"]) if options["db"] else get_rzd_db_path()
@@ -180,6 +197,24 @@ class Command(BaseCommand):
             if route_set.name != route_set_name:
                 route_set.name = route_set_name
                 route_set.save(update_fields=["name"])
+
+            if options.get("backfill_shippers"):
+                stats = self._backfill_shippers(
+                    db_path=db_path,
+                    route_set=route_set,
+                    caches=caches,
+                    batch_size=batch_size,
+                    dry_run=dry_run,
+                )
+                if dry_run:
+                    transaction.set_rollback(True)
+                self.stdout.write(
+                    self.style.SUCCESS(
+                        "Дозаполнение грузоотправителей завершено. "
+                        f"Обработано: {stats['processed']}, обновлено: {stats['updated']}."
+                    )
+                )
+                return
 
             if options.get("clear"):
                 deleted = clear_routes_for_route_set(route_set.id)
@@ -256,6 +291,119 @@ class Command(BaseCommand):
                 "message_type": 0,
             },
         }
+
+    def _resolve_shipper(
+        self,
+        row: sqlite3.Row,
+        caches: dict[str, Any],
+    ) -> Optional[Shipper]:
+        shipper_name = (row[COL_SHIPPER_NAME] or "").strip()
+        holding = (row[COL_HOLDING] or "").strip()
+        okpo = _parse_int(row[COL_OKPO])
+        inn = _normalize_inn(row[COL_INN])
+        okpo_key = okpo if okpo is not None else 0
+
+        if not _is_missing_ref(shipper_name):
+            key = (okpo_key, inn, shipper_name)
+            shipper = caches["shipper_by_key"].get(key)
+            if shipper is None:
+                shipper, created = Shipper.objects.get_or_create(
+                    okpo=okpo_key,
+                    inn=inn,
+                    name=shipper_name,
+                    defaults={
+                        "holding": holding if not _is_missing_ref(holding) else "",
+                    },
+                )
+                if not created and holding and not shipper.holding:
+                    shipper.holding = holding
+                    shipper.save(update_fields=["holding"])
+                caches["shipper_by_key"][(shipper.okpo, shipper.inn or "", shipper.name)] = (
+                    shipper
+                )
+            elif holding and not shipper.holding:
+                shipper.holding = holding
+                shipper.save(update_fields=["holding"])
+            return shipper
+
+        if not _is_missing_ref(holding):
+            key = (okpo_key, inn, holding)
+            shipper = caches["shipper_by_key"].get(key)
+            if shipper is None:
+                shipper, _ = Shipper.objects.get_or_create(
+                    okpo=okpo_key,
+                    inn=inn,
+                    name=holding,
+                    defaults={"holding": holding},
+                )
+                caches["shipper_by_key"][(shipper.okpo, shipper.inn or "", shipper.name)] = (
+                    shipper
+                )
+            return shipper
+
+        return None
+
+    def _backfill_shippers(
+        self,
+        *,
+        db_path: Path,
+        route_set: RouteSet,
+        caches: dict[str, Any],
+        batch_size: int,
+        dry_run: bool,
+    ) -> dict[str, int]:
+        routes = {
+            route.route_code: route
+            for route in Route.objects.filter(
+                route_set=route_set,
+                shipper__isnull=True,
+            ).only("id", "route_code")
+        }
+        if not routes:
+            return {"processed": 0, "updated": 0}
+
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        updates: list[Route] = []
+        processed = 0
+        route_codes = list(routes.keys())
+        lookup_batch_size = 500
+        select_by_index_sql = f"""
+            SELECT
+                [{COL_INDEX}],
+                [{COL_OKPO}],
+                [{COL_INN}],
+                [{COL_SHIPPER_NAME}],
+                [{COL_HOLDING}]
+            FROM [{RZD_TABLE}]
+            WHERE [{COL_INDEX}] IN ({{placeholders}})
+        """
+
+        try:
+            for offset in range(0, len(route_codes), lookup_batch_size):
+                chunk = route_codes[offset : offset + lookup_batch_size]
+                placeholders = ",".join("?" * len(chunk))
+                sql = select_by_index_sql.format(placeholders=placeholders)
+                for row in conn.execute(sql, chunk):
+                    route_code = (
+                        str(row[COL_INDEX]).strip() if row[COL_INDEX] is not None else ""
+                    )
+                    route = routes.get(route_code)
+                    if route is None:
+                        continue
+                    processed += 1
+                    shipper = self._resolve_shipper(row, caches)
+                    if shipper is None:
+                        continue
+                    route.shipper_id = shipper.id
+                    updates.append(route)
+        finally:
+            conn.close()
+
+        if updates and not dry_run:
+            Route.objects.bulk_update(updates, ["shipper_id"], batch_size=batch_size)
+
+        return {"processed": processed, "updated": len(updates)}
 
     def _resolve_ref(
         self,
@@ -421,12 +569,7 @@ class Command(BaseCommand):
             required=False,
         )
 
-        shipper = None
-        shipper_name = (row[COL_SHIPPER_NAME] or "").strip()
-        if shipper_name and shipper_name not in ("-", "0"):
-            okpo = _parse_int(row[COL_OKPO])
-            inn = (row[COL_INN] or "").strip()
-            shipper = caches["shipper_by_key"].get((okpo, inn, shipper_name))
+        shipper = self._resolve_shipper(row, caches)
 
         volume = _parse_decimal(row[COL_VOLUME_TONS])
         turnover = _parse_decimal(row[COL_TURNOVER_TKM])

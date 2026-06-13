@@ -1,0 +1,187 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Задача #{{ task.id }} · Цифровой тарифный инструментарий{% endblock %}
+
+{% block content %}
+<div
+  data-controller="task-detail"
+  data-task-detail-task-id-value="{{ task.id }}"
+  data-task-detail-api-url-value="{% url 'support:api_task_detail' task.id %}"
+  data-task-detail-comments-url-value="{% url 'support:api_task_comments' task.id %}"
+  data-task-detail-attachments-url-value="{% url 'support:api_task_attachments' task.id %}"
+  data-task-detail-watch-url-value="{% url 'support:api_task_watch' task.id %}"
+  data-task-detail-list-url-value="{% url 'support:task_list' %}"
+>
+  <div class="page-header d-print-none">
+    <div class="row align-items-center">
+      <div class="col">
+        <div class="text-muted mb-1">
+          <a href="{% url 'support:task_list' %}">← К списку задач</a>
+        </div>
+        <h2 class="page-title">#{{ task.id }} {{ task.title }}</h2>
+      </div>
+      <div class="col-auto">
+        <button type="button" class="btn btn-outline-secondary" data-action="click->task-detail#toggleWatch">
+          <i class="ti ti-eye"></i>
+          <span data-task-detail-target="watchLabel">{% if task.is_watching %}Отписаться{% else %}Следить{% endif %}</span>
+        </button>
+        <button type="button" class="btn btn-outline-danger" data-action="click->task-detail#deleteTask">
+          <i class="ti ti-trash"></i>
+          Удалить
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="col-lg-8">
+      <div class="card mb-3">
+        <div class="card-header"><h3 class="card-title">Описание</h3></div>
+        <div class="card-body">
+          <textarea class="form-control" rows="6" data-task-detail-target="descriptionInput">{{ task.description }}</textarea>
+          <div class="text-end mt-2">
+            <button class="btn btn-primary btn-sm" data-action="click->task-detail#saveDescription">Сохранить</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card mb-3">
+        <div class="card-header">
+          <ul class="nav nav-tabs card-header-tabs">
+            <li class="nav-item">
+              <a class="nav-link active" href="#" data-action="click->task-detail#showComments">Комментарии</a>
+            </li>
+            <li class="nav-item">
+              <a class="nav-link" href="#" data-action="click->task-detail#showActivity">История</a>
+            </li>
+          </ul>
+        </div>
+        <div class="card-body" data-task-detail-target="commentsPanel">
+          <div data-task-detail-target="commentsList">
+            {% for comment in task.comments %}
+              <div class="mb-3 pb-3 border-bottom">
+                <div class="d-flex justify-content-between">
+                  <strong>{{ comment.author_name }}</strong>
+                  <span class="text-muted small">{{ comment.created_at }}</span>
+                </div>
+                <div class="mt-1">{{ comment.body|linebreaksbr }}</div>
+              </div>
+            {% empty %}
+              <p class="text-muted">Комментариев пока нет</p>
+            {% endfor %}
+          </div>
+          <form data-action="submit->task-detail#addComment">
+            <textarea class="form-control mb-2" rows="3" data-task-detail-target="commentInput" placeholder="Написать комментарий..."></textarea>
+            <button type="submit" class="btn btn-primary btn-sm">Отправить</button>
+          </form>
+        </div>
+        <div class="card-body" data-task-detail-target="activityPanel" style="display:none;">
+          {% for act in task.activities %}
+            <div class="mb-2 pb-2 border-bottom">
+              <div class="text-muted small">{{ act.created_at }} · {{ act.actor_name }}</div>
+              <div>
+                {% if act.message %}{{ act.message }}
+                {% elif act.field_name %}{{ act.field_name }}: {{ act.old_value }} → {{ act.new_value }}
+                {% else %}{{ act.action }}{% endif %}
+              </div>
+            </div>
+          {% empty %}
+            <p class="text-muted">История пуста</p>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="card mb-3">
+        <div class="card-header"><h3 class="card-title">Вложения</h3></div>
+        <div class="card-body">
+          <div data-task-detail-target="attachmentsList" class="mb-3">
+            {% for att in task.attachments %}
+              <div class="d-flex justify-content-between align-items-center mb-2" data-attachment-id="{{ att.id }}">
+                <a href="{{ att.url }}" target="_blank">{{ att.original_name }}</a>
+                <div>
+                  <span class="text-muted small me-2">{{ att.uploaded_by_name }}</span>
+                  <button class="btn btn-sm btn-outline-danger" data-action="click->task-detail#deleteAttachment" data-attachment-id="{{ att.id }}">×</button>
+                </div>
+              </div>
+            {% empty %}
+              <p class="text-muted" data-task-detail-target="noAttachments">Вложений нет</p>
+            {% endfor %}
+          </div>
+          <form data-action="submit->task-detail#uploadAttachment">
+            <input type="file" class="form-control" data-task-detail-target="fileInput">
+            <button type="submit" class="btn btn-outline-primary btn-sm mt-2">Загрузить</button>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-lg-4">
+      <div class="card">
+        <div class="card-body">
+          <div class="mb-3">
+            <label class="form-label">Статус</label>
+            <select class="form-select" data-task-detail-target="statusSelect" data-action="change->task-detail#saveField">
+              {% for code, label in statuses.items %}
+                <option value="{{ code }}" {% if task.status == code %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Приоритет</label>
+            <select class="form-select" data-task-detail-target="prioritySelect" data-action="change->task-detail#saveField">
+              {% for code, label in priorities.items %}
+                <option value="{{ code }}" {% if task.priority == code %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Тип</label>
+            <select class="form-select" data-task-detail-target="typeSelect" data-action="change->task-detail#saveField">
+              {% for code, label in types.items %}
+                <option value="{{ code }}" {% if task.task_type == code %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Дедлайн</label>
+            <input type="datetime-local" class="form-control" data-task-detail-target="deadlineInput"
+                   value="{{ deadline_iso }}"
+                   data-action="change->task-detail#saveDeadline">
+            {% if task.is_overdue %}
+              <div class="text-danger small mt-1">Просрочена</div>
+            {% endif %}
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Автор</label>
+            <div>{{ task.author_name }}</div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Исполнитель</label>
+            <select class="form-select" data-task-detail-target="assigneeSelect" data-action="change->task-detail#saveAssignee">
+              <option value="">Не назначен</option>
+            </select>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Сценарий</label>
+            <select class="form-select" data-task-detail-target="scenarioSelect" data-action="change->task-detail#saveScenario">
+              <option value="">Не указан</option>
+            </select>
+          </div>
+          <div class="text-muted small">
+            Создана: {{ task.created_at }}<br>
+            Обновлена: {{ task.updated_at }}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div
+    class="toast-container position-fixed bottom-0 end-0 p-3"
+    style="z-index: 1090;"
+    data-task-detail-target="toastContainer"
+  ></div>
+</div>
+{% endblock %}
+

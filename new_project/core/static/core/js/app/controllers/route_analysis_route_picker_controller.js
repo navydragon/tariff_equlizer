@@ -432,6 +432,7 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
       const routeCode = (route.route_code || "").trim();
       const cargo = (route.cargo_name || "").trim();
       const cargoGroup = (route.cargo_group_name || "").trim();
+      const shipper = (route.shipper_name || "").trim();
       const holding = (route.shipper_holding || "").trim();
       const origin = (route.origin_station_name || "").trim();
       const destination = (route.destination_station_name || "").trim();
@@ -450,8 +451,9 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
         `;
       };
 
-      const row = (label, value, icon) => {
-        if (!value) return "";
+      const row = (label, value, icon, showEmpty = false) => {
+        const displayValue = (value || "").trim();
+        if (!displayValue && !showEmpty) return "";
         return `
           <div class="d-flex align-items-start gap-2 mb-2">
             <div class="text-muted" style="width: 140px;">
@@ -459,7 +461,7 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
               ${escapeHtml(label)}
             </div>
             <div class="fw-medium text-body flex-grow-1">
-              ${escapeHtml(value)}
+              ${escapeHtml(displayValue || "—")}
             </div>
           </div>
         `;
@@ -467,7 +469,6 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
 
       const headerBadges = [
         pill(cargoGroup, "ti-category", "teal"),
-        pill(holding, "ti-building", "indigo"),
         pill(msgType, "ti-message", "azure"),
       ]
         .filter(Boolean)
@@ -487,6 +488,11 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
           </div>
 
           ${cargo ? `<div class="mt-3">${row("Груз", cargo, "ti-box")}</div>` : ""}
+
+          <div class="mt-2">
+            ${row("Грузоотправитель", shipper, "ti-user", true)}
+            ${row("Холдинг", holding, "ti-building", true)}
+          </div>
 
           <div class="mt-2">
             ${row("Отправление", origin, "ti-map-pin")}

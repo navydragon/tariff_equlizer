@@ -79,6 +79,7 @@ INSTALLED_APPS = [
     'core.apps.CoreConfig',
     'scenarios',
     'calculations',
+    'support.apps.SupportConfig',
 ]
 
 AUTH_USER_MODEL = "core.User"
@@ -190,6 +191,14 @@ USE_TZ = True
 
 STATIC_URL = 'static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
+
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
+
+SUPPORT_MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024  # 10 MB
+SUPPORT_ALLOWED_ATTACHMENT_EXTENSIONS = {
+    '.pdf', '.xlsx', '.xls', '.png', '.jpg', '.jpeg', '.docx', '.zip', '.csv', '.txt',
+}
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 

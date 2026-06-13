@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+
+{% block title %}Задача не найдена{% endblock %}
+
+{% block content %}
+<div class="empty py-5">
+  <div class="empty-icon"><i class="ti ti-alert-circle" style="font-size:3rem;"></i></div>
+  <p class="empty-title">Задача не найдена</p>
+  <div class="empty-action">
+    <a href="{% url 'support:task_list' %}" class="btn btn-primary">К списку задач</a>
+  </div>
+</div>
+{% endblock %}

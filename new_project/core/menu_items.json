@@ -12,7 +12,9 @@
 
   {"position": 6, "title": "Управление сценариями", "icon": "ti-settings", "url_name": "scenarios:management"},
 
-  {"position": 7, "title": "Справочники", "icon": "ti-book", "url_name": "references"}
+  {"position": 7, "title": "Справочники", "icon": "ti-book", "url_name": "references"},
+
+  {"position": 8, "title": "Управление задачами", "icon": "ti-list-check", "url_name": "support:task_list"}
 
 ]
 

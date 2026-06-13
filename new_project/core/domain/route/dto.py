@@ -213,7 +213,11 @@ class RouteDTO:
             message_type_id=route.message_type_id,
             message_type_name=route.message_type.name if route.message_type_id else "",
             shipper_id=route.shipper_id,
-            shipper_name=route.shipper.name if route.shipper_id else "",
+            shipper_name=(
+                ""
+                if route.shipper_id and route.shipper.name == route.shipper.holding
+                else (route.shipper.name if route.shipper_id else "")
+            ),
             shipper_holding=route.shipper.holding if route.shipper_id else "",
             shipper_okpo=route.shipper.okpo if route.shipper_id else None,
             shipper_inn=route.shipper.inn if route.shipper_id else "",

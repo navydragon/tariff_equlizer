@@ -97,6 +97,15 @@ def breadcrumbs(request):
             {"title": "Сценарии", "url": reverse("scenarios:management")},
             {"title": "Редактирование сценария", "url": None},
         ],
+        "support:task_list": [
+            {"title": home_title, "url": home_url},
+            {"title": "Управление задачами", "url": None},
+        ],
+        "support:task_detail": [
+            {"title": home_title, "url": home_url},
+            {"title": "Управление задачами", "url": reverse("support:task_list")},
+            {"title": "Задача", "url": None},
+        ],
     }
 
     return {"breadcrumbs": trail_map.get(view_name, [])}
