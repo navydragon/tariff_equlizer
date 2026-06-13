@@ -90,7 +90,30 @@ class RouteRepository:
         if filters.economics_filled:
             qs = qs.filter(market_price_per_ton__isnull=False)
 
+        if filters.holding:
+            qs = qs.filter(shipper__holding=filters.holding)
+
         return qs.order_by("id")
+
+    def list_distinct_holdings(
+        self,
+        route_set_id: int,
+        *,
+        search: str | None = None,
+        economics_filled: bool = False,
+        limit: int = 50,
+    ) -> list[str]:
+        qs = Route.objects.filter(route_set_id=route_set_id)
+        if economics_filled:
+            qs = qs.filter(market_price_per_ton__isnull=False)
+        qs = qs.exclude(shipper__isnull=True).exclude(shipper__holding="")
+        if search:
+            qs = qs.filter(shipper__holding_search__contains=search.casefold())
+        return list(
+            qs.values_list("shipper__holding", flat=True)
+            .distinct()
+            .order_by("shipper__holding")[:limit],
+        )
 
     @staticmethod
     def _build_search_query(search: str) -> Q:

@@ -282,6 +282,11 @@ urlpatterns = [
         name="route_list_api",
     ),
     path(
+        "references/api/route-holdings/",
+        views.route_holding_options_api,
+        name="route_holding_options_api",
+    ),
+    path(
         "references/api/routes/<int:pk>/",
         views.route_detail_api,
         name="route_detail_api",

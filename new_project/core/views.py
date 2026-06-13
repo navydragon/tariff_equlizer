@@ -1,4 +1,5 @@
 import json
+import time
 from pathlib import Path
 
 from django.contrib.auth import logout
@@ -22,6 +23,7 @@ from core.domain.route.dto import (
     RouteListFiltersDTO,
     UpdateRouteSetDTO,
 )
+from core.domain.route.repositories import RouteRepository
 from core.domain.route.services import RouteService, RouteSetService
 from core.models import (
     Region,
@@ -1895,6 +1897,7 @@ def route_list_api(request):
     include_total = include_total_raw in ("1", "true", "yes")
     economics_filled_raw = (request.GET.get("economics_filled") or "").strip().lower()
     economics_filled = economics_filled_raw in ("1", "true", "yes")
+    holding = (request.GET.get("holding") or "").strip() or None
     filters = RouteListFiltersDTO(
         route_set_id=route_set_id,
         page=page,
@@ -1904,14 +1907,51 @@ def route_list_api(request):
         destination_esr=request.GET.get("destination_esr") or None,
         include_total=include_total,
         economics_filled=economics_filled,
+        holding=holding,
     )
 
     service = RouteService()
+    t0 = time.perf_counter()
     result, errors = service.list_routes(filters)
+    elapsed_ms = int((time.perf_counter() - t0) * 1000)
     if errors:
         return JsonResponse({"success": False, "errors": errors}, status=400)
 
-    return JsonResponse({"success": True, **result.to_api_dict()})
+    return JsonResponse(
+        {"success": True, **result.to_api_dict(), "elapsed_ms": elapsed_ms},
+    )
+
+
+@login_required
+@require_http_methods(["GET"])
+def route_holding_options_api(request):
+    try:
+        route_set_id = int(request.GET.get("route_set_id", "0"))
+    except (TypeError, ValueError):
+        route_set_id = 0
+    if not route_set_id:
+        return JsonResponse(
+            {"success": False, "errors": ["Не указан набор маршрутов"]},
+            status=400,
+        )
+
+    search = (request.GET.get("search") or "").strip() or None
+    economics_filled_raw = (request.GET.get("economics_filled") or "1").strip().lower()
+    economics_filled = economics_filled_raw in ("1", "true", "yes")
+
+    repository = RouteRepository()
+    t0 = time.perf_counter()
+    holdings = repository.list_distinct_holdings(
+        route_set_id,
+        search=search,
+        economics_filled=economics_filled,
+        limit=50,
+    )
+    elapsed_ms = int((time.perf_counter() - t0) * 1000)
+    items = [{"value": h, "text": h} for h in holdings]
+    return JsonResponse(
+        {"success": True, "items": items, "elapsed_ms": elapsed_ms},
+    )
 
 
 @login_required

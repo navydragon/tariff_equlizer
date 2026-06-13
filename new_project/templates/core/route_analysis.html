@@ -13,6 +13,7 @@
   data-controller="route-analysis-route-picker"
   data-route-analysis-route-picker-scenarios-url-value="{% url 'scenarios:api_list' %}"
   data-route-analysis-route-picker-routes-url-value="{% url 'route_list_api' %}"
+  data-route-analysis-route-picker-holdings-url-value="{% url 'route_holding_options_api' %}"
   data-route-analysis-route-picker-route-analysis-url-value="{% url 'route_analysis_api' %}"
   data-route-analysis-route-picker-active-scenario-id-value="{{ request.user.active_scenario_id|default:'' }}"
 >
@@ -215,6 +216,50 @@
 
           <div class="row g-3">
             <div class="col-12">
+              <button
+                class="btn btn-link px-0 text-decoration-none"
+                type="button"
+                data-bs-toggle="collapse"
+                data-bs-target="#routeAnalysisFiltersCollapse"
+                aria-expanded="false"
+                aria-controls="routeAnalysisFiltersCollapse"
+              >
+                <i class="ti ti-filter me-1"></i>
+                Фильтры
+              </button>
+              <div
+                id="routeAnalysisFiltersCollapse"
+                class="collapse"
+                data-route-analysis-route-picker-target="filtersCollapse"
+                data-action="shown.bs.collapse->route-analysis-route-picker#onFiltersShown"
+              >
+                <div class="border rounded p-3 bg-light">
+                  <div class="row g-2 align-items-end">
+                    <div class="col">
+                      <label class="form-label" for="routeAnalysisHoldingFilter">Холдинг</label>
+                      <select
+                        id="routeAnalysisHoldingFilter"
+                        data-route-analysis-route-picker-target="holdingFilterSelect"
+                        data-action="focus->route-analysis-route-picker#onHoldingFilterInteract mousedown->route-analysis-route-picker#onHoldingFilterInteract"
+                        placeholder="Начните вводить название холдинга…"
+                      >
+                        <option value="">Все холдинги</option>
+                      </select>
+                    </div>
+                    <div class="col-auto">
+                      <button
+                        type="button"
+                        class="btn btn-outline-secondary"
+                        data-action="click->route-analysis-route-picker#resetHoldingFilter"
+                      >
+                        Сбросить
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="col-12">
               <label class="form-label" for="routeAnalysisRouteSearchInput">Поиск</label>
               <input
                 id="routeAnalysisRouteSearchInput"
@@ -244,6 +289,12 @@
             class="list-group mt-3"
             style="max-height: 360px; overflow: auto;"
             data-route-analysis-route-picker-target="routeList"
+          ></div>
+
+          <div
+            class="form-text text-muted mt-2"
+            style="display: none;"
+            data-route-analysis-route-picker-target="routesTiming"
           ></div>
 
           <div

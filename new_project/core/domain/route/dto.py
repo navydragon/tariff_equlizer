@@ -345,6 +345,7 @@ class RouteListFiltersDTO:
     destination_esr: Optional[str] = None
     include_total: bool = False
     economics_filled: bool = False
+    holding: Optional[str] = None
 
 
 @dataclass

@@ -2,7 +2,9 @@ import json
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
+from django.db import connection
 from django.test import Client, TestCase
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 
 from core.domain.route.dto import CreateRouteSetDTO, RouteWriteDTO
@@ -15,6 +17,7 @@ from core.models import (
     Region,
     Route,
     RouteSet,
+    Shipper,
     ShipmentType,
     Station,
     WagonKind,
@@ -236,6 +239,193 @@ class RouteListEconomicsFilterApiTests(TestCase):
             ids,
             {self.route_with_price.id, self.route_without_price.id},
         )
+
+
+class RouteListHoldingFilterApiTests(TestCase):
+    def setUp(self) -> None:
+        self.client = Client()
+        self.user = User.objects.create_user(login="route_holding_filter_user", password="pass")
+        self.client.force_login(self.user)
+
+        self.route_set = RouteSet.objects.create(name="Holding filter set", code="HOLD_FLT")
+        cargo_group = CargoGroup.objects.create(name="Group H", code=13, position=1)
+        self.cargo = Cargo.objects.create(
+            code=3003,
+            name="Holding cargo",
+            cargo_group=cargo_group,
+        )
+        railroad = RailRoad.objects.create(code="97", name="Road H")
+        region = Region.objects.create(
+            short_name="H",
+            full_name="Holding region",
+            type="область",
+        )
+        self.origin = Station.objects.create(
+            esr_code=300021,
+            short_name="HA",
+            full_name="Station HA",
+            region=region,
+            railroad=railroad,
+        )
+        self.destination = Station.objects.create(
+            esr_code=300022,
+            short_name="HB",
+            full_name="Station HB",
+            region=region,
+            railroad=railroad,
+        )
+        self.wagon_kind = WagonKind.objects.create(code="WK_H", name="Wagon H")
+        self.shipment_type = ShipmentType.objects.create(code="ST_H", name="Shipment H")
+        self.message_type = MessageType.objects.create(
+            code="MT_H",
+            name="Внутр. перевозки H",
+        )
+        self.shipper_alpha = Shipper.objects.create(
+            okpo=1001,
+            inn="7701000001",
+            name="Shipper Alpha",
+            holding="Alpha Holding",
+        )
+        self.shipper_beta = Shipper.objects.create(
+            okpo=1002,
+            inn="7701000002",
+            name="Shipper Beta",
+            holding="Beta Holding",
+        )
+        self.route_alpha = Route.objects.create(
+            route_set=self.route_set,
+            cargo=self.cargo,
+            origin_station=self.origin,
+            destination_station=self.destination,
+            wagon_kind=self.wagon_kind,
+            shipment_type=self.shipment_type,
+            message_type=self.message_type,
+            shipper=self.shipper_alpha,
+            route_code="HOLD-ALPHA",
+            market_price_per_ton=Decimal("1200.00"),
+        )
+        self.route_beta = Route.objects.create(
+            route_set=self.route_set,
+            cargo=self.cargo,
+            origin_station=self.origin,
+            destination_station=self.destination,
+            wagon_kind=self.wagon_kind,
+            shipment_type=self.shipment_type,
+            message_type=self.message_type,
+            shipper=self.shipper_beta,
+            route_code="HOLD-BETA",
+            market_price_per_ton=Decimal("1300.00"),
+        )
+
+    def test_list_with_holding_filter(self) -> None:
+        response = self.client.get(
+            reverse("route_list_api"),
+            {
+                "route_set_id": self.route_set.id,
+                "economics_filled": "1",
+                "holding": "Alpha Holding",
+                "page_size": "100",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data["success"])
+        ids = {item["id"] for item in data["items"]}
+        self.assertEqual(ids, {self.route_alpha.id})
+        self.assertIn("elapsed_ms", data)
+
+    def test_route_list_api_query_count(self) -> None:
+        with CaptureQueriesContext(connection) as ctx:
+            response = self.client.get(
+                reverse("route_list_api"),
+                {
+                    "route_set_id": self.route_set.id,
+                    "economics_filled": "1",
+                    "holding": "Alpha Holding",
+                    "page_size": "20",
+                    "include_total": "0",
+                },
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["success"])
+        route_queries = [
+            q for q in ctx.captured_queries if '"core_route"' in q["sql"]
+        ]
+        self.assertEqual(len(route_queries), 1)
+
+    def test_route_holding_options_api(self) -> None:
+        response = self.client.get(
+            reverse("route_holding_options_api"),
+            {
+                "route_set_id": self.route_set.id,
+                "economics_filled": "1",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data["success"])
+        values = {item["value"] for item in data["items"]}
+        self.assertEqual(values, {"Alpha Holding", "Beta Holding"})
+        self.assertIn("elapsed_ms", data)
+
+        search_response = self.client.get(
+            reverse("route_holding_options_api"),
+            {
+                "route_set_id": self.route_set.id,
+                "economics_filled": "1",
+                "search": "alpha",
+            },
+        )
+        search_data = search_response.json()
+        self.assertTrue(search_data["success"])
+        self.assertEqual(
+            [item["value"] for item in search_data["items"]],
+            ["Alpha Holding"],
+        )
+
+    def test_route_holding_options_api_excludes_routes_without_market_price(self) -> None:
+        Route.objects.create(
+            route_set=self.route_set,
+            cargo=self.cargo,
+            origin_station=self.origin,
+            destination_station=self.destination,
+            wagon_kind=self.wagon_kind,
+            shipment_type=self.shipment_type,
+            message_type=self.message_type,
+            shipper=Shipper.objects.create(
+                okpo=1003,
+                inn="7701000003",
+                name="Shipper Gamma",
+                holding="Gamma Holding",
+            ),
+            route_code="HOLD-GAMMA",
+        )
+        response = self.client.get(
+            reverse("route_holding_options_api"),
+            {
+                "route_set_id": self.route_set.id,
+                "economics_filled": "1",
+            },
+        )
+        data = response.json()
+        values = {item["value"] for item in data["items"]}
+        self.assertNotIn("Gamma Holding", values)
+
+    def test_route_holding_options_api_query_count(self) -> None:
+        with CaptureQueriesContext(connection) as ctx:
+            response = self.client.get(
+                reverse("route_holding_options_api"),
+                {
+                    "route_set_id": self.route_set.id,
+                    "economics_filled": "1",
+                },
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["success"])
+        route_queries = [
+            q for q in ctx.captured_queries if '"core_route"' in q["sql"]
+        ]
+        self.assertEqual(len(route_queries), 1)
 
 
 class RouteWriteDTOTests(TestCase):

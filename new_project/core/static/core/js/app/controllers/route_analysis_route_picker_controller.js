@@ -17,11 +17,14 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
     static targets = [
       "scenarioSelect",
       "searchInput",
+      "holdingFilterSelect",
+      "filtersCollapse",
       "routeList",
       "loading",
       "empty",
       "errors",
       "confirmButton",
+      "routesTiming",
       "diagramTypeSelect",
       "diagramPlaceholder",
       "equalizerTypeSelect",
@@ -34,6 +37,7 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
     static values = {
       scenariosUrl: String,
       routesUrl: String,
+      holdingsUrl: String,
       routeAnalysisUrl: String,
       activeScenarioId: String,
       pageSize: { type: Number, default: 20 },
@@ -60,6 +64,13 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
         routesHasNext: false,
         routesIsLoadingMore: false,
         routesLastSearch: "",
+        routesLastHolding: "",
+        selectedHolding: "",
+        holdingTomSelect: null,
+        holdingTomSelectInitialized: false,
+        holdingFilterTimeout: null,
+        routesLastCount: 0,
+        routesLastElapsedMs: null,
         scenarioById: new Map(),
         selectedScenario: null,
         selectedScenarioId: null,
@@ -83,6 +94,7 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
       }
       this.state.boundSearchHandler = this.onSearchInput.bind(this);
 
+      this._bindFiltersCollapseListener();
       this._resetUi();
       this._renderRouteDetails(null);
       this._updateEqualizerVisibility(false);
@@ -94,6 +106,71 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
 
       // Инициализируем заглушку диаграмм.
       this._renderDiagram();
+    }
+
+    disconnect() {
+      clearTimeout(this.state.searchTimeout);
+      clearTimeout(this.state.holdingFilterTimeout);
+      this._destroyHoldingTomSelect();
+    }
+
+    onFiltersShown() {
+      this._ensureHoldingTomSelect();
+    }
+
+    onHoldingFilterInteract() {
+      this._ensureHoldingTomSelect();
+    }
+
+    _bindFiltersCollapseListener() {
+      const collapseEl = document.getElementById("routeAnalysisFiltersCollapse");
+      if (!collapseEl || collapseEl.dataset.holdingCollapseBound) return;
+      collapseEl.dataset.holdingCollapseBound = "1";
+      collapseEl.addEventListener("shown.bs.collapse", () => {
+        this._ensureHoldingTomSelect();
+      });
+    }
+
+    onHoldingFilterChange() {
+      clearTimeout(this.state.holdingFilterTimeout);
+      this.state.routesPage = 1;
+      this.state.routesHasNext = false;
+      this.state.holdingFilterTimeout = setTimeout(() => {
+        const holding = this._getSelectedHolding();
+        this.state.selectedHolding = holding;
+        const search = this._getSearchInputEl()
+          ? this._getSearchInputEl().value
+          : "";
+        if (!search.trim() && !holding) {
+          this._resetRouteListOnly();
+          return;
+        }
+        this._loadRoutes({
+          search,
+          holding,
+          page: 1,
+          append: false,
+        });
+      }, this.searchDebounceMsValue || 400);
+    }
+
+    resetHoldingFilter() {
+      this._clearHoldingFilter();
+      const search = this._getSearchInputEl()
+        ? this._getSearchInputEl().value
+        : "";
+      if (!search.trim()) {
+        this._resetRouteListOnly();
+        return;
+      }
+      this.state.routesPage = 1;
+      this.state.routesHasNext = false;
+      this._loadRoutes({
+        search,
+        holding: "",
+        page: 1,
+        append: false,
+      });
     }
 
     onDiagramTypeChange() {
@@ -116,6 +193,7 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
         : "";
       const scenarioId = raw ? Number(raw) : null;
       this.state.routeAnalysisCache.clear();
+      this._destroyHoldingTomSelect();
       this._setScenario(scenarioId);
       this._resetRouteSearch();
       this._renderRouteDetails(null);
@@ -135,8 +213,17 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
         query: this._getSearchInputEl() ? this._getSearchInputEl().value : "",
       });
       this.state.searchTimeout = setTimeout(() => {
+        const search = this._getSearchInputEl()
+          ? this._getSearchInputEl().value
+          : "";
+        const holding = this._getSelectedHolding();
+        if (!search.trim() && !holding) {
+          this._resetRouteListOnly();
+          return;
+        }
         this._loadRoutes({
-          search: this._getSearchInputEl() ? this._getSearchInputEl().value : "",
+          search,
+          holding,
           page: 1,
           append: false,
         });
@@ -264,12 +351,18 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
       if (this.hasSearchInputTarget) {
         this.searchInputTarget.value = "";
       }
+      this._clearHoldingFilter();
+      this._resetRouteListOnly();
+      this._resetRoutesPagination();
+    }
+
+    _resetRouteListOnly() {
       if (this.hasRouteListTarget) {
         this.routeListTarget.innerHTML = "";
       }
       if (this.hasEmptyTarget) setVisible(this.emptyTarget, false);
       this._setLoading(false);
-      this._resetRoutesPagination();
+      this._updateRoutesTiming(null, null);
     }
 
     _resetRoutesPagination() {
@@ -277,10 +370,14 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
       this.state.routesHasNext = false;
       this.state.routesIsLoadingMore = false;
       this.state.routesLastSearch = "";
+      this.state.routesLastHolding = "";
+      this.state.selectedHolding = "";
+      this.state.routesLastCount = 0;
+      this.state.routesLastElapsedMs = null;
       this._removeLoadMoreSentinel();
     }
 
-    async _loadRoutes({ search, page, append = false }) {
+    async _loadRoutes({ search, holding, page, append = false }) {
       if (!this.routesUrlValue) return;
       if (!this.state.selectedRouteSetId) {
         this._showErrors(["У выбранного сценария не задан набор маршрутов"]);
@@ -289,16 +386,26 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
         return;
       }
 
+      const normalizedSearch = (search || "").trim();
+      const normalizedHolding = (holding || "").trim();
+      if (!normalizedSearch && !normalizedHolding) {
+        return;
+      }
+
       // eslint-disable-next-line no-console
       console.info("[route-analysis] fetching routes", {
         routeSetId: this.state.selectedRouteSetId,
-        search: (search || "").trim(),
+        search: normalizedSearch,
+        holding: normalizedHolding,
         page: page || 1,
       });
 
       const query = new URLSearchParams();
       query.set("route_set_id", String(this.state.selectedRouteSetId));
-      query.set("search", (search || "").trim());
+      query.set("search", normalizedSearch);
+      if (normalizedHolding) {
+        query.set("holding", normalizedHolding);
+      }
       query.set("page", String(page || 1));
       query.set("page_size", String(this.pageSizeValue || 20));
       query.set("include_total", "0");
@@ -333,10 +440,16 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
       }
 
       const items = data.items || [];
-      const normalizedSearch = (search || "").trim();
       this.state.routesLastSearch = normalizedSearch;
+      this.state.routesLastHolding = normalizedHolding;
       this.state.routesPage = page || 1;
       this.state.routesHasNext = Boolean(data.has_next);
+      if (!append) {
+        this.state.routesLastCount = items.length;
+        this.state.routesLastElapsedMs =
+          data.elapsed_ms != null ? data.elapsed_ms : null;
+        this._updateRoutesTiming(this.state.routesLastCount, data.elapsed_ms);
+      }
       this._renderRouteList(items, { append });
       if (append) {
         this.state.routesIsLoadingMore = false;
@@ -1386,6 +1499,7 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
 
       this._loadRoutes({
         search: this.state.routesLastSearch,
+        holding: this.state.routesLastHolding,
         page: this.state.routesPage + 1,
         append: true,
       });
@@ -1477,6 +1591,159 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
     _getConfirmButtonEl() {
       const modal = this._getModalEl();
       return modal ? modal.querySelector('[data-route-analysis-route-picker-target="confirmButton"]') : null;
+    }
+
+    _getHoldingFilterSelectEl() {
+      if (this.hasHoldingFilterSelectTarget) {
+        return this.holdingFilterSelectTarget;
+      }
+      const modal = this._getModalEl();
+      return modal ? modal.querySelector("#routeAnalysisHoldingFilter") : null;
+    }
+
+    _getSelectedHolding() {
+      if (this.state.holdingTomSelect) {
+        const value = this.state.holdingTomSelect.getValue();
+        return value ? String(value).trim() : "";
+      }
+      const selectEl = this._getHoldingFilterSelectEl();
+      return selectEl ? String(selectEl.value || "").trim() : "";
+    }
+
+    _clearHoldingFilter() {
+      if (this.state.holdingTomSelect) {
+        this.state.holdingTomSelect.clear(true);
+      } else {
+        const selectEl = this._getHoldingFilterSelectEl();
+        if (selectEl) selectEl.value = "";
+      }
+      this.state.selectedHolding = "";
+    }
+
+    _ensureHoldingTomSelect() {
+      if (this.state.holdingTomSelectInitialized) return;
+      const TomSelectCtor = window.TomSelect;
+      if (typeof TomSelectCtor === "undefined") {
+        console.warn("TomSelect is not available for route-analysis holding filter");
+        return;
+      }
+      if (!this.holdingsUrlValue) {
+        console.warn("holdingsUrlValue is not defined for route-analysis");
+        return;
+      }
+      if (!this.state.selectedRouteSetId) {
+        console.warn("[route-analysis] holding filter: route_set_id is empty");
+        return;
+      }
+
+      const selectEl = this._getHoldingFilterSelectEl();
+      if (!selectEl) return;
+      if (selectEl.tomselect) {
+        this.state.holdingTomSelect = selectEl.tomselect;
+        this.state.holdingTomSelectInitialized = true;
+        return;
+      }
+
+      const holdingsUrl = this.holdingsUrlValue;
+      const getRouteSetId = () => this.state.selectedRouteSetId;
+
+      this.state.holdingTomSelect = new TomSelectCtor(selectEl, {
+        valueField: "value",
+        labelField: "text",
+        searchField: ["text"],
+        maxOptions: 50,
+        maxItems: 1,
+        allowEmptyOption: true,
+        loadThrottle: 350,
+        preload: "focus",
+        shouldLoad: () => true,
+        placeholder: "Начните вводить название холдинга…",
+        render: {
+          option(item, escape) {
+            return `<div>${escape(item.text || "")}</div>`;
+          },
+          item(item, escape) {
+            return `<div>${escape(item.text || "")}</div>`;
+          },
+          no_results() {
+            return '<div class="no-results">Ничего не найдено</div>';
+          },
+        },
+        load: (query, callback) => {
+          const routeSetId = getRouteSetId();
+          if (!routeSetId) {
+            callback();
+            return;
+          }
+          const params = new URLSearchParams();
+          params.set("route_set_id", String(routeSetId));
+          params.set("economics_filled", "1");
+          const q = (query || "").trim();
+          if (q) {
+            params.set("search", q);
+          }
+          fetchJson(`${holdingsUrl}?${params.toString()}`, { method: "GET" })
+            .then(({ data }) => {
+              if (!data || !data.success || !Array.isArray(data.items)) {
+                callback();
+                return;
+              }
+              if (data.elapsed_ms != null) {
+                // eslint-disable-next-line no-console
+                console.info("[route-analysis] holdings loaded", {
+                  count: data.items.length,
+                  elapsed_ms: data.elapsed_ms,
+                });
+              }
+              callback(
+                data.items.map((item) => ({
+                  value: String(item.value),
+                  text: item.text || item.value,
+                })),
+              );
+            })
+            .catch((e) => {
+              console.error("Ошибка загрузки холдингов:", e);
+              callback();
+            });
+        },
+        onChange: () => {
+          this.onHoldingFilterChange();
+        },
+      });
+      this.state.holdingTomSelectInitialized = true;
+    }
+
+    _destroyHoldingTomSelect() {
+      if (
+        this.state.holdingTomSelect &&
+        typeof this.state.holdingTomSelect.destroy === "function"
+      ) {
+        this.state.holdingTomSelect.destroy();
+      }
+      this.state.holdingTomSelect = null;
+      this.state.holdingTomSelectInitialized = false;
+    }
+
+    _updateRoutesTiming(count, elapsedMs) {
+      const el = this.hasRoutesTimingTarget
+        ? this.routesTimingTarget
+        : this._getModalEl()
+          ? this._getModalEl().querySelector(
+              '[data-route-analysis-route-picker-target="routesTiming"]',
+            )
+          : null;
+      if (!el) return;
+      if (elapsedMs == null || elapsedMs === undefined) {
+        el.style.display = "none";
+        el.textContent = "";
+        return;
+      }
+      const n = count != null ? count : 0;
+      const suffix =
+        this.state.routesHasNext && n > 0 ? " (есть ещё)" : "";
+      el.textContent = `Показано ${n} маршрут(ов) за ${elapsedMs} мс${suffix}`;
+      el.style.display = "";
     }
 
     _updateEqualizerVisibility(show) {

@@ -1,4 +1,5 @@
 from django.db import models
+from django.db.models import Q
 from django.contrib.auth.base_user import AbstractBaseUser, BaseUserManager
 from django.contrib.auth.models import PermissionsMixin
 
@@ -637,6 +638,12 @@ class Route(models.Model):
             models.Index(
                 fields=["origin_station", "destination_station"],
                 name="route_stations_idx",
+            ),
+            models.Index(fields=["route_set", "shipper"], name="route_set_shipper_idx"),
+            models.Index(
+                fields=["route_set", "id"],
+                name="route_set_economics_idx",
+                condition=Q(market_price_per_ton__isnull=False),
             ),
         ]
         constraints = [
