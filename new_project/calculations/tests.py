@@ -908,10 +908,16 @@ class ScenarioEffectsPandasParityTests(TariffLoadServiceTestMixin, TestCase):
         from calculations.domain.services.scenario_compute_store import (
             scenario_compute_dir,
         )
+        from calculations.domain.services.route_mart_store import route_mart_cache_dir
+        import shutil
 
         self._setup_btd("1.1000")
         scenario = Scenario.objects.select_related("route_set").get(
             pk=self.scenario.pk,
+        )
+        shutil.rmtree(
+            route_mart_cache_dir(route_set_id=scenario.route_set_id),
+            ignore_errors=True,
         )
         _, _, meta_first = self.pandas_service.compute_pandas(
             scenario=scenario,
@@ -919,7 +925,6 @@ class ScenarioEffectsPandasParityTests(TariffLoadServiceTestMixin, TestCase):
         )
         data_version = meta_first.get("data_version")
         assert data_version
-        import shutil
 
         shutil.rmtree(
             scenario_compute_dir(scenario_id=scenario.id, data_version=data_version),
@@ -934,7 +939,10 @@ class ScenarioEffectsPandasParityTests(TariffLoadServiceTestMixin, TestCase):
         self.assertFalse(meta_first.get("route_mart_cache_hit"))
         self.assertTrue(meta_second.get("route_mart_cache_hit"))
         self.assertFalse(meta_second.get("scenario_compute_cache_hit"))
-        self.assertGreater(meta_second["timings"].get("parquet_read_ms", 0), 0)
+        self.assertIn(
+            meta_second["timings"].get("mart_read_mode"),
+            ("charge_npy", "parquet_columns", "parquet_full"),
+        )
 
     def test_rule_mask_cache_hit(self) -> None:
         from calculations.domain.services.route_effects_loader import (

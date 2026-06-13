@@ -17,6 +17,29 @@ from calculations.domain.services.scenario_effects_compact import _DIMENSION_COL
 from core.models import RouteSet, Setting
 
 META_SUFFIX = ".meta.json"
+CHARGE_NPY_SUFFIX = ".charge.npy"
+
+MART_COMPUTE_BASE_COLUMNS = ("freight_charge_rub",)
+
+# Колонки для масок правил (если dim_* отсутствует в витрине).
+MART_RULE_MASK_FALLBACK_COLUMNS = (
+    "distance_belt_midpoint_km",
+    "shipper_id",
+    "wagon_kind_id",
+    "shipment_type_id",
+    "message_type_id",
+    "shipper_holding",
+    "cargo_group_code",
+    "cargo_code",
+    "origin_railroad_code",
+    "destination_railroad_code",
+    "wagon_kind",
+    "transport_type",
+    "shipment_category",
+    "park_type",
+    "holding",
+    "cargo_group",
+)
 
 ROUTE_MART_REFS_VERSION_CODE = "route_mart_refs_version"
 REFS_VERSION_CACHE_SECONDS = 60 * 60 * 24
@@ -106,6 +129,39 @@ def mart_meta_path(parquet_path: Path) -> Path:
     return parquet_path.with_suffix(parquet_path.suffix + META_SUFFIX)
 
 
+def charge_npy_path(parquet_path: Path) -> Path:
+    return parquet_path.with_name(parquet_path.stem + CHARGE_NPY_SUFFIX)
+
+
+def resolve_light_mart_columns(*, has_rules: bool) -> list[str]:
+    """Минимальный набор колонок для синхронного KPI-расчёта."""
+    if not has_rules:
+        return list(MART_COMPUTE_BASE_COLUMNS)
+    columns = list(MART_COMPUTE_BASE_COLUMNS)
+    for column in _DIMENSION_COLUMNS:
+        dim_column = f"dim_{column}"
+        if dim_column not in columns:
+            columns.append(dim_column)
+    for column in MART_RULE_MASK_FALLBACK_COLUMNS:
+        if column not in columns:
+            columns.append(column)
+    return columns
+
+
+def _parquet_column_names(path: Path) -> set[str]:
+    import pyarrow.parquet as pq
+
+    return set(pq.ParquetFile(path).schema_arrow.names)
+
+
+def _filter_existing_columns(path: Path, columns: list[str]) -> list[str]:
+    available = _parquet_column_names(path)
+    selected = [column for column in columns if column in available]
+    if not selected:
+        return list(MART_COMPUTE_BASE_COLUMNS)
+    return selected
+
+
 def encode_mart_dimensions(df: pd.DataFrame) -> dict[str, list[str]]:
     dimension_labels: dict[str, list[str]] = {}
     for column in _DIMENSION_COLUMNS:
@@ -159,6 +215,10 @@ def load_mart_meta(parquet_path: Path) -> MartMeta | None:
     )
 
 
+def _atomic_replace(tmp_path: Path, final_path: Path) -> None:
+    os.replace(tmp_path, final_path)
+
+
 def _cleanup_stale_parquet_files(*, cache_dir: Path, keep_path: Path) -> int:
     removed = 0
     if not cache_dir.is_dir():
@@ -175,8 +235,59 @@ def _cleanup_stale_parquet_files(*, cache_dir: Path, keep_path: Path) -> int:
     return removed
 
 
-def load_route_mart_parquet(path: Path) -> pd.DataFrame:
-    return pd.read_parquet(path, engine="pyarrow")
+def load_route_mart_parquet(
+    path: Path,
+    *,
+    columns: list[str] | None = None,
+) -> pd.DataFrame:
+    import pyarrow.parquet as pq
+
+    if columns is None:
+        return pq.read_table(path, memory_map=True).to_pandas(
+            split_blocks=True,
+            self_destruct=True,
+        )
+
+    selected = _filter_existing_columns(path, columns)
+    return pq.read_table(path, columns=selected, memory_map=True).to_pandas(
+        split_blocks=True,
+        self_destruct=True,
+    )
+
+
+def save_charge_npy(df: pd.DataFrame, parquet_path: Path) -> None:
+    if "freight_charge_rub" not in df.columns:
+        return
+    out_path = charge_npy_path(parquet_path)
+    tmp_base = out_path.parent / (out_path.stem + ".tmp")
+    charge = df["freight_charge_rub"].to_numpy(dtype=np.float64, copy=False)
+    np.save(tmp_base, charge)
+    _atomic_replace(Path(f"{tmp_base}.npy"), out_path)
+
+
+def load_charge_npy(parquet_path: Path) -> np.ndarray | None:
+    path = charge_npy_path(parquet_path)
+    if not path.is_file():
+        return None
+    loaded = np.load(path, mmap_mode="r")
+    return np.asarray(loaded, dtype=np.float64)
+
+
+def ensure_charge_npy(parquet_path: Path) -> np.ndarray | None:
+    """Создаёт sidecar при первом обращении к старой витрине без .charge.npy."""
+    existing = load_charge_npy(parquet_path)
+    if existing is not None:
+        return existing
+    if not parquet_path.is_file():
+        return None
+    charge_df = load_route_mart_parquet(
+        parquet_path,
+        columns=list(MART_COMPUTE_BASE_COLUMNS),
+    )
+    if charge_df.empty or "freight_charge_rub" not in charge_df.columns:
+        return None
+    save_charge_npy(charge_df, parquet_path)
+    return charge_df["freight_charge_rub"].to_numpy(dtype=np.float64, copy=False)
 
 
 def save_route_mart_parquet(df: pd.DataFrame, path: Path) -> None:
@@ -201,6 +312,7 @@ def save_route_mart_parquet(df: pd.DataFrame, path: Path) -> None:
 def try_load_route_mart(
     *,
     route_set_id: int,
+    columns: list[str] | None = None,
 ) -> tuple[pd.DataFrame | None, MartMeta | None, dict[str, int | str]]:
     timings: dict[str, int | str] = {}
     t0 = time.perf_counter()
@@ -215,13 +327,30 @@ def try_load_route_mart(
         timings["parquet_read_ms"] = 0
         return None, None, timings
 
-    t_read = time.perf_counter()
-    df = load_route_mart_parquet(path)
     meta = load_mart_meta(path)
+    t_read = time.perf_counter()
+
+    if columns is not None and columns == list(MART_COMPUTE_BASE_COLUMNS):
+        charge = load_charge_npy(path)
+        if charge is None:
+            charge = ensure_charge_npy(path)
+        if charge is not None:
+            df = pd.DataFrame({"freight_charge_rub": charge})
+            timings["charge_npy_read_ms"] = int((time.perf_counter() - t_read) * 1000)
+            timings["parquet_read_ms"] = timings["charge_npy_read_ms"]
+            timings["mart_read_mode"] = "charge_npy"
+            timings["cache_hit"] = 1
+            timings["mart_cache_size_mb"] = int(path.stat().st_size / (1024 * 1024))
+            return df, meta, timings
+
+    df = load_route_mart_parquet(path, columns=columns)
     t_done = time.perf_counter()
 
     timings["cache_hit"] = 1
     timings["parquet_read_ms"] = int((t_done - t_read) * 1000)
+    timings["mart_read_mode"] = "parquet_columns" if columns else "parquet_full"
+    if columns:
+        timings["mart_read_columns"] = len(columns)
     timings["mart_cache_size_mb"] = int(path.stat().st_size / (1024 * 1024))
     return df, meta, timings
 
@@ -253,6 +382,7 @@ def save_route_mart(
         ),
     )
     save_route_mart_parquet(df, path)
+    save_charge_npy(df, path)
     t_write = time.perf_counter()
     timings["parquet_write_ms"] = int((t_write - t0) * 1000)
     timings["mart_cache_size_mb"] = int(path.stat().st_size / (1024 * 1024))
@@ -261,5 +391,15 @@ def save_route_mart(
         cache_dir=path.parent,
         keep_path=path,
     )
+    keep_charge = charge_npy_path(path)
+    if keep_charge.is_file():
+        for entry in path.parent.glob(f"*{CHARGE_NPY_SUFFIX}"):
+            if entry.resolve() == keep_charge.resolve():
+                continue
+            try:
+                entry.unlink()
+                removed += 1
+            except OSError:
+                pass
     timings["mart_cache_cleanup_removed"] = removed
     return timings

@@ -445,6 +445,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
             ["compact", meta.timings.compact_build_ms],
             ["итоги", meta.timings.totals_ms],
             ["parquet read", meta.timings.parquet_read_ms],
+            ["charge npy", meta.timings.charge_npy_read_ms],
             ["parquet write", meta.timings.parquet_write_ms],
             ["stats", meta.timings.stats_ms],
             ["sql", meta.timings.routes_sql_execute_ms],

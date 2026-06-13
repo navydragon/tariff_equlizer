@@ -3,11 +3,15 @@ from __future__ import annotations
 import logging
 import threading
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
-import pandas as pd
 
-from calculations.domain.services.route_mart_store import MartMeta
+from calculations.domain.services.route_mart_store import (
+    MartMeta,
+    load_mart_meta,
+    load_route_mart_parquet,
+)
 from calculations.domain.services.scenario_compute_store import (
     ScenarioComputeBundle,
     save_scenario_compute,
@@ -36,7 +40,7 @@ class DeferredCompactJob:
     charge_by_year: np.ndarray
     rule_meta: list[tuple[int, str]]
     rule_by_year: np.ndarray | None
-    df: pd.DataFrame
+    parquet_path: str
     mart_meta: MartMeta | None
     global_totals: GlobalTotals
     filter_options: dict[str, list[str]]
@@ -46,9 +50,12 @@ class DeferredCompactJob:
 
 def _run_deferred_compact(job: DeferredCompactJob) -> None:
     try:
+        parquet_path = Path(job.parquet_path)
+        df = load_route_mart_parquet(parquet_path)
+        mart_meta = job.mart_meta or load_mart_meta(parquet_path)
         dimensions, dimension_labels, volume = prepare_compact_inputs(
-            job.df,
-            job.mart_meta,
+            df,
+            mart_meta,
         )
         compact = build_compact_from_arrays(
             years=job.years,

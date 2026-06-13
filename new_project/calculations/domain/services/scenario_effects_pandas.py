@@ -35,7 +35,10 @@ from calculations.domain.services.route_effects_loader import (
     fetch_route_set_stats,
     fetch_routes_dataframe_cached_timed,
 )
-from calculations.domain.services.route_mart_store import MartMeta
+from calculations.domain.services.route_mart_store import (
+    MartMeta,
+    resolve_light_mart_columns,
+)
 from calculations.domain.services.tariff_load import TariffLoadService
 from scenarios.models import Scenario
 
@@ -90,7 +93,11 @@ class ScenarioEffectsPandasService:
             skipped_volume = scenario_bundle.routes_without_volume
             t_load = t_compute = t_post_compute = time.perf_counter()
         else:
-            df, mart_meta, load_timings = self._load_routes_df(scenario)
+            light_columns = resolve_light_mart_columns(has_rules=bool(context.rules))
+            df, mart_meta, load_timings = self._load_routes_df(
+                scenario,
+                columns=light_columns,
+            )
             t_load = time.perf_counter()
 
             (
@@ -151,8 +158,10 @@ class ScenarioEffectsPandasService:
                     charge_by_year=deferred_job.charge_by_year,
                     rule_meta=deferred_job.rule_meta,
                     rule_by_year=deferred_job.rule_by_year,
-                    df=deferred_job.df,
-                    mart_meta=deferred_job.mart_meta,
+                    parquet_path=str(
+                        load_timings.get("mart_cache_path") or "",
+                    ),
+                    mart_meta=mart_meta,
                     global_totals=global_totals,
                     filter_options=filter_options,
                     skipped_charge=skipped_charge,
@@ -203,9 +212,14 @@ class ScenarioEffectsPandasService:
     def _load_routes_df(
         self,
         scenario: Scenario,
+        *,
+        columns: list[str] | None = None,
     ) -> tuple[pd.DataFrame, MartMeta | None, dict[str, int | str]]:
         route_set_id = scenario.route_set_id
-        df, mart_meta, load_timings = fetch_routes_dataframe_cached_timed(route_set_id)
+        df, mart_meta, load_timings = fetch_routes_dataframe_cached_timed(
+            route_set_id,
+            columns=columns,
+        )
         return df, mart_meta, load_timings
 
     @staticmethod
@@ -357,7 +371,7 @@ class ScenarioEffectsPandasService:
             charge_by_year=charge_by_year,
             rule_meta=rule_meta,
             rule_by_year=rule_by_year_arr,
-            df=df,
+            parquet_path="",
             mart_meta=mart_meta,
             global_totals=global_totals,
             filter_options={},

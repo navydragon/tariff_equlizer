@@ -78,13 +78,19 @@ def fetch_routes_dataframe(route_set_id: int) -> pd.DataFrame:
 
 def fetch_routes_dataframe_cached_timed(
     route_set_id: int,
+    *,
+    columns: list[str] | None = None,
 ) -> tuple[pd.DataFrame, MartMeta | None, dict[str, int | str]]:
     """
     Витрина маршрутов (после JOIN и normalize) из parquet-файла или из БД.
-  """
+    columns: подмножество колонок parquet для ускорения KPI-расчёта.
+    """
     timings: dict[str, int | str] = {}
 
-    df, meta, load_timings = try_load_route_mart(route_set_id=route_set_id)
+    df, meta, load_timings = try_load_route_mart(
+        route_set_id=route_set_id,
+        columns=columns,
+    )
     timings.update(load_timings)
 
     if df is not None:
@@ -110,7 +116,16 @@ def fetch_routes_dataframe_cached_timed(
     timings.update(write_timings)
     timings["cache_hit"] = 0
 
-    meta = try_load_route_mart(route_set_id=route_set_id)[1]
+    if columns is None:
+        meta = try_load_route_mart(route_set_id=route_set_id)[1]
+        return df, meta, timings
+
+    df, meta, reload_timings = try_load_route_mart(
+        route_set_id=route_set_id,
+        columns=columns,
+    )
+    reload_timings.pop("cache_hit", None)
+    timings.update(reload_timings)
     return df, meta, timings
 
 
