@@ -57,6 +57,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
         scenarioYears: [],
         suppressFilterEvents: false,
         computing: false,
+        compactPending: false,
       };
 
       this._loadScenarios();
@@ -232,6 +233,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
         }
 
         this.state.cacheKey = data.cache_key || null;
+        this.state.compactPending = data.compact_ready === false;
         this.state.scenarioYears = data.years || [];
         this._renderWarning(
           data.routes_without_charge,
@@ -276,7 +278,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
       }
     }
 
-    async _aggregateEffects({ showTableLoading = false } = {}) {
+    async _aggregateEffects({ showTableLoading = false, attempt = 0 } = {}) {
       if (
         !this.aggregateUrlValue ||
         !this.state.selectedScenarioId ||
@@ -294,9 +296,11 @@ import { clearToasts, showToast } from "../lib/toast.js";
         return;
       }
 
-      if (showTableLoading) {
+      if (showTableLoading && attempt === 0) {
         this._setTableLoading(true);
       }
+
+      const maxAttempts = this.state.compactPending ? 45 : 1;
 
       try {
         const payload = {
@@ -330,20 +334,55 @@ import { clearToasts, showToast } from "../lib/toast.js";
             await this._computeEffects();
             return;
           }
+          if (
+            this._isAggregatePendingMessage(message) &&
+            attempt + 1 < maxAttempts
+          ) {
+            await this._sleep(2000);
+            return this._aggregateEffects({
+              showTableLoading,
+              attempt: attempt + 1,
+            });
+          }
           this._showError(message);
+          if (showTableLoading) {
+            this._setTableLoading(false);
+          }
           return;
         }
 
+        this.state.compactPending = false;
         this._renderTable(data.table && data.table.rows ? data.table.rows : []);
         this._renderChart(data.chart || null);
+        if (showTableLoading) {
+          this._setTableLoading(false);
+        }
       } catch (error) {
         console.error("[decision-effects] aggregate failed", error);
+        if (attempt + 1 < maxAttempts) {
+          await this._sleep(2000);
+          return this._aggregateEffects({
+            showTableLoading,
+            attempt: attempt + 1,
+          });
+        }
         this._showError("Не удалось обновить таблицу и график.");
-      } finally {
         if (showTableLoading) {
           this._setTableLoading(false);
         }
       }
+    }
+
+    _isAggregatePendingMessage(message) {
+      return (
+        typeof message === "string" &&
+        (message.includes("ещё выполняется") ||
+          message.includes("еще выполняется"))
+      );
+    }
+
+    _sleep(ms) {
+      return new Promise((resolve) => setTimeout(resolve, ms));
     }
 
     _setKpiLoading(isLoading) {

@@ -18,6 +18,7 @@ from calculations.domain.dto.scenario_effects import (
 from calculations.domain.services.grouping import build_group_keys
 from calculations.domain.services.scenario_effects_compact import aggregate_compact_buckets
 from calculations.domain.services.scenario_effects_cache import (
+    COMPACT_API_WAIT_TIMEOUT_SECONDS,
     RouteEffectFact,
     ScenarioEffectsCachePayload,
     get_payload,
@@ -104,7 +105,10 @@ class ScenarioEffectsService:
         user_id: int,
         request: ScenarioEffectsAggregateRequestDTO,
     ) -> tuple[ScenarioEffectsAggregateResponseDTO | None, list[str]]:
-        payload = get_payload_ready(request.cache_key)
+        payload = get_payload_ready(
+            request.cache_key,
+            timeout_seconds=COMPACT_API_WAIT_TIMEOUT_SECONDS,
+        )
         if payload is None:
             return None, ["Расчёт устарел. Выберите сценарий заново."]
 

@@ -17,6 +17,7 @@ from calculations.domain.services.scenario_effects_compact import (
     aggregate_compact_year_values,
 )
 from calculations.domain.services.scenario_effects_cache import (
+    COMPACT_API_WAIT_TIMEOUT_SECONDS,
     CompactRouteEffects,
     RouteEffectFact,
     ScenarioEffectsCachePayload,
@@ -98,7 +99,10 @@ class ScenarioEffectsCubeService:
         user_id: int,
         request: ScenarioEffectsCubeRequestDTO,
     ) -> tuple[ScenarioEffectsCubeResponseDTO | None, list[str]]:
-        payload = get_payload_ready(request.cache_key)
+        payload = get_payload_ready(
+            request.cache_key,
+            timeout_seconds=COMPACT_API_WAIT_TIMEOUT_SECONDS,
+        )
         if payload is None:
             return None, ["Кэш расчёта устарел или недоступен. Выполните пересчёт."]
 

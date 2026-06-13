@@ -15,6 +15,7 @@ from calculations.domain.services.scenario_effects_compact import (
     aggregate_compact_year_values,
 )
 from calculations.domain.services.scenario_effects_cache import (
+    COMPACT_API_WAIT_TIMEOUT_SECONDS,
     ScenarioEffectsCachePayload,
     get_payload_ready,
     validate_cache_access,
@@ -129,7 +130,10 @@ class ScenarioAbsoluteService:
         user_id: int,
         scenario_id: int,
     ) -> tuple[ScenarioEffectsCachePayload | None, list[str]]:
-        payload = get_payload_ready(cache_key)
+        payload = get_payload_ready(
+            cache_key,
+            timeout_seconds=COMPACT_API_WAIT_TIMEOUT_SECONDS,
+        )
         if payload is None:
             return None, ["Расчёт устарел. Выберите сценарий заново."]
 
