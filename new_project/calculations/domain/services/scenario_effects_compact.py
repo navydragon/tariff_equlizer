@@ -19,9 +19,32 @@ _DIMENSION_COLUMNS = (
     "holding",
 )
 
+_FLOAT_DTYPE = np.float32
+_COMPUTE_DTYPE = np.float64
+
+
+def extract_volume_array(df: pd.DataFrame) -> np.ndarray:
+    series = df["transport_volume_tons"]
+    if pd.api.types.is_numeric_dtype(series):
+        return np.nan_to_num(
+            series.to_numpy(dtype=_FLOAT_DTYPE, copy=False),
+            nan=0.0,
+        )
+    return (
+        pd.to_numeric(series, errors="coerce")
+        .fillna(0)
+        .to_numpy(dtype=_FLOAT_DTYPE)
+    )
+
+
+def _as_float32(array: np.ndarray) -> np.ndarray:
+    if array.dtype == _FLOAT_DTYPE:
+        return array
+    return array.astype(_FLOAT_DTYPE, copy=False)
+
 
 def build_compact_from_arrays(
-    df: pd.DataFrame,
+    df: pd.DataFrame | None = None,
     *,
     years: list[int],
     initial: np.ndarray,
@@ -32,6 +55,7 @@ def build_compact_from_arrays(
     rule_by_year: np.ndarray | None = None,
     dimensions: dict[str, np.ndarray] | None = None,
     dimension_labels: dict[str, list[str]] | None = None,
+    volume: np.ndarray | None = None,
 ) -> CompactRouteEffects:
     resolved_dimensions: dict[str, np.ndarray] = {}
     resolved_labels: dict[str, list[str]] = {}
@@ -39,7 +63,7 @@ def build_compact_from_arrays(
     if dimensions is not None and dimension_labels is not None:
         resolved_dimensions = dimensions
         resolved_labels = dimension_labels
-    else:
+    elif df is not None:
         for column in _DIMENSION_COLUMNS:
             dim_column = f"dim_{column}"
             if dim_column in df.columns:
@@ -53,25 +77,26 @@ def build_compact_from_arrays(
             codes, uniques = pd.factorize(series, sort=False)
             resolved_dimensions[column] = codes.astype(np.int32, copy=False)
             resolved_labels[column] = uniques.tolist()
+    else:
+        raise ValueError("dimensions and dimension_labels or df are required")
 
-    volume = (
-        pd.to_numeric(df["transport_volume_tons"], errors="coerce")
-        .fillna(0)
-        .to_numpy(dtype=np.float64)
-    )
+    if volume is None:
+        if df is None:
+            raise ValueError("volume or df is required")
+        volume = extract_volume_array(df)
 
     return CompactRouteEffects(
         years=years,
         dimensions=resolved_dimensions,
         dimension_labels=resolved_labels,
-        baseline_rub=initial.astype(np.float64, copy=False),
-        volume_tons=volume,
-        base_by_year=base_by_year.astype(np.float64, copy=False),
-        rules_by_year=rules_by_year_arr.astype(np.float64, copy=False),
-        charge_by_year=charge_by_year.astype(np.float64, copy=False),
+        baseline_rub=_as_float32(initial),
+        volume_tons=_as_float32(volume),
+        base_by_year=_as_float32(base_by_year),
+        rules_by_year=_as_float32(rules_by_year_arr),
+        charge_by_year=_as_float32(charge_by_year),
         rule_meta=list(rule_meta or []),
         rule_by_year=(
-            rule_by_year.astype(np.float64, copy=False)
+            _as_float32(rule_by_year)
             if rule_by_year is not None
             else None
         ),

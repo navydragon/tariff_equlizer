@@ -16,7 +16,7 @@ from calculations.domain.services.scenario_effects_compact import (
 )
 from calculations.domain.services.scenario_effects_cache import (
     ScenarioEffectsCachePayload,
-    get_payload,
+    get_payload_ready,
     validate_cache_access,
 )
 from calculations.domain.units import RUB_PER_BLN, TONS_PER_MLN
@@ -129,7 +129,7 @@ class ScenarioAbsoluteService:
         user_id: int,
         scenario_id: int,
     ) -> tuple[ScenarioEffectsCachePayload | None, list[str]]:
-        payload = get_payload(cache_key)
+        payload = get_payload_ready(cache_key)
         if payload is None:
             return None, ["Расчёт устарел. Выберите сценарий заново."]
 
@@ -140,6 +140,9 @@ class ScenarioAbsoluteService:
         )
         if access_errors:
             return None, access_errors
+
+        if payload.compact is None and payload.compact_pending:
+            return None, ["Расчёт ещё выполняется. Повторите запрос через несколько секунд."]
 
         return payload, []
 

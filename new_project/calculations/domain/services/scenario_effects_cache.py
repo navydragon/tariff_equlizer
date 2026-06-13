@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 import uuid
 from dataclasses import dataclass, field
 from decimal import Decimal
@@ -15,6 +16,8 @@ from scenarios.models import Scenario, TariffRule
 CACHE_PREFIX = "scenario_effects"
 STABLE_CACHE_PREFIX = f"{CACHE_PREFIX}:stable"
 CACHE_TIMEOUT_SECONDS = 60 * 60 * 24
+COMPACT_WAIT_TIMEOUT_SECONDS = 60.0
+COMPACT_WAIT_POLL_INTERVAL_SECONDS = 0.05
 
 
 @dataclass
@@ -59,6 +62,7 @@ class ScenarioEffectsCachePayload:
     baseline_total: Decimal
     facts: list[RouteEffectFact] = field(default_factory=list)
     compact: CompactRouteEffects | None = None
+    compact_pending: bool = False
     data_version: str | None = None
 
 
@@ -193,6 +197,37 @@ def get_payload(cache_key: str) -> ScenarioEffectsCachePayload | None:
     if not isinstance(payload, ScenarioEffectsCachePayload):
         return None
     return _hydrate_payload_from_disk(payload)
+
+
+def get_payload_ready(
+    cache_key: str,
+    *,
+    timeout_seconds: float = COMPACT_WAIT_TIMEOUT_SECONDS,
+) -> ScenarioEffectsCachePayload | None:
+    """Возвращает payload с compact; ждёт фоновую сборку при compact_pending."""
+    deadline = time.perf_counter() + timeout_seconds
+    while True:
+        payload = get_payload(cache_key)
+        if payload is None:
+            return None
+        if payload.compact is not None or not payload.compact_pending:
+            return payload
+        if time.perf_counter() >= deadline:
+            return payload
+        time.sleep(COMPACT_WAIT_POLL_INTERVAL_SECONDS)
+
+
+def update_payload_compact(
+    *,
+    cache_key: str,
+    compact: CompactRouteEffects,
+) -> None:
+    payload = cache.get(cache_key)
+    if not isinstance(payload, ScenarioEffectsCachePayload):
+        return
+    payload.compact = compact
+    payload.compact_pending = False
+    cache.set(cache_key, payload, CACHE_TIMEOUT_SECONDS)
 
 
 def validate_cache_access(

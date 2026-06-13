@@ -22,7 +22,7 @@ from calculations.domain.services import (
     ScenarioEffectsService,
     TariffLoadService,
 )
-from calculations.domain.services.scenario_effects_cache import get_payload
+from calculations.domain.services.scenario_effects_cache import get_payload, get_payload_ready
 from calculations.domain.services.pandas_tariff_conditions import (
     build_rule_mask,
     build_rule_mask_numpy,
@@ -889,10 +889,11 @@ class ScenarioEffectsPandasParityTests(TariffLoadServiceTestMixin, TestCase):
             pk=self.scenario.pk,
         )
 
-        _, _, meta_first = self.pandas_service.compute_pandas(
+        result_first, _, meta_first = self.pandas_service.compute_pandas(
             scenario=scenario,
             user_id=self.user.id,
         )
+        get_payload_ready(result_first.cache_key)
         _, _, meta_second = self.pandas_service.compute_pandas(
             scenario=scenario,
             user_id=self.user.id,
@@ -1026,6 +1027,7 @@ class ScenarioEffectsComputePandasApiTests(TariffLoadServiceTestMixin, TestCase)
         self.assertIn("data_version", payload)
         self.assertIn("scenario_compute_cache_hit", payload)
 
+        get_payload_ready(payload["cache_key"])
         response_repeat = self.client.post(
             url,
             data=json.dumps({"scenario_id": self.scenario.id}),
@@ -1047,9 +1049,10 @@ class ScenarioEffectsComputePandasApiTests(TariffLoadServiceTestMixin, TestCase)
         cached = cache.get(cache_key)
         self.assertIsNotNone(cached)
         self.assertIsNone(cached.compact)
+        self.assertTrue(cached.compact_pending)
         self.assertTrue(cached.data_version)
 
-        resolved = get_payload(cache_key)
+        resolved = get_payload_ready(cache_key)
         self.assertIsNotNone(resolved)
         self.assertIsNotNone(resolved.compact)
         self.assertGreater(len(resolved.compact.baseline_rub), 0)

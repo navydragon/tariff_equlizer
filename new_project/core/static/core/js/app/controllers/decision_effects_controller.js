@@ -240,6 +240,8 @@ import { clearToasts, showToast } from "../lib/toast.js";
             engine: data.engine,
             elapsed_ms: data.elapsed_ms,
             timings: data.timings,
+            scenario_compute_cache_hit: data.scenario_compute_cache_hit,
+            compact_ready: data.compact_ready,
           },
         );
         this._syncYearOptions(data.years || []);
@@ -434,6 +436,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
             ["снимок write", meta.timings.scenario_snapshot_save_ms],
             ["загрузка", meta.timings.load_ms],
             ["расчёт", meta.timings.compute_ms],
+            ["постобработка", meta.timings.post_compute_ms],
             ["карточки", meta.timings.cards_ms],
             ["кэш", meta.timings.cache_ms],
             ["маски", meta.timings.masks_ms],
@@ -458,6 +461,9 @@ import { clearToasts, showToast } from "../lib/toast.js";
           timingDetails += ", снимок сценария";
         } else if (meta.cache_hit || meta.route_mart_cache_hit) {
           timingDetails += ", витрина parquet";
+        }
+        if (meta.compact_ready === false) {
+          timingDetails += ", compact в фоне";
         }
         showToast(
           `Расчёт выполнен${elapsed}${timingDetails}.`,

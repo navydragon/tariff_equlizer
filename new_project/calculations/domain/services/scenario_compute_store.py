@@ -87,10 +87,10 @@ def _load_rule_by_year(cache_dir: Path, data) -> np.ndarray | None:
     sidecar = cache_dir / RULE_BY_YEAR_FILENAME
     if sidecar.is_file():
         loaded = np.load(sidecar, mmap_mode="r")
-        return np.asarray(loaded, dtype=np.float64)
+        return np.asarray(loaded, dtype=np.float32)
 
     if data is not None and "rule_by_year" in data.files:
-        return data["rule_by_year"].astype(np.float64, copy=False)
+        return data["rule_by_year"].astype(np.float32, copy=False)
     return None
 
 
@@ -106,9 +106,9 @@ def save_scenario_compute(
     compact = bundle.compact
     arrays = _compact_arrays_for_store(compact)
 
-    tmp_base = cache_dir / "arrays.tmp"
-    np.savez(tmp_base, **arrays)
-    _atomic_replace(Path(f"{tmp_base}.npz"), cache_dir / NPZ_FILENAME)
+    tmp_path = cache_dir / "arrays.write.npz"
+    np.savez(tmp_path, **arrays)
+    _atomic_replace(tmp_path, cache_dir / NPZ_FILENAME)
 
     if compact.rule_by_year is not None:
         _save_rule_by_year(cache_dir / RULE_BY_YEAR_FILENAME, compact.rule_by_year)
@@ -151,11 +151,11 @@ def try_load_scenario_compute(
             years=[int(year) for year in metadata["years"]],
             dimensions=dimensions,
             dimension_labels=metadata["dimension_labels"],
-            baseline_rub=data["baseline_rub"].astype(np.float64, copy=False),
-            volume_tons=data["volume_tons"].astype(np.float64, copy=False),
-            base_by_year=data["base_by_year"].astype(np.float64, copy=False),
-            rules_by_year=data["rules_by_year"].astype(np.float64, copy=False),
-            charge_by_year=data["charge_by_year"].astype(np.float64, copy=False),
+            baseline_rub=data["baseline_rub"],
+            volume_tons=data["volume_tons"],
+            base_by_year=data["base_by_year"],
+            rules_by_year=data["rules_by_year"],
+            charge_by_year=data["charge_by_year"],
             rule_meta=[(int(item[0]), str(item[1])) for item in metadata.get("rule_meta", [])],
             rule_by_year=rule_by_year,
         )

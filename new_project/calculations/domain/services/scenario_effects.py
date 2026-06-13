@@ -21,6 +21,7 @@ from calculations.domain.services.scenario_effects_cache import (
     RouteEffectFact,
     ScenarioEffectsCachePayload,
     get_payload,
+    get_payload_ready,
     make_cache_key,
     store_payload,
     validate_cache_access,
@@ -103,7 +104,7 @@ class ScenarioEffectsService:
         user_id: int,
         request: ScenarioEffectsAggregateRequestDTO,
     ) -> tuple[ScenarioEffectsAggregateResponseDTO | None, list[str]]:
-        payload = get_payload(request.cache_key)
+        payload = get_payload_ready(request.cache_key)
         if payload is None:
             return None, ["Расчёт устарел. Выберите сценарий заново."]
 
@@ -114,6 +115,12 @@ class ScenarioEffectsService:
         )
         if access_errors:
             return None, access_errors
+
+        if payload.compact is None and payload.compact_pending:
+            return None, ["Расчёт ещё выполняется. Повторите запрос через несколько секунд."]
+
+        if payload.compact is None and not payload.facts:
+            return None, ["Расчёт устарел. Выберите сценарий заново."]
 
         years = payload.years
         if request.year not in years:

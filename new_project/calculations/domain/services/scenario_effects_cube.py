@@ -20,7 +20,7 @@ from calculations.domain.services.scenario_effects_cache import (
     CompactRouteEffects,
     RouteEffectFact,
     ScenarioEffectsCachePayload,
-    get_payload,
+    get_payload_ready,
     validate_cache_access,
 )
 from calculations.domain.units import RUB_PER_BLN
@@ -98,7 +98,7 @@ class ScenarioEffectsCubeService:
         user_id: int,
         request: ScenarioEffectsCubeRequestDTO,
     ) -> tuple[ScenarioEffectsCubeResponseDTO | None, list[str]]:
-        payload = get_payload(request.cache_key)
+        payload = get_payload_ready(request.cache_key)
         if payload is None:
             return None, ["Кэш расчёта устарел или недоступен. Выполните пересчёт."]
 
@@ -109,6 +109,9 @@ class ScenarioEffectsCubeService:
         )
         if access_errors:
             return None, access_errors
+
+        if payload.compact is None:
+            return None, ["Расчёт ещё выполняется. Повторите запрос через несколько секунд."]
 
         if not _payload_has_effects_data(payload):
             return None, [
