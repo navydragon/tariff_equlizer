@@ -686,6 +686,7 @@ import { renderErrors } from "../lib/errors.js";
       this.modalInstance.hide();
       await this.loadRules();
       this.showToast("success", "Сохранено");
+      this._dispatchTariffRulesChanged();
     }
 
     async deleteRule(event) {
@@ -701,6 +702,16 @@ import { renderErrors } from "../lib/errors.js";
       }
       await this.loadRules();
       this.showToast("success", "Удалено");
+      this._dispatchTariffRulesChanged();
+    }
+
+    _dispatchTariffRulesChanged() {
+      if (!this.hasScenarioIdValue) return;
+      document.dispatchEvent(
+        new CustomEvent("tariff-rules-changed", {
+          detail: { scenarioId: this.scenarioIdValue },
+        }),
+      );
     }
 
     showToast(type, message) {

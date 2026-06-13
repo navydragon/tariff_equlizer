@@ -11,6 +11,9 @@ from scenarios.domain.dto import (
 )
 from scenarios.domain.repositories import ScenarioRepository, TariffRuleRepository
 from scenarios.domain.services.scenario_access import ScenarioAccessHelper
+from calculations.domain.services.scenario_warm_scheduler import (
+    schedule_debounced_scenario_warm,
+)
 
 
 ERR_RULE_NOT_FOUND = "Тарифное решение не найдено"
@@ -23,17 +26,11 @@ def _schedule_scenario_warm(
     rule_id: int | None = None,
     mask_changed: bool = False,
 ) -> None:
-    from calculations.domain.services.scenario_effects_warm import (
-        warm_scenario_after_rule_change,
-    )
-
-    transaction.on_commit(
-        lambda: warm_scenario_after_rule_change(
-            scenario_id=scenario_id,
-            change=change,
-            rule_id=rule_id,
-            mask_changed=mask_changed,
-        ),
+    schedule_debounced_scenario_warm(
+        scenario_id=scenario_id,
+        change=change,
+        rule_id=rule_id,
+        mask_changed=mask_changed,
     )
 
 
@@ -162,6 +159,7 @@ class TariffRuleService:
             dto.conditions is not None
             or dto.year_values is not None
             or dto.base_percent is not None
+            or dto.name is not None
         )
         if refreshed is not None and affects_compute:
             _schedule_scenario_warm(

@@ -31,6 +31,7 @@ _MART_MASK_DIM_SOURCES: dict[str, str] = {
 
 # Колонки для masks.npz: только числовые поля, не покрытые dim_*.
 MART_RULE_MASK_SIDECAR_COLUMNS = (
+    "distance_belt",
     "distance_belt_midpoint_km",
     "shipper_id",
     "shipment_type_id",
@@ -245,8 +246,24 @@ def load_mart_meta(parquet_path: Path) -> MartMeta | None:
     )
 
 
-def _atomic_replace(tmp_path: Path, final_path: Path) -> None:
-    os.replace(tmp_path, final_path)
+def _atomic_replace(tmp_path: Path, final_path: Path, *, max_attempts: int = 12) -> None:
+    import time
+
+    final_path.parent.mkdir(parents=True, exist_ok=True)
+    last_error: OSError | None = None
+    for attempt in range(max_attempts):
+        try:
+            if final_path.exists():
+                final_path.unlink()
+            os.replace(tmp_path, final_path)
+            return
+        except OSError as exc:
+            last_error = exc
+            if attempt + 1 >= max_attempts:
+                break
+            time.sleep(0.05 * (attempt + 1))
+    if last_error is not None:
+        raise last_error
 
 
 def _cleanup_stale_parquet_files(*, cache_dir: Path, keep_path: Path) -> int:
@@ -340,6 +357,8 @@ def _mask_sidecar_array(series: pd.Series, column: str) -> np.ndarray:
             dtype=np.float64,
             copy=False,
         )
+    if column == "distance_belt":
+        return series.fillna("").astype(str).to_numpy(dtype="U32", copy=False)
     raise ValueError(f"Unexpected masks sidecar column: {column}")
 
 
@@ -399,7 +418,13 @@ def _masks_npz_needs_rebuild(parquet_path: Path) -> bool:
     if not keys:
         return True
     allowed = frozenset(MART_RULE_MASK_SIDECAR_COLUMNS)
-    return bool(keys - allowed)
+    if keys - allowed:
+        return True
+    available = _parquet_column_names(parquet_path)
+    required = {
+        column for column in MART_RULE_MASK_SIDECAR_COLUMNS if column in available
+    }
+    return bool(required - keys)
 
 
 def save_dims_npz(df: pd.DataFrame, parquet_path: Path) -> None:
@@ -440,7 +465,7 @@ def load_masks_npz(parquet_path: Path) -> dict[str, np.ndarray]:
     path = masks_npz_path(parquet_path)
     if not path.is_file():
         return {}
-    with np.load(path, allow_pickle=False, mmap_mode="r") as data:
+    with np.load(path, allow_pickle=False) as data:
         return {key: np.asarray(data[key]) for key in data.files}
 
 

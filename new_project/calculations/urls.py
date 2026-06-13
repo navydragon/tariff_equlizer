@@ -26,6 +26,16 @@ urlpatterns = [
         name="scenario_effects_aggregate_api",
     ),
     path(
+        "api/scenario-effects/revision/",
+        views.scenario_effects_revision_api,
+        name="scenario_effects_revision_api",
+    ),
+    path(
+        "api/scenario-effects/compact-status/",
+        views.scenario_effects_compact_status_api,
+        name="scenario_effects_compact_status_api",
+    ),
+    path(
         "api/scenario-effects/",
         views.scenario_effects_api,
         name="scenario_effects_api",

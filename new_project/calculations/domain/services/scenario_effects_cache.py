@@ -102,7 +102,7 @@ def compute_scenario_data_version(
         parts.append(f"base:{year}:{base_coef_by_year[year]}")
     for rule in rules:
         parts.append(
-            f"rule:{rule.id}:{rule.position}:{rule.base_percent}",
+            f"rule:{rule.id}:{rule.name}:{rule.position}:{rule.base_percent}",
         )
         for condition in rule.conditions.all():
             parts.append(
@@ -248,3 +248,34 @@ def validate_cache_access(
     if payload.scenario_id != scenario_id:
         return ["Кэш расчёта не соответствует сценарию"]
     return []
+
+
+REVISION_PREFIX = f"{CACHE_PREFIX}:rev"
+
+
+def revision_cache_key(*, scenario_id: int) -> str:
+    return f"{REVISION_PREFIX}:{scenario_id}"
+
+
+def set_scenario_effects_revision(*, scenario_id: int, data_version: str) -> None:
+    cache.set(
+        revision_cache_key(scenario_id=scenario_id),
+        data_version,
+        CACHE_TIMEOUT_SECONDS,
+    )
+
+
+def get_scenario_effects_revision(*, scenario_id: int) -> str | None:
+    value = cache.get(revision_cache_key(scenario_id=scenario_id))
+    return value if isinstance(value, str) else None
+
+
+def get_compact_status(*, cache_key: str) -> dict[str, object]:
+    payload = get_payload(cache_key)
+    if payload is None:
+        return {"compact_ready": False, "data_version": None}
+    compact_ready = payload.compact is not None or not payload.compact_pending
+    return {
+        "compact_ready": compact_ready,
+        "data_version": payload.data_version,
+    }

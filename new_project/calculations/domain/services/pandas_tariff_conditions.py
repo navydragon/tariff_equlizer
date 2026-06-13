@@ -61,6 +61,53 @@ def _label_codes(values: list, labels: list[str]) -> list[int]:
     return codes
 
 
+def _parse_int_ids(vals: list) -> list[int]:
+    ids: list[int] = []
+    for value in vals:
+        try:
+            ids.append(int(value))
+        except (TypeError, ValueError):
+            continue
+    return ids
+
+
+def _lookup_dimension_names(parameter: str, vals: list) -> list[str]:
+    ids = _parse_int_ids(vals)
+    if not ids:
+        return []
+
+    if parameter == "wagon_kind":
+        from core.models import WagonKind
+
+        return list(
+            WagonKind.objects.filter(pk__in=ids).values_list("name", flat=True),
+        )
+    if parameter == "message_type":
+        from core.models import MessageType
+
+        return list(
+            MessageType.objects.filter(pk__in=ids).values_list("name", flat=True),
+        )
+    if parameter == "shipment_type":
+        from core.models import ShipmentType
+
+        return list(
+            ShipmentType.objects.filter(pk__in=ids).values_list("name", flat=True),
+        )
+
+    return []
+
+
+def _lookup_railroad_names(codes: list) -> list[str]:
+    from core.models import RailRoad
+
+    return list(
+        RailRoad.objects.filter(
+            code__in=[str(value) for value in codes],
+        ).values_list("name", flat=True),
+    )
+
+
 def _resolve_dim_compare_codes(
     parameter: str,
     vals: list,
@@ -78,6 +125,14 @@ def _resolve_dim_compare_codes(
                 code__in=[str(value) for value in vals],
             ).values_list("name", flat=True),
         )
+        return _label_codes(names, labels)
+
+    if parameter in {"origin_railroad", "destination_railroad"}:
+        names = _lookup_railroad_names(vals)
+        return _label_codes(names, labels)
+
+    names = _lookup_dimension_names(parameter, vals)
+    if names:
         return _label_codes(names, labels)
 
     return []
@@ -98,6 +153,21 @@ def build_rule_mask_numpy(
         parameter = (condition.get("parameter") or "").strip()
         operator = (condition.get("operator") or "").strip()
         values = condition.get("values")
+
+        if parameter == "distance_belt" and operator in ("include", "exclude"):
+            if "distance_belt" not in df.columns:
+                continue
+            belt_vals = [
+                str(v) for v in _as_list(values) if v is not None and str(v) != ""
+            ]
+            if not belt_vals:
+                continue
+            series = df["distance_belt"].fillna("").astype(str).to_numpy()
+            if operator == "include":
+                mask &= np.isin(series, belt_vals)
+            elif operator == "exclude":
+                mask &= ~np.isin(series, belt_vals)
+            continue
 
         if parameter == "distance_belt" and operator in ("lt", "gt"):
             if "distance_belt_midpoint_km" not in df.columns:
@@ -187,6 +257,21 @@ def build_rule_mask(df: pd.DataFrame, conditions: list[dict]) -> pd.Series:
         parameter = (condition.get("parameter") or "").strip()
         operator = (condition.get("operator") or "").strip()
         values = condition.get("values")
+
+        if parameter == "distance_belt" and operator in ("include", "exclude"):
+            if "distance_belt" not in df.columns:
+                continue
+            belt_vals = [
+                str(v) for v in _as_list(values) if v is not None and str(v) != ""
+            ]
+            if not belt_vals:
+                continue
+            series = df["distance_belt"].fillna("").astype(str)
+            if operator == "include":
+                mask &= series.isin(belt_vals)
+            elif operator == "exclude":
+                mask &= ~series.isin(belt_vals)
+            continue
 
         if parameter == "distance_belt" and operator in ("lt", "gt"):
             if "distance_belt_midpoint_km" not in df.columns:

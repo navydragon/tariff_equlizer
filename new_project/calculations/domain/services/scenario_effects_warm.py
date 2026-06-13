@@ -114,9 +114,27 @@ def warm_scenario_after_rule_change(
         skipped_charge=skipped_charge,
         routes_without_volume=skipped_volume,
     )
+    from calculations.domain.services.scenario_effects_cache import (
+        set_scenario_effects_revision,
+    )
+
+    set_scenario_effects_revision(
+        scenario_id=scenario.id,
+        data_version=data_version,
+    )
     purge_stale_scenario_compute(
         scenario_id=scenario.id,
         keep_data_version=data_version,
+    )
+    from calculations.domain.services.route_mask_cache import (
+        mask_cache_dir,
+        purge_stale_mask_cache_dirs,
+    )
+
+    resolved_mask_dir = mask_cache_dir(route_set_id=scenario.route_set_id)
+    purge_stale_mask_cache_dirs(
+        route_set_id=scenario.route_set_id,
+        keep_cache_dir=resolved_mask_dir,
     )
 
     base_coef_by_year: dict[int, Decimal] = context.base_coef_by_year
@@ -130,7 +148,7 @@ def warm_scenario_after_rule_change(
             base_coef_by_year=base_coef_by_year,
             rule_specs=rule_specs,
             parquet_path=str(parquet_path),
-            mask_cache_dir_path=str(mask_cache_dir(route_set_id=scenario.route_set_id)),
+            mask_cache_dir_path=str(resolved_mask_dir),
             mart_meta=mart_meta,
             global_totals=global_totals,
             filter_options=filter_options,

@@ -8,6 +8,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from concurrent.futures import ThreadPoolExecutor
+
 from calculations.domain.services.route_mask_cache import build_or_load_rule_mask
 from calculations.domain.services.route_mart_store import MartMeta
 from calculations.domain.services.scenario_effects_compact import _COMPUTE_DTYPE
@@ -98,15 +100,28 @@ def _prepare_rules_state(
     import time
 
     t_masks = time.perf_counter()
-    for rule_spec in rule_specs:
+    resolved_mask_dir = mask_cache_dir
+    if resolved_mask_dir is None:
+        from calculations.domain.services.route_mask_cache import mask_cache_dir as resolve_mask_cache_dir
+
+        resolved_mask_dir = resolve_mask_cache_dir(route_set_id=route_set_id)
+
+    def _build_mask(rule_spec: RuleComputeSpec) -> tuple[RuleComputeSpec, np.ndarray]:
         mask = build_or_load_rule_mask(
             route_set_id=route_set_id,
             rule_id=rule_spec.id,
             conditions=rule_spec.conditions,
             df=df,
             mart_meta=mart_meta,
-            cache_dir=mask_cache_dir,
+            cache_dir=resolved_mask_dir,
         )
+        return rule_spec, mask
+
+    max_workers = min(8, len(rule_specs) or 1)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        mask_results = list(executor.map(_build_mask, rule_specs))
+
+    for rule_spec, mask in mask_results:
         if not mask.any():
             continue
 

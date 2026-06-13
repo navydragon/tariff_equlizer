@@ -1,0 +1,52 @@
+{
+  "generated_at": "2026-06-13T17:18:52.236798+00:00",
+  "scenario": {
+    "id": 1,
+    "name": "Базовый сценарий",
+    "route_set_id": 3,
+    "routes_total": 2128493
+  },
+  "profile": "mixed",
+  "samples": {
+    "wagon_kind_id": "13",
+    "cargo_group_code": "8",
+    "message_type_id": "15",
+    "shipment_type_id": "32",
+    "railroad_code": "01",
+    "shipper_id": "20170",
+    "holding": "(пусто)",
+    "distance_belt_lt": 500,
+    "distance_belt_include": "0-500"
+  },
+  "cache_sizes_mb": {
+    "route_masks_mb": 42.44,
+    "scenario_compute_mb": 0.0,
+    "route_mart_mb": 391.04
+  },
+  "runs": [
+    {
+      "rules_count": 1,
+      "profile": "mixed",
+      "cold_compute_ms": null,
+      "warm_compute_ms": null,
+      "compact_ready_ms": null,
+      "compact_ready": null,
+      "masks_ms_cold": null,
+      "masks_ms_warm": null,
+      "rule_by_year_ms": null,
+      "scenario_compute_cache_hit": null,
+      "burst_create_ms": 12,
+      "update_coef_ms": null,
+      "update_conditions_ms": null,
+      "aggregate_pending_ms": null,
+      "aggregate_ready_ms": null,
+      "matched_routes": [
+        248326
+      ],
+      "rules_by_year_2030": null,
+      "errors": [
+        "[WinError 32] Процесс не может получить доступ к файлу, так как этот файл занят другим процессом: 'C:\\\\Users\\\\Пользователь\\\\Documents\\\\projects\\\\tariff_equlizer\\\\new_project\\\\cache\\\\route_mart\\\\3\\\\refs4457_20260525T184316371849Z.masks.write.npz' -> 'C:\\\\Users\\\\Пользователь\\\\Documents\\\\projects\\\\tariff_equlizer\\\\new_project\\\\cache\\\\route_mart\\\\3\\\\refs4457_20260525T184316371849Z.masks.npz'"
+      ]
+    }
+  ]
+}

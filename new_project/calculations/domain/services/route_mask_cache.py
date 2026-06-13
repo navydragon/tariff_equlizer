@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
+import threading
 from pathlib import Path
 
 import numpy as np
@@ -36,11 +38,42 @@ def _format_updated_at(updated_at) -> str:
     return updated_at.strftime("%Y%m%dT%H%M%S%fZ")
 
 
+_mask_dir_memo: dict[int, tuple[str, str, Path]] = {}
+_mask_dir_memo_guard = threading.Lock()
+
+
 def mask_cache_dir(*, route_set_id: int) -> Path:
     rs = RouteSet.objects.only("updated_at").get(pk=route_set_id)
     refs_version = get_route_mart_refs_version()
     stamp = _format_updated_at(rs.updated_at)
-    return route_mask_cache_root() / str(route_set_id) / f"refs{refs_version}_{stamp}"
+    with _mask_dir_memo_guard:
+        cached = _mask_dir_memo.get(route_set_id)
+        if cached is not None and cached[0] == stamp and cached[1] == refs_version:
+            return cached[2]
+        path = route_mask_cache_root() / str(route_set_id) / f"refs{refs_version}_{stamp}"
+        _mask_dir_memo[route_set_id] = (stamp, refs_version, path)
+        return path
+
+
+def purge_stale_mask_cache_dirs(
+    *,
+    route_set_id: int,
+    keep_cache_dir: Path | None = None,
+) -> int:
+    root = route_mask_cache_root() / str(route_set_id)
+    if not root.is_dir():
+        return 0
+
+    keep_resolved = keep_cache_dir.resolve() if keep_cache_dir is not None else None
+    removed = 0
+    for child in root.iterdir():
+        if not child.is_dir():
+            continue
+        if keep_resolved is not None and child.resolve() == keep_resolved:
+            continue
+        shutil.rmtree(child, ignore_errors=True)
+        removed += 1
+    return removed
 
 
 def _conditions_hash(conditions: list[dict]) -> str:

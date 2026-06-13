@@ -125,3 +125,14 @@ class Command(BaseCommand):
             f"(sql={load_ms} ms, parquet_write={parquet_write_ms} ms)",
         )
         self.stdout.write(f"        {mart_path}")
+        from calculations.domain.services.route_mask_cache import (
+            mask_cache_dir,
+            purge_stale_mask_cache_dirs,
+        )
+
+        removed_masks = purge_stale_mask_cache_dirs(
+            route_set_id=route_set.id,
+            keep_cache_dir=mask_cache_dir(route_set_id=route_set.id),
+        )
+        if removed_masks:
+            self.stdout.write(f"        удалено устаревших mask dirs: {removed_masks}")

@@ -117,6 +117,27 @@ def _write_metadata(cache_dir: Path, metadata: dict) -> None:
     _atomic_replace(tmp_meta, meta_path)
 
 
+def _remove_compact_sidecars(
+    cache_dir: Path,
+    *,
+    scenario_id: int | None = None,
+    data_version: str | None = None,
+) -> None:
+    skip_npz = False
+    if scenario_id is not None and data_version is not None:
+        from calculations.domain.services.scenario_effects_deferred import (
+            is_deferred_running,
+        )
+
+        skip_npz = is_deferred_running(scenario_id, data_version)
+
+    for path in (cache_dir / NPZ_FILENAME, cache_dir / RULE_BY_YEAR_FILENAME):
+        if path.name == NPZ_FILENAME and skip_npz:
+            continue
+        if path.is_file():
+            path.unlink()
+
+
 def save_scenario_compute_kpi_only(
     *,
     scenario_id: int,
@@ -129,6 +150,11 @@ def save_scenario_compute_kpi_only(
 ) -> Path:
     cache_dir = scenario_compute_dir(scenario_id=scenario_id, data_version=data_version)
     cache_dir.mkdir(parents=True, exist_ok=True)
+    _remove_compact_sidecars(
+        cache_dir,
+        scenario_id=scenario_id,
+        data_version=data_version,
+    )
 
     metadata = {
         "kpi_only": True,
@@ -139,6 +165,14 @@ def save_scenario_compute_kpi_only(
         "routes_without_volume": routes_without_volume,
     }
     _write_metadata(cache_dir, metadata)
+    from calculations.domain.services.scenario_effects_cache import (
+        set_scenario_effects_revision,
+    )
+
+    set_scenario_effects_revision(
+        scenario_id=scenario_id,
+        data_version=data_version,
+    )
     return cache_dir
 
 
@@ -195,6 +229,14 @@ def save_scenario_compute(
         "routes_without_volume": bundle.routes_without_volume,
     }
     _write_metadata(cache_dir, metadata)
+    from calculations.domain.services.scenario_effects_cache import (
+        set_scenario_effects_revision,
+    )
+
+    set_scenario_effects_revision(
+        scenario_id=scenario_id,
+        data_version=data_version,
+    )
     return cache_dir
 
 
@@ -210,7 +252,7 @@ def try_load_scenario_compute(
         return None
 
     metadata = json.loads(meta_path.read_text(encoding="utf-8"))
-    if metadata.get("kpi_only") and not npz_path.is_file():
+    if metadata.get("kpi_only"):
         return ScenarioComputeBundle(
             compact=None,
             global_totals=_global_totals_from_json(metadata["global_totals"]),
@@ -231,7 +273,7 @@ def try_load_scenario_compute(
         compact = CompactRouteEffects(
             years=[int(year) for year in metadata["years"]],
             dimensions=dimensions,
-            dimension_labels=metadata["dimension_labels"],
+            dimension_labels=metadata.get("dimension_labels") or {},
             baseline_rub=data["baseline_rub"],
             volume_tons=data["volume_tons"],
             base_by_year=data["base_by_year"],

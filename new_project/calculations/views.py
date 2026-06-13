@@ -219,6 +219,69 @@ def scenario_effects_aggregate_api(request):
 
 
 @login_required
+@require_http_methods(["GET"])
+def scenario_effects_revision_api(request):
+    scenario_id_raw = request.GET.get("scenario_id")
+    try:
+        scenario_id = int(scenario_id_raw)
+    except (TypeError, ValueError):
+        return JsonResponse(
+            {"success": False, "errors": ["Некорректный scenario_id"]},
+            status=400,
+        )
+
+    scenario, error_response = _get_user_scenario(request, scenario_id)
+    if error_response:
+        return error_response
+
+    from calculations.domain.services.scenario_effects_cache import (
+        get_scenario_effects_revision,
+    )
+
+    data_version = get_scenario_effects_revision(scenario_id=scenario.id)
+    return JsonResponse({"success": True, "data_version": data_version})
+
+
+@login_required
+@require_http_methods(["POST"])
+def scenario_effects_compact_status_api(request):
+    data, error_response = _parse_json_body(request)
+    if error_response:
+        return error_response
+
+    cache_key = data.get("cache_key") or ""
+    if not cache_key:
+        return JsonResponse(
+            {"success": False, "errors": ["Не указан cache_key"]},
+            status=400,
+        )
+
+    from calculations.domain.services.scenario_effects_cache import (
+        get_compact_status,
+        get_payload,
+        validate_cache_access,
+    )
+
+    payload = get_payload(cache_key)
+    if payload is None:
+        return JsonResponse(
+            {"success": False, "errors": ["Кэш расчёта недоступен"]},
+            status=404,
+        )
+
+    access_errors = validate_cache_access(
+        payload=payload,
+        user_id=request.user.id,
+        scenario_id=payload.scenario_id,
+    )
+    if access_errors:
+        return JsonResponse({"success": False, "errors": access_errors}, status=403)
+
+    status = get_compact_status(cache_key=cache_key)
+    return JsonResponse({"success": True, **status})
+
+
+@login_required
 @require_http_methods(["POST"])
 def scenario_effects_api(request):
     """Полный расчёт (compute + aggregate) для обратной совместимости."""

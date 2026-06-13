@@ -1,0 +1,61 @@
+{
+  "generated_at": "2026-06-13T17:09:34.303927+00:00",
+  "scenario": {
+    "id": 1,
+    "name": "Базовый сценарий",
+    "route_set_id": 3,
+    "routes_total": 2128493
+  },
+  "profile": "mixed",
+  "samples": {
+    "wagon_kind_id": "13",
+    "cargo_group_code": "8",
+    "message_type_id": "15",
+    "shipment_type_id": "32",
+    "railroad_code": "01",
+    "shipper_id": "20170",
+    "holding": "(пусто)",
+    "distance_belt_lt": 500,
+    "distance_belt_include": "0-500"
+  },
+  "cache_sizes_mb": {
+    "route_masks_mb": 31.37,
+    "scenario_compute_mb": 0.01,
+    "route_mart_mb": 155.23
+  },
+  "runs": [
+    {
+      "rules_count": 10,
+      "profile": "mixed",
+      "cold_compute_ms": 13,
+      "warm_compute_ms": 789,
+      "compact_ready_ms": 12566,
+      "compact_ready": true,
+      "masks_ms_cold": null,
+      "masks_ms_warm": null,
+      "rule_by_year_ms": null,
+      "scenario_compute_cache_hit": true,
+      "burst_create_ms": 48193,
+      "update_coef_ms": 2565,
+      "update_conditions_ms": 6604,
+      "aggregate_pending_ms": 4817,
+      "aggregate_ready_ms": 4817,
+      "matched_routes": [
+        248326,
+        16936,
+        0,
+        0,
+        0,
+        9,
+        9,
+        661205,
+        1934733,
+        1934733
+      ],
+      "rules_by_year_2030": "2840.2",
+      "errors": [
+        "Расчёт ещё выполняется. Повторите запрос через несколько секунд."
+      ]
+    }
+  ]
+}

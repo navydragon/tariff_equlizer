@@ -131,6 +131,14 @@ def _run_deferred_full_compute(job: DeferredFullComputeJob) -> None:
                 routes_without_volume=job.routes_without_volume,
             ),
         )
+        from calculations.domain.services.scenario_effects_cache import (
+            set_scenario_effects_revision,
+        )
+
+        set_scenario_effects_revision(
+            scenario_id=job.scenario_id,
+            data_version=job.data_version,
+        )
         update_payload_compact(cache_key=job.cache_key, compact=compact)
     except Exception:
         logger.exception(
@@ -150,16 +158,28 @@ def _deferred_lock_for(job: DeferredFullComputeJob) -> threading.Lock:
         return lock
 
 
-def _run_deferred_full_compute_guarded(job: DeferredFullComputeJob) -> None:
-    lock = _deferred_lock_for(job)
-    with lock:
-        _run_deferred_full_compute(job)
+def is_deferred_running(scenario_id: int, data_version: str) -> bool:
+    key = (scenario_id, data_version)
+    with _deferred_locks_guard:
+        lock = _deferred_locks.get(key)
+    if lock is None:
+        return False
+    return lock.locked()
 
 
 def schedule_deferred_full_compute(job: DeferredFullComputeJob) -> None:
+    lock = _deferred_lock_for(job)
+    if not lock.acquire(blocking=False):
+        return
+
+    def runner() -> None:
+        try:
+            _run_deferred_full_compute(job)
+        finally:
+            lock.release()
+
     thread = threading.Thread(
-        target=_run_deferred_full_compute_guarded,
-        args=(job,),
+        target=runner,
         name=f"full-compute-{job.scenario_id}",
         daemon=True,
     )

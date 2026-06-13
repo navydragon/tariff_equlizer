@@ -34,6 +34,8 @@ import { clearToasts, showToast } from "../lib/toast.js";
       computeUrl: String,
       computePandasUrl: String,
       aggregateUrl: String,
+      revisionUrl: String,
+      compactStatusUrl: String,
       revenuesUrl: String,
       volumesUrl: String,
       revenuesExportUrl: String,
@@ -58,12 +60,29 @@ import { clearToasts, showToast } from "../lib/toast.js";
         suppressFilterEvents: false,
         computing: false,
         compactPending: false,
+        lastDataVersion: null,
+        revisionTimer: null,
       };
+
+      this._onVisibilityChange = this._onVisibilityChange.bind(this);
+      this._onTariffRulesChanged = this._onTariffRulesChanged.bind(this);
+      document.addEventListener("visibilitychange", this._onVisibilityChange);
+      document.addEventListener("tariff-rules-changed", this._onTariffRulesChanged);
+      this.state.revisionTimer = setInterval(
+        () => this._checkRevision(),
+        30000,
+      );
 
       this._loadScenarios();
     }
 
     disconnect() {
+      document.removeEventListener("visibilitychange", this._onVisibilityChange);
+      document.removeEventListener("tariff-rules-changed", this._onTariffRulesChanged);
+      if (this.state?.revisionTimer) {
+        clearInterval(this.state.revisionTimer);
+        this.state.revisionTimer = null;
+      }
       this._destroyChart();
       this._destroyTomSelects();
     }
@@ -234,6 +253,10 @@ import { clearToasts, showToast } from "../lib/toast.js";
 
         this.state.cacheKey = data.cache_key || null;
         this.state.compactPending = data.compact_ready === false;
+        this.state.lastDataVersion = data.data_version || null;
+        if (this.state.compactPending) {
+          this._setCompactPendingIndicator(true);
+        }
         this.state.scenarioYears = data.years || [];
         this._renderWarning(
           data.routes_without_charge,
@@ -334,6 +357,13 @@ import { clearToasts, showToast } from "../lib/toast.js";
             await this._computeEffects();
             return;
           }
+          if (this.state.compactPending && attempt + 1 < maxAttempts) {
+            await this._waitForCompactReady();
+            return this._aggregateEffects({
+              showTableLoading,
+              attempt: attempt + 1,
+            });
+          }
           if (
             this._isAggregatePendingMessage(message) &&
             attempt + 1 < maxAttempts
@@ -352,6 +382,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
         }
 
         this.state.compactPending = false;
+        this._setCompactPendingIndicator(false);
         this._renderTable(data.table && data.table.rows ? data.table.rows : []);
         this._renderChart(data.chart || null);
         if (showTableLoading) {
@@ -383,6 +414,102 @@ import { clearToasts, showToast } from "../lib/toast.js";
 
     _sleep(ms) {
       return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
+    async _waitForCompactReady() {
+      if (!this.compactStatusUrlValue || !this.state.cacheKey) {
+        await this._sleep(2000);
+        return;
+      }
+
+      try {
+        const { data } = await fetchJson(this.compactStatusUrlValue, {
+          method: "POST",
+          body: { cache_key: this.state.cacheKey },
+        });
+        if (data && data.success) {
+          this.state.compactPending = !data.compact_ready;
+          if (data.data_version) {
+            this.state.lastDataVersion = data.data_version;
+          }
+        }
+      } catch (error) {
+        console.error("[decision-effects] compact-status failed", error);
+      }
+      await this._sleep(2000);
+    }
+
+    _onVisibilityChange() {
+      if (document.visibilityState === "visible") {
+        this._checkRevision();
+      }
+    }
+
+    _onTariffRulesChanged(event) {
+      const scenarioId = event?.detail?.scenarioId;
+      if (
+        scenarioId &&
+        this.state.selectedScenarioId &&
+        Number(scenarioId) === Number(this.state.selectedScenarioId)
+      ) {
+        this._checkRevision(true);
+      }
+    }
+
+    async _checkRevision(forceRecompute = false) {
+      if (!this.revisionUrlValue || !this.state.selectedScenarioId) {
+        return;
+      }
+      if (this.state.computing) {
+        return;
+      }
+
+      try {
+        const url = `${this.revisionUrlValue}?scenario_id=${encodeURIComponent(
+          String(this.state.selectedScenarioId),
+        )}`;
+        const { data } = await fetchJson(url);
+        if (!data || !data.success || !data.data_version) {
+          return;
+        }
+        if (
+          forceRecompute ||
+          (this.state.lastDataVersion &&
+            data.data_version !== this.state.lastDataVersion)
+        ) {
+          await this._computeEffects();
+        }
+      } catch (error) {
+        console.error("[decision-effects] revision check failed", error);
+      }
+    }
+
+    _setCompactPendingIndicator(isPending) {
+      if (!this.hasKpiCardsTarget) return;
+      const existing = this.kpiCardsTarget.querySelector("[data-compact-pending]");
+      if (!isPending) {
+        if (existing) {
+          existing.remove();
+        }
+        return;
+      }
+      if (existing) {
+        return;
+      }
+      const wrapper = document.createElement("div");
+      wrapper.dataset.compactPending = "1";
+      wrapper.innerHTML = `
+        <div class="alert alert-info py-2 px-3 mb-2 w-100" role="status">
+          <span class="spinner-border spinner-border-sm text-primary me-2" role="status"></span>
+          Обновление детализации…
+        </div>
+      `;
+      this.kpiCardsTarget.prepend(wrapper);
+      if (this.hasTableWrapTarget) {
+        this.tableWrapTarget.innerHTML = this._tableLoadingHtml(
+          "Обновление детализации…",
+        );
+      }
     }
 
     _setKpiLoading(isLoading) {
@@ -880,6 +1007,10 @@ import { clearToasts, showToast } from "../lib/toast.js";
         });
 
         if (!response.ok || !data || !data.success) {
+          const message =
+            (data && data.errors && data.errors.join("; ")) ||
+            "Ошибка загрузки выручки";
+          this._showError(message);
           if (this.hasRevenuesTableWrapTarget) {
             this._setAbsoluteTableLoading(
               this.revenuesTableWrapTarget,
@@ -923,6 +1054,10 @@ import { clearToasts, showToast } from "../lib/toast.js";
         });
 
         if (!response.ok || !data || !data.success) {
+          const message =
+            (data && data.errors && data.errors.join("; ")) ||
+            "Ошибка загрузки объёмов";
+          this._showError(message);
           if (this.hasVolumesTableWrapTarget) {
             this._setAbsoluteTableLoading(this.volumesTableWrapTarget, false);
             this.volumesTableWrapTarget.innerHTML =

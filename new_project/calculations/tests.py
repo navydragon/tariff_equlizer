@@ -2051,6 +2051,35 @@ class DistanceBeltTariffConditionsTests(TariffLoadServiceTestMixin, TestCase):
         self.assertTrue(mask[1])
         self.assertTrue(mask[2])
 
+    def test_build_rule_mask_numpy_wagon_kind_id_via_db_lookup(self) -> None:
+        from calculations.domain.services.route_mart_store import MartMeta
+
+        wagon_kind, _ = WagonKind.objects.get_or_create(
+            name="Cisterns",
+            defaults={"code": "cisterns-test"},
+        )
+        mart_meta = MartMeta(
+            dimension_labels={
+                "wagon_kind": ["Other", "Cisterns"],
+            },
+        )
+        df = pd.DataFrame(
+            {
+                "dim_wagon_kind": [1, 0, 1],
+            },
+        )
+        conditions = [
+            {
+                "parameter": "wagon_kind",
+                "operator": "include",
+                "values": [str(wagon_kind.id)],
+            },
+        ]
+        mask = build_rule_mask_numpy(df, conditions, mart_meta=mart_meta)
+        self.assertTrue(mask[0])
+        self.assertFalse(mask[1])
+        self.assertTrue(mask[2])
+
     def test_apply_tariff_conditions_distance_belt_gt_threshold(self) -> None:
         qs = Route.objects.filter(route_set=self.route_set)
         conditions = [
@@ -2117,3 +2146,425 @@ class DistanceBeltTariffConditionsTests(TariffLoadServiceTestMixin, TestCase):
         mask = build_rule_mask_numpy(df, conditions)
         self.assertTrue(mask[0])
         self.assertFalse(mask[1])
+
+
+class TariffRulesCacheAuditTests(TariffLoadServiceTestMixin, TestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        cache.clear()
+        from calculations.domain.services.scenario_compute_store import (
+            scenario_compute_cache_root,
+        )
+        import shutil
+
+        shutil.rmtree(scenario_compute_cache_root(), ignore_errors=True)
+
+    def test_kpi_only_overwrites_stale_npz(self) -> None:
+        import numpy as np
+        from calculations.domain.services.scenario_compute_store import (
+            NPZ_FILENAME,
+            METADATA_FILENAME,
+            save_scenario_compute_kpi_only,
+            scenario_compute_dir,
+            try_load_scenario_compute,
+        )
+        from calculations.domain.services.scenario_effects_cache import (
+            compute_scenario_data_version,
+        )
+        from calculations.domain.services.scenario_effects_formatting import GlobalTotals
+
+        context = self.service.build_scenario_context(self.scenario)
+        data_version = compute_scenario_data_version(
+            scenario=self.scenario,
+            base_coef_by_year=context.base_coef_by_year,
+            rules=context.rules,
+        )
+        totals = GlobalTotals()
+        totals.baseline_total = Decimal("1000")
+        save_scenario_compute_kpi_only(
+            scenario_id=self.scenario.id,
+            data_version=data_version,
+            years=[2025, 2026],
+            global_totals=totals,
+            filter_options={"cargo_groups": ["—"], "holdings": ["Прочие"]},
+            skipped_charge=0,
+            routes_without_volume=0,
+        )
+        cache_dir = scenario_compute_dir(
+            scenario_id=self.scenario.id,
+            data_version=data_version,
+        )
+        np.savez(
+            cache_dir / NPZ_FILENAME.replace(".npz", ""),
+            baseline_rub=np.array([1.0], dtype=np.float32),
+        )
+
+        bundle = try_load_scenario_compute(
+            scenario_id=self.scenario.id,
+            data_version=data_version,
+        )
+        self.assertIsNotNone(bundle)
+        assert bundle is not None
+        self.assertIsNone(bundle.compact)
+
+        save_scenario_compute_kpi_only(
+            scenario_id=self.scenario.id,
+            data_version=data_version,
+            years=[2025, 2026],
+            global_totals=totals,
+            filter_options={"cargo_groups": ["—"], "holdings": ["Прочие"]},
+            skipped_charge=0,
+            routes_without_volume=0,
+        )
+        self.assertFalse((cache_dir / NPZ_FILENAME).is_file())
+
+    def test_distance_belt_include_sidecar_ignored(self) -> None:
+        from calculations.domain.services.route_mart_store import MartMeta
+
+        df = pd.DataFrame(
+            {
+                "dim_cargo_group": [0, 1, 0],
+                "distance_belt": ["0-500", "500-1000", ""],
+                "distance_belt_midpoint_km": [250.0, 750.0, None],
+            },
+        )
+        conditions = [
+            {
+                "parameter": "distance_belt",
+                "operator": "include",
+                "values": ["0-500"],
+            },
+        ]
+        mask = build_rule_mask_numpy(df, conditions, mart_meta=MartMeta(dimension_labels={}))
+        self.assertTrue(mask[0])
+        self.assertFalse(mask[1])
+        self.assertFalse(mask.all())
+
+    def test_build_rule_mask_numpy_origin_railroad_code_via_db_lookup(self) -> None:
+        from calculations.domain.services.route_mart_store import MartMeta
+
+        railroad, _ = RailRoad.objects.get_or_create(
+            code="01",
+            defaults={"name": "Road"},
+        )
+        df = pd.DataFrame(
+            {
+                "dim_origin_railroad": [0, 1, 0],
+            },
+        )
+        conditions = [
+            {
+                "parameter": "origin_railroad",
+                "operator": "include",
+                "values": ["01"],
+            },
+        ]
+        mask = build_rule_mask_numpy(
+            df,
+            conditions,
+            mart_meta=MartMeta(
+                dimension_labels={"origin_railroad": [railroad.name, "Other"]},
+            ),
+        )
+        self.assertTrue(mask[0])
+        self.assertFalse(mask[1])
+
+    def test_build_rule_mask_numpy_message_type_id_on_sidecar(self) -> None:
+        message_type, _ = MessageType.objects.get_or_create(
+            code="MT",
+            defaults={"name": "Message"},
+        )
+        df = pd.DataFrame(
+            {
+                "message_type_id": [message_type.id, 999, message_type.id],
+            },
+        )
+        conditions = [
+            {
+                "parameter": "message_type",
+                "operator": "include",
+                "values": [str(message_type.id)],
+            },
+        ]
+        mask = build_rule_mask_numpy(df, conditions)
+        self.assertTrue(mask[0])
+        self.assertFalse(mask[1])
+        self.assertTrue(mask[2])
+
+    def test_kpi_only_skips_npz_when_deferred_running(self) -> None:
+        import numpy as np
+        from calculations.domain.services.scenario_compute_store import (
+            NPZ_FILENAME,
+            save_scenario_compute_kpi_only,
+            scenario_compute_dir,
+        )
+        from calculations.domain.services.scenario_effects_cache import (
+            compute_scenario_data_version,
+        )
+        from calculations.domain.services.scenario_effects_deferred import (
+            DeferredFullComputeJob,
+            _deferred_lock_for,
+        )
+        from calculations.domain.services.scenario_effects_formatting import GlobalTotals
+
+        context = self.service.build_scenario_context(self.scenario)
+        data_version = compute_scenario_data_version(
+            scenario=self.scenario,
+            base_coef_by_year=context.base_coef_by_year,
+            rules=context.rules,
+        )
+        totals = GlobalTotals()
+        cache_dir = scenario_compute_dir(
+            scenario_id=self.scenario.id,
+            data_version=data_version,
+        )
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        np.savez(
+            cache_dir / NPZ_FILENAME.replace(".npz", ""),
+            baseline_rub=np.array([1.0], dtype=np.float32),
+        )
+
+        job = DeferredFullComputeJob(
+            cache_key="",
+            scenario_id=self.scenario.id,
+            route_set_id=self.route_set.id,
+            data_version=data_version,
+            years=[2025, 2026],
+            base_coef_by_year=context.base_coef_by_year,
+            rule_specs=[],
+            parquet_path="",
+            mask_cache_dir_path="",
+            mart_meta=None,
+            global_totals=totals,
+            filter_options={},
+            skipped_charge=0,
+            routes_without_volume=0,
+        )
+        lock = _deferred_lock_for(job)
+        self.assertTrue(lock.acquire(blocking=False))
+        try:
+            save_scenario_compute_kpi_only(
+                scenario_id=self.scenario.id,
+                data_version=data_version,
+                years=[2025, 2026],
+                global_totals=totals,
+                filter_options={"cargo_groups": ["—"], "holdings": ["Прочие"]},
+                skipped_charge=0,
+                routes_without_volume=0,
+            )
+            self.assertTrue((cache_dir / NPZ_FILENAME).is_file())
+        finally:
+            lock.release()
+
+    def test_rule_rename_changes_data_version(self) -> None:
+        from calculations.domain.services.scenario_effects_cache import (
+            compute_scenario_data_version,
+        )
+        from scenarios.domain.dto import CreateTariffRuleDTO, UpdateTariffRuleDTO
+        from scenarios.domain.services import TariffRuleService
+
+        dto = CreateTariffRuleDTO(
+            scenario_id=self.scenario.id,
+            name="Before rename",
+            base_percent="100",
+            position=1,
+            conditions=[],
+            year_values={"2026": "1.0500"},
+        )
+        rule, errors = TariffRuleService().create_rule(dto, self.user)
+        self.assertFalse(errors)
+        assert rule is not None
+
+        scenario = Scenario.objects.select_related("route_set").get(pk=self.scenario.pk)
+        context = self.service.build_scenario_context(scenario)
+        before = compute_scenario_data_version(
+            scenario=scenario,
+            base_coef_by_year=context.base_coef_by_year,
+            rules=context.rules,
+        )
+
+        updated, errors = TariffRuleService().update_rule(
+            rule.id,
+            UpdateTariffRuleDTO(name="After rename"),
+            self.user,
+        )
+        self.assertFalse(errors)
+        self.assertIsNotNone(updated)
+
+        scenario = Scenario.objects.select_related("route_set").get(pk=self.scenario.pk)
+        context = self.service.build_scenario_context(scenario)
+        after = compute_scenario_data_version(
+            scenario=scenario,
+            base_coef_by_year=context.base_coef_by_year,
+            rules=context.rules,
+        )
+        self.assertNotEqual(before, after)
+
+    def test_warm_deferred_updates_disk_without_session_key(self) -> None:
+        from calculations.domain.services.scenario_effects_warm import (
+            warm_scenario_after_rule_change,
+        )
+        from calculations.domain.services.scenario_compute_store import (
+            try_load_scenario_compute,
+        )
+        from calculations.domain.services.scenario_effects_cache import (
+            compute_scenario_data_version,
+        )
+        from calculations.domain.services.route_effects_loader import (
+            fetch_routes_dataframe_cached_timed,
+        )
+
+        category = BTDCategory.objects.create(name="BTD", scenario=self.scenario, position=1)
+        BTDCategoryValue.objects.create(
+            scenario=self.scenario,
+            category=category,
+            year=2025,
+            value=Decimal("1.0000"),
+        )
+        BTDCategoryValue.objects.create(
+            scenario=self.scenario,
+            category=category,
+            year=2026,
+            value=Decimal("1.1000"),
+        )
+        self.route.freight_charge_rub = Decimal("1000000.00")
+        self.route.save(update_fields=["freight_charge_rub"])
+        fetch_routes_dataframe_cached_timed(self.route_set.id)
+
+        dto = CreateTariffRuleDTO(
+            scenario_id=self.scenario.id,
+            name="Warm disk rule",
+            base_percent="100",
+            position=1,
+            conditions=[],
+            year_values={"2026": "1.0500"},
+        )
+        with self.captureOnCommitCallbacks(execute=True):
+            TariffRuleService().create_rule(dto, self.user)
+
+        scenario = Scenario.objects.select_related("route_set").get(pk=self.scenario.pk)
+        context = self.service.build_scenario_context(scenario)
+        data_version = compute_scenario_data_version(
+            scenario=scenario,
+            base_coef_by_year=context.base_coef_by_year,
+            rules=context.rules,
+        )
+        bundle = try_load_scenario_compute(
+            scenario_id=scenario.id,
+            data_version=data_version,
+        )
+        self.assertIsNotNone(bundle)
+        assert bundle is not None
+        self.assertIsNone(bundle.compact)
+
+        warm_scenario_after_rule_change(
+            scenario_id=scenario.id,
+            change="update",
+            rule_id=scenario.tariff_rules.first().id,
+            mask_changed=False,
+        )
+        bundle_after = try_load_scenario_compute(
+            scenario_id=scenario.id,
+            data_version=data_version,
+        )
+        self.assertIsNotNone(bundle_after)
+        assert bundle_after is not None
+        self.assertGreater(
+            bundle_after.global_totals.rules_by_year.get(2026, Decimal("0")),
+            Decimal("0"),
+        )
+
+    def test_ten_rules_mask_cache_hit(self) -> None:
+        from calculations.domain.services.route_effects_loader import (
+            fetch_routes_dataframe_cached_timed,
+        )
+        from calculations.domain.services.scenario_effects_compute import (
+            compute_kpi_totals,
+            rule_specs_from_context,
+        )
+        from calculations.domain.services.route_mart_store import (
+            load_mart_meta,
+            load_mart_sidecar_dataframe,
+            resolve_mart_parquet_path,
+        )
+        import shutil
+        from calculations.domain.services.scenario_compute_store import (
+            scenario_compute_cache_root,
+        )
+
+        category = BTDCategory.objects.create(name="BTD10", scenario=self.scenario, position=1)
+        for year, coef in [(2025, "1"), (2026, "1.1")]:
+            BTDCategoryValue.objects.create(
+                scenario=self.scenario,
+                category=category,
+                year=year,
+                value=Decimal(coef),
+            )
+        self.route.freight_charge_rub = Decimal("1000000.00")
+        self.route.save(update_fields=["freight_charge_rub"])
+        fetch_routes_dataframe_cached_timed(self.route_set.id)
+
+        service = TariffRuleService()
+        presets = [
+            ("wagon_kind", [str(self.route.wagon_kind_id)]),
+            ("cargo_group", ["1"]),
+            ("message_type", [str(self.route.message_type_id)]),
+            ("shipment_type", [str(self.route.shipment_type_id)]),
+            ("origin_railroad", ["01"]),
+            ("shipper_holding", ["Прочие"]),
+            ("distance_belt", 500),
+            (None, None),
+        ]
+        for index, (parameter, values) in enumerate(presets):
+            conditions = []
+            if parameter:
+                operator = (
+                    "lt"
+                    if parameter == "distance_belt" and isinstance(values, int)
+                    else "include"
+                )
+                conditions.append(
+                    {
+                        "parameter": parameter,
+                        "operator": operator,
+                        "values": values,
+                    },
+                )
+            dto = CreateTariffRuleDTO(
+                scenario_id=self.scenario.id,
+                name=f"BENCH-test-{index}",
+                base_percent="100",
+                position=index + 1,
+                conditions=conditions,
+                year_values={"2026": "1.0500"},
+            )
+            with self.captureOnCommitCallbacks(execute=True):
+                service.create_rule(dto, self.user)
+
+        scenario = Scenario.objects.select_related("route_set").get(pk=self.scenario.pk)
+        context = self.service.build_scenario_context(scenario)
+        rule_specs = rule_specs_from_context(self.service, context)
+        parquet = resolve_mart_parquet_path(route_set_id=scenario.route_set_id)
+        df, _ = load_mart_sidecar_dataframe(parquet, include_charge=True)
+        meta = load_mart_meta(parquet)
+
+        _totals1, timings1 = compute_kpi_totals(
+            df,
+            years=context.years,
+            base_coef_by_year=context.base_coef_by_year,
+            rule_specs=rule_specs,
+            route_set_id=scenario.route_set_id,
+            mart_meta=meta,
+        )
+        self.assertGreater(timings1.get("masks_ms", 0), 0)
+
+        shutil.rmtree(scenario_compute_cache_root(), ignore_errors=True)
+        _totals2, timings2 = compute_kpi_totals(
+            df,
+            years=context.years,
+            base_coef_by_year=context.base_coef_by_year,
+            rule_specs=rule_specs,
+            route_set_id=scenario.route_set_id,
+            mart_meta=meta,
+        )
+        self.assertLessEqual(timings2.get("masks_ms", 999), 50)
