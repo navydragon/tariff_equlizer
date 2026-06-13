@@ -33,6 +33,15 @@ _DIM_PARAMETERS = frozenset(
     },
 )
 
+_CODE_FALLBACK_PARAMETERS = frozenset(
+    {
+        "cargo_group",
+        "cargo_code",
+        "origin_railroad",
+        "destination_railroad",
+    },
+)
+
 
 def _as_list(value) -> list:
     if value is None:
@@ -50,6 +59,28 @@ def _label_codes(values: list, labels: list[str]) -> list[int]:
         if key in label_to_code:
             codes.append(label_to_code[key])
     return codes
+
+
+def _resolve_dim_compare_codes(
+    parameter: str,
+    vals: list,
+    labels: list[str],
+) -> list[int]:
+    compare_codes = _label_codes(vals, labels)
+    if compare_codes:
+        return compare_codes
+
+    if parameter == "cargo_group":
+        from core.models import CargoGroup
+
+        names = list(
+            CargoGroup.objects.filter(
+                code__in=[str(value) for value in vals],
+            ).values_list("name", flat=True),
+        )
+        return _label_codes(names, labels)
+
+    return []
 
 
 def build_rule_mask_numpy(
@@ -99,9 +130,17 @@ def build_rule_mask_numpy(
 
         if dim_column and dim_column in df.columns and mart_meta is not None:
             labels = mart_meta.dimension_labels.get(dim_parameter, [])
-            compare_codes = _label_codes(vals, labels)
+            compare_codes = _resolve_dim_compare_codes(dim_parameter, vals, labels)
             if not compare_codes:
-                mask &= False
+                if parameter in _CODE_FALLBACK_PARAMETERS and column in df.columns:
+                    compare_vals = [str(v) for v in vals]
+                    series = df[column].astype(str).to_numpy()
+                    if operator == "include":
+                        mask &= np.isin(series, compare_vals)
+                    elif operator == "exclude":
+                        mask &= ~np.isin(series, compare_vals)
+                else:
+                    mask &= False
                 continue
             series = df[dim_column].to_numpy(dtype=np.int32, copy=False)
             if operator == "include":

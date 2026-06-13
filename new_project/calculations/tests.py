@@ -2021,6 +2021,36 @@ class DistanceBeltTariffConditionsTests(TariffLoadServiceTestMixin, TestCase):
         self.assertTrue(mask[0])
         self.assertFalse(mask[1])
 
+    def test_build_rule_mask_numpy_cargo_group_code_via_db_lookup(self) -> None:
+        from calculations.domain.services.route_mart_store import MartMeta
+
+        CargoGroup.objects.get_or_create(
+            code=8,
+            defaults={"name": "Coal group", "position": 8},
+        )
+        mart_meta = MartMeta(
+            dimension_labels={
+                "cargo_group": ["Other", "Coal group"],
+            },
+        )
+        df = pd.DataFrame(
+            {
+                "dim_cargo_group": [0, 1, 1],
+                "message_type_id": [9, 9, 1],
+            },
+        )
+        conditions = [
+            {
+                "parameter": "cargo_group",
+                "operator": "include",
+                "values": ["8"],
+            },
+        ]
+        mask = build_rule_mask_numpy(df, conditions, mart_meta=mart_meta)
+        self.assertFalse(mask[0])
+        self.assertTrue(mask[1])
+        self.assertTrue(mask[2])
+
     def test_apply_tariff_conditions_distance_belt_gt_threshold(self) -> None:
         qs = Route.objects.filter(route_set=self.route_set)
         conditions = [

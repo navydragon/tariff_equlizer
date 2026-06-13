@@ -29,7 +29,12 @@ from scenarios.domain.dto import (
     CreateTariffRuleDTO,
     UpdateTariffRuleDTO,
 )
+from scenarios.domain.utils.tariff_rule_display import enrich_rule_dict_for_api
 from scenarios.domain.utils.tariff_conditions import apply_tariff_conditions
+
+
+def _tariff_rule_api_dict(rule, *, route_set_id: int) -> dict:
+    return enrich_rule_dict_for_api(asdict(rule), route_set_id=route_set_id)
 
 
 @login_required
@@ -300,10 +305,18 @@ def tariff_rule_list_api(request, scenario_id):
     rules, errors = service.list_rules(scenario_id, request.user)
     if errors:
         return JsonResponse({"success": False, "errors": errors}, status=400)
+    try:
+        scenario = Scenario.objects.only("route_set_id").get(pk=scenario_id)
+        route_set_id = scenario.route_set_id
+    except Scenario.DoesNotExist:
+        return JsonResponse({"success": False, "errors": ["Сценарий не найден"]}, status=404)
     return JsonResponse(
         {
             "success": True,
-            "rules": [asdict(r) for r in rules],
+            "rules": [
+                _tariff_rule_api_dict(rule, route_set_id=route_set_id)
+                for rule in rules
+            ],
         }
     )
 
@@ -339,7 +352,16 @@ def tariff_rule_detail_api(request, rule_id):
     rule, errors = service.get_rule(rule_id, request.user)
     if errors:
         return JsonResponse({"success": False, "errors": errors}, status=400)
-    return JsonResponse({"success": True, "rule": asdict(rule)})
+    try:
+        scenario = Scenario.objects.only("route_set_id").get(pk=rule.scenario_id)
+    except Scenario.DoesNotExist:
+        return JsonResponse({"success": False, "errors": ["Сценарий не найден"]}, status=404)
+    return JsonResponse(
+        {
+            "success": True,
+            "rule": _tariff_rule_api_dict(rule, route_set_id=scenario.route_set_id),
+        },
+    )
 
 
 @login_required

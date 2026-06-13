@@ -52,24 +52,47 @@ import { renderErrors } from "../lib/errors.js";
     return (meta && meta.type === "numeric") || isDistanceBeltThreshold(parameter, operator);
   }
 
-  function formatConditionValues(condition) {
+  function normalizeOptionItems(items) {
+    return (items || []).map((item) => ({
+      value: String(item.value),
+      text: item.text != null ? String(item.text) : String(item.value),
+    }));
+  }
+
+  function normalizeConditionValues(values) {
+    if (Array.isArray(values)) {
+      return values.map((value) => String(value));
+    }
+    if (values == null || values === "") {
+      return [];
+    }
+    return [String(values)];
+  }
+
+  function formatConditionValues(condition, labelResolver) {
     const meta = PARAMETERS.find((p) => p.code === condition.parameter);
     const values = condition.values;
     if (usesNumericConditionValue(condition.parameter, condition.operator)) {
       if (values == null || values === "") return "—";
       return String(values);
     }
-    const list = Array.isArray(values)
-      ? values
-      : values != null && values !== ""
-        ? [values]
-        : [];
+    const list = Array.isArray(condition.values_display) && condition.values_display.length
+      ? condition.values_display.map((value) => String(value))
+      : normalizeConditionValues(values);
     if (!list.length) return "—";
-    const text = list.map((v) => String(v)).join(", ");
+    const text = list
+      .map((value) => {
+        if (typeof labelResolver === "function") {
+          const resolved = labelResolver(condition.parameter, value);
+          if (resolved) return resolved;
+        }
+        return value;
+      })
+      .join(", ");
     return text.length > 80 ? `${text.slice(0, 77)}…` : text;
   }
 
-  function formatConditionsSummary(conditions) {
+  function formatConditionsSummary(conditions, labelResolver) {
     if (!conditions || !conditions.length) {
       return '<span class="text-muted">Все маршруты набора (без фильтра)</span>';
     }
@@ -80,7 +103,7 @@ import { renderErrors } from "../lib/errors.js";
       .map((condition) => {
         const param = escapeHtml(parameterLabel(condition.parameter));
         const op = escapeHtml(operatorLabel(condition.operator));
-        const vals = escapeHtml(formatConditionValues(condition));
+        const vals = escapeHtml(formatConditionValues(condition, labelResolver));
         return `<div class="tariff-rule-condition-line"><span class="fw-medium">${param}</span> ${op}: ${vals}</div>`;
       })
       .join("");
@@ -155,6 +178,9 @@ import { renderErrors } from "../lib/errors.js";
       this.state = {
         rules: [],
         editingRuleId: null,
+        optionLabels: new Map(),
+        editLoadId: 0,
+        suppressCoverageRefresh: false,
       };
       this.statsDebounceTimer = null;
 
@@ -174,6 +200,7 @@ import { renderErrors } from "../lib/errors.js";
         return;
       }
       this.state.rules = data.rules || [];
+      await this.ensureOptionLabelsForRules(this.state.rules);
       this.renderTable();
       if (this.hasSummaryTarget) {
         this.summaryTarget.textContent = this.state.rules.length
@@ -202,7 +229,10 @@ import { renderErrors } from "../lib/errors.js";
       this.tbodyTarget.innerHTML = this.state.rules
         .map((r, idx) => {
           const bp = r.base_percent != null ? String(r.base_percent) : "";
-          const conditionsHtml = formatConditionsSummary(r.conditions || []);
+          const conditionsHtml = formatConditionsSummary(
+            r.conditions || [],
+            (parameter, value) => this.resolveOptionLabel(parameter, value),
+          );
           const yearsHtml = formatYearValuesSummary(
             r.year_values || [],
             startYear,
@@ -240,6 +270,7 @@ import { renderErrors } from "../lib/errors.js";
     }
 
     openCreate() {
+      this.state.editLoadId += 1;
       this.state.editingRuleId = null;
       this.modalTitleTarget.textContent = "Добавить тарифное решение";
       this.clearErrors();
@@ -254,28 +285,47 @@ import { renderErrors } from "../lib/errors.js";
     async openEdit(event) {
       const ruleId = parseInt(event.currentTarget.dataset.ruleId || "0", 10);
       if (!ruleId) return;
+      this.state.editLoadId += 1;
+      const loadId = this.state.editLoadId;
       this.state.editingRuleId = ruleId;
       this.modalTitleTarget.textContent = "Редактировать тарифное решение";
       this.clearErrors();
       this.conditionsTarget.innerHTML = "";
       this.resetYearInputs();
+      this.updateCoverageText("loading");
+      this.modalInstance.show();
 
       const url = buildUrl(this.detailUrlTemplateValue, ruleId);
       const { data } = await fetchJson(url, { method: "GET" });
       if (!data || !data.success) {
         this.showErrors((data && (data.errors || [data.error])) || ["Ошибка загрузки"]);
-        this.modalInstance.show();
         return;
       }
 
       const rule = data.rule;
       this.nameTarget.value = rule.name || "";
       this.setBasePercent(parseFloat(rule.base_percent || "100"));
-      (rule.conditions || []).forEach((c) => this.addConditionRow(c));
       this.applyYearValues(rule.year_values || []);
-      this.refreshCoverage();
 
-      this.modalInstance.show();
+      void this.populateEditConditions(rule, loadId);
+    }
+
+    async populateEditConditions(rule, loadId) {
+      this.state.suppressCoverageRefresh = true;
+      try {
+        await this.ensureOptionLabelsForRules([rule]);
+        if (loadId !== this.state.editLoadId) return;
+
+        this.conditionsTarget.innerHTML = "";
+        for (const condition of rule.conditions || []) {
+          if (loadId !== this.state.editLoadId) return;
+          await this.addConditionRow(condition);
+        }
+      } finally {
+        if (loadId !== this.state.editLoadId) return;
+        this.state.suppressCoverageRefresh = false;
+        await this.refreshCoverage();
+      }
     }
 
     clearErrors() {
@@ -292,11 +342,10 @@ import { renderErrors } from "../lib/errors.js";
 
     // === Conditions ===
     addCondition() {
-      this.addConditionRow(null);
-      this.refreshCoverageDebounced();
+      void this.addConditionRow(null);
     }
 
-    addConditionRow(condition) {
+    async addConditionRow(condition) {
       const row = document.createElement("div");
       row.className = "row g-2 align-items-start mb-2 tariff-rule-condition-row";
       row.dataset.conditionRow = "1";
@@ -347,8 +396,7 @@ import { renderErrors } from "../lib/errors.js";
       if (parameter) parameterSelect.value = parameter;
       operatorSelect.value = operator;
 
-      this.renderConditionValueEditor(row, parameter, operator, values);
-      this.refreshCoverageDebounced();
+      await this.renderConditionValueEditor(row, parameter, operator, values);
     }
 
     removeCondition(event) {
@@ -357,19 +405,17 @@ import { renderErrors } from "../lib/errors.js";
       this.refreshCoverageDebounced();
     }
 
-    onConditionParameterChange(row) {
+    async onConditionParameterChange(row) {
       const parameter = row.querySelector("[data-condition-parameter]").value;
       const operator = row.querySelector("[data-condition-operator]").value;
-      this.renderConditionValueEditor(row, parameter, operator, null);
-      this.refreshCoverageDebounced();
+      await this.renderConditionValueEditor(row, parameter, operator, null);
     }
 
-    onConditionOperatorChange(row) {
+    async onConditionOperatorChange(row) {
       const parameter = row.querySelector("[data-condition-parameter]").value;
       const operator = row.querySelector("[data-condition-operator]").value;
       const currentValues = this.readConditionValues(row, parameter, operator);
-      this.renderConditionValueEditor(row, parameter, operator, null);
-      this.refreshCoverageDebounced();
+      await this.renderConditionValueEditor(row, parameter, operator, currentValues);
     }
 
     async loadOptions(parameter) {
@@ -377,18 +423,41 @@ import { renderErrors } from "../lib/errors.js";
         const url = this.optionsUrlTemplateValue + "?parameter=" + encodeURIComponent(parameter);
         const { data } = await fetchJson(url, { method: "GET" });
         if (!data || !data.success) return [];
-        return data.items || [];
+        const items = normalizeOptionItems(data.items || []);
+        const labelMap = new Map(
+          items.map((item) => [String(item.value), item.text]),
+        );
+        this.state.optionLabels.set(parameter, labelMap);
+        return items;
       } catch (_e) {
         return [];
       }
     }
 
-    renderConditionValueEditor(row, parameter, operator, values) {
+    resolveOptionLabel(parameter, value) {
+      const labels = this.state.optionLabels.get(parameter);
+      if (!labels) return null;
+      return labels.get(String(value)) || null;
+    }
+
+    async ensureOptionLabelsForRules(rules) {
+      const parameters = new Set(
+        (rules || []).flatMap((rule) =>
+          (rule.conditions || []).map((condition) => condition.parameter),
+        ),
+      );
+      await Promise.all(
+        Array.from(parameters)
+          .filter(Boolean)
+          .map((parameter) => this.loadOptions(parameter)),
+      );
+    }
+
+    async renderConditionValueEditor(row, parameter, operator, values) {
       const container = row.querySelector("[data-condition-values]");
       if (!container) return;
       container.innerHTML = "";
 
-      const paramMeta = PARAMETERS.find((p) => p.code === parameter) || null;
       const isNumeric = usesNumericConditionValue(parameter, operator);
 
       if (!parameter) {
@@ -416,6 +485,7 @@ import { renderErrors } from "../lib/errors.js";
             "Сравнивается середина интервала пояса, например 500–1000 → 750 км";
           container.appendChild(hint);
         }
+        this.refreshCoverageDebounced();
         return;
       }
 
@@ -435,26 +505,23 @@ import { renderErrors } from "../lib/errors.js";
       });
       select._tomselect = ts;
 
-      const initial = Array.isArray(values)
-        ? values.map((v) => String(v))
-        : values != null
-          ? [String(values)]
-          : [];
-
-      // В режиме редактирования важно: сначала загрузить опции (тексты),
-      // затем проставить выбранные значения, иначе элементы будут "пустыми".
-      this.loadOptions(parameter).then((items) => {
-        const byValue = new Map((items || []).map((it) => [String(it.value), it]));
-        initial.forEach((v) => {
-          if (!byValue.has(String(v))) {
-            ts.addOption({ value: String(v), text: String(v) });
-          }
-        });
-        ts.addOptions(items || []);
-        ts.refreshOptions(false);
-        if (initial.length) ts.setValue(initial, true);
-        ts.on("change", () => this.refreshCoverageDebounced());
+      const initial = normalizeConditionValues(values);
+      const items = await this.loadOptions(parameter);
+      const byValue = new Map(items.map((item) => [String(item.value), item]));
+      initial.forEach((value) => {
+        if (!byValue.has(value)) {
+          const fallbackText = this.resolveOptionLabel(parameter, value) || value;
+          ts.addOption({ value, text: fallbackText });
+          byValue.set(value, { value, text: fallbackText });
+        }
       });
+      ts.addOptions(items);
+      ts.refreshOptions(false);
+      if (initial.length) {
+        ts.setValue(initial, true);
+      }
+      ts.on("change", () => this.refreshCoverageDebounced());
+      this.refreshCoverageDebounced();
     }
 
     readConditionValues(row, parameter, operator) {
@@ -514,6 +581,10 @@ import { renderErrors } from "../lib/errors.js";
     // === Coverage stats ===
     updateCoverageText(payload) {
       if (!this.hasCoverageTarget) return;
+      if (payload === "loading") {
+        this.coverageTarget.textContent = "Покрытие по маршрутам: расчёт…";
+        return;
+      }
       if (!payload) {
         this.coverageTarget.textContent = "Покрытие по маршрутам: —";
         return;
@@ -525,6 +596,7 @@ import { renderErrors } from "../lib/errors.js";
     }
 
     refreshCoverageDebounced() {
+      if (this.state.suppressCoverageRefresh) return;
       if (this.statsDebounceTimer) window.clearTimeout(this.statsDebounceTimer);
       this.statsDebounceTimer = window.setTimeout(() => this.refreshCoverage(), 250);
     }
