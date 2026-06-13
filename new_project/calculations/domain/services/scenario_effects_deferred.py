@@ -3,14 +3,15 @@ from __future__ import annotations
 import logging
 import threading
 from dataclasses import dataclass
+from decimal import Decimal
 from pathlib import Path
-
-import numpy as np
 
 from calculations.domain.services.route_mart_store import (
     MartMeta,
     load_mart_meta,
+    load_mart_sidecar_dataframe,
     load_route_mart_parquet,
+    resolve_light_mart_columns,
 )
 from calculations.domain.services.scenario_compute_store import (
     ScenarioComputeBundle,
@@ -23,24 +24,26 @@ from calculations.domain.services.scenario_effects_compact import (
     build_compact_from_arrays,
     prepare_compact_inputs,
 )
+from calculations.domain.services.scenario_effects_compute import (
+    RuleComputeSpec,
+    compute_arrays_full,
+)
 from calculations.domain.services.scenario_effects_formatting import GlobalTotals
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
-class DeferredCompactJob:
+class DeferredFullComputeJob:
     cache_key: str
     scenario_id: int
+    route_set_id: int
     data_version: str
     years: list[int]
-    initial: np.ndarray
-    base_by_year: np.ndarray
-    rules_by_year_arr: np.ndarray
-    charge_by_year: np.ndarray
-    rule_meta: list[tuple[int, str]]
-    rule_by_year: np.ndarray | None
+    base_coef_by_year: dict[int, Decimal]
+    rule_specs: list[RuleComputeSpec]
     parquet_path: str
+    mask_cache_dir_path: str
     mart_meta: MartMeta | None
     global_totals: GlobalTotals
     filter_options: dict[str, list[str]]
@@ -48,23 +51,45 @@ class DeferredCompactJob:
     routes_without_volume: int
 
 
-def _run_deferred_compact(job: DeferredCompactJob) -> None:
+def _run_deferred_full_compute(job: DeferredFullComputeJob) -> None:
     try:
         parquet_path = Path(job.parquet_path)
-        df = load_route_mart_parquet(parquet_path)
+        df, _sidecar_timings = load_mart_sidecar_dataframe(
+            parquet_path,
+            include_charge=True,
+        )
+        if df.empty or "freight_charge_rub" not in df.columns:
+            light_columns = resolve_light_mart_columns(
+                has_rules=bool(job.rule_specs),
+            )
+            df = load_route_mart_parquet(parquet_path, columns=light_columns)
         mart_meta = job.mart_meta or load_mart_meta(parquet_path)
-        dimensions, dimension_labels, volume = prepare_compact_inputs(
+
+        _global_totals, _timings, arrays = compute_arrays_full(
             df,
+            years=job.years,
+            base_coef_by_year=job.base_coef_by_year,
+            rule_specs=job.rule_specs,
+            route_set_id=job.route_set_id,
+            mart_meta=mart_meta,
+            mask_cache_dir=Path(job.mask_cache_dir_path),
+        )
+        if arrays is None:
+            return
+
+        df_full = load_route_mart_parquet(parquet_path)
+        dimensions, dimension_labels, volume = prepare_compact_inputs(
+            df_full,
             mart_meta,
         )
         compact = build_compact_from_arrays(
             years=job.years,
-            initial=job.initial,
-            base_by_year=job.base_by_year,
-            rules_by_year_arr=job.rules_by_year_arr,
-            charge_by_year=job.charge_by_year,
-            rule_meta=job.rule_meta,
-            rule_by_year=job.rule_by_year,
+            initial=arrays.initial,
+            base_by_year=arrays.base_by_year,
+            rules_by_year_arr=arrays.rules_by_year_arr,
+            charge_by_year=arrays.charge_by_year,
+            rule_meta=arrays.rule_meta,
+            rule_by_year=arrays.rule_by_year,
             dimensions=dimensions,
             dimension_labels=dimension_labels,
             volume=volume,
@@ -83,17 +108,22 @@ def _run_deferred_compact(job: DeferredCompactJob) -> None:
         update_payload_compact(cache_key=job.cache_key, compact=compact)
     except Exception:
         logger.exception(
-            "Deferred compact build failed for scenario_id=%s cache_key=%s",
+            "Deferred full compute failed for scenario_id=%s cache_key=%s",
             job.scenario_id,
             job.cache_key,
         )
 
 
-def schedule_deferred_compact(job: DeferredCompactJob) -> None:
+def schedule_deferred_full_compute(job: DeferredFullComputeJob) -> None:
     thread = threading.Thread(
-        target=_run_deferred_compact,
+        target=_run_deferred_full_compute,
         args=(job,),
-        name=f"compact-{job.scenario_id}",
+        name=f"full-compute-{job.scenario_id}",
         daemon=True,
     )
     thread.start()
+
+
+# Backward-compatible alias
+DeferredCompactJob = DeferredFullComputeJob
+schedule_deferred_compact = schedule_deferred_full_compute

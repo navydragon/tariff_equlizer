@@ -58,9 +58,10 @@ def try_load_rule_mask(
     rule_id: int,
     conditions: list[dict],
     n_routes: int,
+    cache_dir: Path | None = None,
 ) -> np.ndarray | None:
-    cache_dir = mask_cache_dir(route_set_id=route_set_id)
-    path = mask_path(cache_dir=cache_dir, rule_id=rule_id, conditions=conditions)
+    resolved_dir = cache_dir or mask_cache_dir(route_set_id=route_set_id)
+    path = mask_path(cache_dir=resolved_dir, rule_id=rule_id, conditions=conditions)
     if not path.is_file():
         return None
     mask = np.load(path)
@@ -75,10 +76,11 @@ def save_rule_mask(
     rule_id: int,
     conditions: list[dict],
     mask: np.ndarray,
+    cache_dir: Path | None = None,
 ) -> None:
-    cache_dir = mask_cache_dir(route_set_id=route_set_id)
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    path = mask_path(cache_dir=cache_dir, rule_id=rule_id, conditions=conditions)
+    resolved_dir = cache_dir or mask_cache_dir(route_set_id=route_set_id)
+    resolved_dir.mkdir(parents=True, exist_ok=True)
+    path = mask_path(cache_dir=resolved_dir, rule_id=rule_id, conditions=conditions)
     tmp_base = path.with_name(path.stem + ".tmp")
     np.save(tmp_base, mask.astype(np.bool_, copy=False))
     tmp_path = Path(f"{tmp_base}.npy")
@@ -92,6 +94,7 @@ def build_or_load_rule_mask(
     conditions: list[dict],
     df,
     mart_meta: MartMeta | None,
+    cache_dir: Path | None = None,
 ) -> np.ndarray:
     n_routes = len(df)
     cached = try_load_rule_mask(
@@ -99,6 +102,7 @@ def build_or_load_rule_mask(
         rule_id=rule_id,
         conditions=conditions,
         n_routes=n_routes,
+        cache_dir=cache_dir,
     )
     if cached is not None:
         return cached
@@ -109,6 +113,7 @@ def build_or_load_rule_mask(
         rule_id=rule_id,
         conditions=conditions,
         mask=mask,
+        cache_dir=cache_dir,
     )
     return mask
 

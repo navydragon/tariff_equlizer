@@ -883,6 +883,115 @@ class ScenarioEffectsPandasParityTests(TariffLoadServiceTestMixin, TestCase):
         self.assertEqual(meta["engine"], "pandas")
         self._assert_aggregate_close(python_result, pandas_result)
 
+    def test_kpi_totals_match_full_compute(self) -> None:
+        from calculations.domain.services.route_effects_loader import (
+            fetch_routes_dataframe_cached_timed,
+        )
+        from calculations.domain.services.scenario_effects_compute import (
+            compute_arrays_full,
+            compute_kpi_totals,
+            rule_specs_from_context,
+        )
+
+        self._setup_btd("1.1000")
+        scenario = Scenario.objects.select_related("route_set").get(
+            pk=self.scenario.pk,
+        )
+        rule = TariffRule.objects.create(
+            scenario=scenario,
+            name="KPI parity rule",
+            base_percent=Decimal("100"),
+            position=1,
+        )
+        TariffRuleCondition.objects.create(
+            tariff_rule=rule,
+            parameter="cargo_group",
+            operator="include",
+            values=["—"],
+            position=1,
+        )
+        TariffRuleYearValue.objects.create(
+            tariff_rule=rule,
+            year=2026,
+            coefficient=Decimal("1.0500"),
+        )
+
+        context = self.pandas_service._tariff_load.build_scenario_context(scenario)
+        rule_specs = rule_specs_from_context(self.pandas_service._tariff_load, context)
+        df, mart_meta, _timings = fetch_routes_dataframe_cached_timed(
+            scenario.route_set_id,
+        )
+
+        kpi_totals, _kpi_timings = compute_kpi_totals(
+            df,
+            years=context.years,
+            base_coef_by_year=context.base_coef_by_year,
+            rule_specs=rule_specs,
+            route_set_id=scenario.route_set_id,
+            mart_meta=mart_meta,
+        )
+        full_totals, _full_timings, _arrays = compute_arrays_full(
+            df,
+            years=context.years,
+            base_coef_by_year=context.base_coef_by_year,
+            rule_specs=rule_specs,
+            route_set_id=scenario.route_set_id,
+            mart_meta=mart_meta,
+        )
+
+        self.assertEqual(kpi_totals.baseline_total, full_totals.baseline_total)
+        for year in context.years:
+            self.assertEqual(
+                kpi_totals.charge_by_year[year],
+                full_totals.charge_by_year[year],
+                year,
+            )
+            if year == context.years[0]:
+                continue
+            self.assertEqual(
+                kpi_totals.base_by_year[year],
+                full_totals.base_by_year[year],
+                year,
+            )
+            self.assertEqual(
+                kpi_totals.rules_by_year[year],
+                full_totals.rules_by_year[year],
+                year,
+            )
+
+    def test_deferred_full_compute_builds_rule_by_year(self) -> None:
+        self._setup_btd("1.1000")
+        scenario = Scenario.objects.select_related("route_set").get(
+            pk=self.scenario.pk,
+        )
+        rule = TariffRule.objects.create(
+            scenario=scenario,
+            name="Deferred rule",
+            base_percent=Decimal("100"),
+            position=1,
+        )
+        TariffRuleYearValue.objects.create(
+            tariff_rule=rule,
+            year=2026,
+            coefficient=Decimal("1.0500"),
+        )
+
+        result, errors, meta = self.pandas_service.compute_pandas(
+            scenario=scenario,
+            user_id=self.user.id,
+        )
+        self.assertEqual(errors, [])
+        assert result is not None
+        self.assertEqual(meta["timings"].get("rule_by_year_ms"), 0)
+
+        payload = get_payload_ready(result.cache_key)
+        self.assertIsNotNone(payload)
+        assert payload is not None
+        self.assertIsNotNone(payload.compact)
+        assert payload.compact is not None
+        self.assertGreater(len(payload.compact.rule_meta), 0)
+        self.assertIsNotNone(payload.compact.rule_by_year)
+
     def test_scenario_snapshot_cache_hit(self) -> None:
         self._setup_btd("1.1000")
         scenario = Scenario.objects.select_related("route_set").get(

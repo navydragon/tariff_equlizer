@@ -3,11 +3,9 @@ from __future__ import annotations
 import time
 from decimal import Decimal
 
-import numpy as np
 import pandas as pd
 
 from calculations.domain.dto.scenario_effects import ScenarioEffectsComputeResponseDTO
-from calculations.domain.services.route_mask_cache import build_or_load_rule_mask
 from calculations.domain.services.scenario_effects_cache import (
     CompactRouteEffects,
     ScenarioEffectsCachePayload,
@@ -15,13 +13,16 @@ from calculations.domain.services.scenario_effects_cache import (
     make_cache_key,
     store_payload,
 )
-from calculations.domain.services.scenario_effects_compact import (
-    _COMPUTE_DTYPE,
-    prepare_compact_inputs,
+from calculations.domain.services.scenario_effects_compact import prepare_compact_inputs
+from calculations.domain.services.scenario_effects_compute import (
+    FullComputeArrays,
+    compute_arrays_full,
+    compute_kpi_totals,
+    rule_specs_from_context,
 )
 from calculations.domain.services.scenario_effects_deferred import (
-    DeferredCompactJob,
-    schedule_deferred_compact,
+    DeferredFullComputeJob,
+    schedule_deferred_full_compute,
 )
 from calculations.domain.services.scenario_effects_formatting import (
     GlobalTotals,
@@ -35,20 +36,13 @@ from calculations.domain.services.route_effects_loader import (
     fetch_route_set_stats,
     fetch_routes_dataframe_cached_timed,
 )
+from calculations.domain.services.route_mask_cache import mask_cache_dir
 from calculations.domain.services.route_mart_store import (
     MartMeta,
     resolve_light_mart_columns,
 )
 from calculations.domain.services.tariff_load import TariffLoadService
 from scenarios.models import Scenario
-
-
-def _effective_rule_coefficient(coefficient: float, base_percent: float) -> float:
-    return 1.0 + (coefficient - 1.0) * base_percent / 100.0
-
-
-def _to_decimal(value: float) -> Decimal:
-    return Decimal(str(value))
 
 
 class ScenarioEffectsPandasService:
@@ -65,6 +59,7 @@ class ScenarioEffectsPandasService:
         context = self._tariff_load.build_scenario_context(scenario)
         t_context = time.perf_counter()
         years = context.years
+        rule_specs = rule_specs_from_context(self._tariff_load, context)
         data_version = compute_scenario_data_version(
             scenario=scenario,
             base_coef_by_year=context.base_coef_by_year,
@@ -83,7 +78,8 @@ class ScenarioEffectsPandasService:
         compute_timings: dict[str, int] = {}
         scenario_snapshot_save_ms = 0
         compact_ready = True
-        deferred_job: DeferredCompactJob | None = None
+        deferred_job: DeferredFullComputeJob | None = None
+        mart_meta: MartMeta | None = None
 
         if scenario_bundle is not None:
             compact = scenario_bundle.compact
@@ -100,17 +96,13 @@ class ScenarioEffectsPandasService:
             )
             t_load = time.perf_counter()
 
-            (
-                global_totals,
-                compute_timings,
-                deferred_job,
-            ) = self._compute_arrays(
+            global_totals, compute_timings = compute_kpi_totals(
                 df,
-                context,
-                years,
-                scenario=scenario,
+                years=years,
+                base_coef_by_year=context.base_coef_by_year,
+                rule_specs=rule_specs,
+                route_set_id=scenario.route_set_id,
                 mart_meta=mart_meta,
-                data_version=data_version,
             )
             compact = None
             compact_ready = False
@@ -123,6 +115,25 @@ class ScenarioEffectsPandasService:
                 load_timings,
             )
             t_post_compute = time.perf_counter()
+
+            deferred_job = DeferredFullComputeJob(
+                cache_key="",
+                scenario_id=scenario.id,
+                route_set_id=scenario.route_set_id,
+                data_version=data_version,
+                years=years,
+                base_coef_by_year=context.base_coef_by_year,
+                rule_specs=rule_specs,
+                parquet_path=str(load_timings.get("mart_cache_path") or ""),
+                mask_cache_dir_path=str(
+                    mask_cache_dir(route_set_id=scenario.route_set_id),
+                ),
+                mart_meta=mart_meta,
+                global_totals=global_totals,
+                filter_options=filter_options,
+                skipped_charge=skipped_charge,
+                routes_without_volume=skipped_volume,
+            )
 
         cards = build_cards_from_totals(global_totals, years)
         t_cards = time.perf_counter()
@@ -146,26 +157,22 @@ class ScenarioEffectsPandasService:
         t_cache = time.perf_counter()
 
         if deferred_job is not None:
-            schedule_deferred_compact(
-                DeferredCompactJob(
+            schedule_deferred_full_compute(
+                DeferredFullComputeJob(
                     cache_key=cache_key,
                     scenario_id=deferred_job.scenario_id,
+                    route_set_id=deferred_job.route_set_id,
                     data_version=deferred_job.data_version,
                     years=deferred_job.years,
-                    initial=deferred_job.initial,
-                    base_by_year=deferred_job.base_by_year,
-                    rules_by_year_arr=deferred_job.rules_by_year_arr,
-                    charge_by_year=deferred_job.charge_by_year,
-                    rule_meta=deferred_job.rule_meta,
-                    rule_by_year=deferred_job.rule_by_year,
-                    parquet_path=str(
-                        load_timings.get("mart_cache_path") or "",
-                    ),
-                    mart_meta=mart_meta,
-                    global_totals=global_totals,
-                    filter_options=filter_options,
-                    skipped_charge=skipped_charge,
-                    routes_without_volume=skipped_volume,
+                    base_coef_by_year=deferred_job.base_coef_by_year,
+                    rule_specs=deferred_job.rule_specs,
+                    parquet_path=deferred_job.parquet_path,
+                    mask_cache_dir_path=deferred_job.mask_cache_dir_path,
+                    mart_meta=deferred_job.mart_meta,
+                    global_totals=deferred_job.global_totals,
+                    filter_options=deferred_job.filter_options,
+                    skipped_charge=deferred_job.skipped_charge,
+                    routes_without_volume=deferred_job.routes_without_volume,
                 ),
             )
 
@@ -246,139 +253,16 @@ class ScenarioEffectsPandasService:
         scenario: Scenario,
         mart_meta: MartMeta | None,
         data_version: str,
-    ) -> tuple[GlobalTotals, dict[str, int], DeferredCompactJob | None]:
-        timings: dict[str, int] = {}
-        if df.empty:
-            return GlobalTotals(), timings, None
-
-        n_routes = len(df)
-        n_years = len(years)
-        initial = df["freight_charge_rub"].to_numpy(dtype=_COMPUTE_DTYPE, copy=False)
-        rules_coef = np.ones((n_routes, n_years), dtype=_COMPUTE_DTYPE)
-        base_coef_arr = np.array(
-            [float(context.base_coef_by_year.get(year, Decimal("1"))) for year in years],
-            dtype=_COMPUTE_DTYPE,
-        )
-
-        rule_meta: list[tuple[int, str]] = []
-        rule_masks: list[np.ndarray] = []
-        rule_effective_by_year: list[np.ndarray] = []
-
-        t_masks = time.perf_counter()
-        for rule in context.rules:
-            conditions = self._tariff_load._rule_conditions_payload(rule)
-            mask = build_or_load_rule_mask(
-                route_set_id=scenario.route_set_id,
-                rule_id=rule.id,
-                conditions=conditions,
-                df=df,
-                mart_meta=mart_meta,
-            )
-            if not mask.any():
-                continue
-
-            year_coefs = {
-                value.year: float(value.coefficient)
-                for value in rule.year_values.all()
-            }
-            base_percent = float(rule.base_percent)
-            effective_arr = np.array(
-                [
-                    _effective_rule_coefficient(year_coefs.get(year, 1.0), base_percent)
-                    for year in years
-                ],
-                dtype=_COMPUTE_DTYPE,
-            )
-            rule_meta.append((rule.id, rule.name))
-            rule_masks.append(mask)
-            rule_effective_by_year.append(effective_arr)
-
-            for year_index, _year in enumerate(years):
-                rules_coef[mask, year_index] *= effective_arr[year_index]
-        timings["masks_ms"] = int((time.perf_counter() - t_masks) * 1000)
-
-        has_rules = bool(rule_meta)
-        n_rules = len(rule_meta)
-        rule_by_year_arr = (
-            np.zeros((n_rules, n_routes, n_years), dtype=_COMPUTE_DTYPE)
-            if n_rules
-            else None
-        )
-
-        charge_by_year = np.zeros((n_routes, n_years), dtype=_COMPUTE_DTYPE)
-        base_by_year = np.zeros((n_routes, n_years), dtype=_COMPUTE_DTYPE)
-        rules_by_year_arr = np.zeros((n_routes, n_years), dtype=_COMPUTE_DTYPE)
-
-        prev = initial.copy()
-        t_years = time.perf_counter()
-        rule_by_year_ms = 0
-        for year_index, _year in enumerate(years):
-            if year_index == 0:
-                charge_by_year[:, year_index] = prev
-                continue
-
-            base_coef = base_coef_arr[year_index]
-            if not has_rules:
-                current = np.round(prev * base_coef, 2)
-                base_inc = np.round(prev * (base_coef - 1.0), 2)
-            else:
-                rules_column = rules_coef[:, year_index]
-                current = np.round(prev * (base_coef + rules_column - 1.0), 2)
-                base_inc = np.round(prev * (base_coef - 1.0), 2)
-                rules_inc = np.round(prev * (rules_column - 1.0), 2)
-                rules_by_year_arr[:, year_index] = rules_inc
-
-                if rule_by_year_arr is not None:
-                    t_rule_slice = time.perf_counter()
-                    for rule_index, mask in enumerate(rule_masks):
-                        effective = rule_effective_by_year[rule_index][year_index]
-                        rule_by_year_arr[rule_index, mask, year_index] = np.round(
-                            prev[mask] * (effective - 1.0),
-                            2,
-                        )
-                    rule_by_year_ms += int((time.perf_counter() - t_rule_slice) * 1000)
-
-            charge_by_year[:, year_index] = current
-            base_by_year[:, year_index] = base_inc
-            prev = current
-        timings["years_loop_ms"] = int((time.perf_counter() - t_years) * 1000)
-        timings["rule_by_year_ms"] = rule_by_year_ms
-
-        t_totals = time.perf_counter()
-        charge_sums = charge_by_year.sum(axis=0, dtype=np.float64)
-        base_sums = base_by_year.sum(axis=0, dtype=np.float64)
-        rules_sums = rules_by_year_arr.sum(axis=0, dtype=np.float64)
-        global_totals = GlobalTotals()
-        global_totals.baseline_total = _to_decimal(float(initial.sum(dtype=np.float64)))
-        for year_index, year in enumerate(years):
-            global_totals.charge_by_year[year] = _to_decimal(
-                float(charge_sums[year_index]),
-            )
-            if year_index == 0:
-                continue
-            global_totals.base_by_year[year] = _to_decimal(float(base_sums[year_index]))
-            global_totals.rules_by_year[year] = _to_decimal(float(rules_sums[year_index]))
-        timings["totals_ms"] = int((time.perf_counter() - t_totals) * 1000)
-
-        deferred_job = DeferredCompactJob(
-            cache_key="",
-            scenario_id=scenario.id,
-            data_version=data_version,
+    ) -> tuple[GlobalTotals, dict[str, int], FullComputeArrays | None]:
+        rule_specs = rule_specs_from_context(self._tariff_load, context)
+        return compute_arrays_full(
+            df,
             years=years,
-            initial=initial,
-            base_by_year=base_by_year,
-            rules_by_year_arr=rules_by_year_arr,
-            charge_by_year=charge_by_year,
-            rule_meta=rule_meta,
-            rule_by_year=rule_by_year_arr,
-            parquet_path="",
+            base_coef_by_year=context.base_coef_by_year,
+            rule_specs=rule_specs,
+            route_set_id=scenario.route_set_id,
             mart_meta=mart_meta,
-            global_totals=global_totals,
-            filter_options={},
-            skipped_charge=0,
-            routes_without_volume=0,
         )
-        return global_totals, timings, deferred_job
 
     @staticmethod
     def _collect_filter_options(
@@ -412,7 +296,7 @@ class ScenarioEffectsPandasService:
             build_compact_from_arrays,
         )
 
-        global_totals, timings, deferred_job = self._compute_arrays(
+        global_totals, timings, arrays = self._compute_arrays(
             df,
             context,
             years,
@@ -424,7 +308,7 @@ class ScenarioEffectsPandasService:
                 rules=context.rules,
             ),
         )
-        if deferred_job is None:
+        if arrays is None:
             return None, global_totals, timings
 
         t_compact = time.perf_counter()
@@ -435,16 +319,35 @@ class ScenarioEffectsPandasService:
         timings["compact_prep_ms"] = int((time.perf_counter() - t_compact) * 1000)
         t_build = time.perf_counter()
         compact = build_compact_from_arrays(
-            years=deferred_job.years,
-            initial=deferred_job.initial,
-            base_by_year=deferred_job.base_by_year,
-            rules_by_year_arr=deferred_job.rules_by_year_arr,
-            charge_by_year=deferred_job.charge_by_year,
-            rule_meta=deferred_job.rule_meta,
-            rule_by_year=deferred_job.rule_by_year,
+            years=years,
+            initial=arrays.initial,
+            base_by_year=arrays.base_by_year,
+            rules_by_year_arr=arrays.rules_by_year_arr,
+            charge_by_year=arrays.charge_by_year,
+            rule_meta=arrays.rule_meta,
+            rule_by_year=arrays.rule_by_year,
             dimensions=dimensions,
             dimension_labels=dimension_labels,
             volume=volume,
         )
         timings["compact_build_ms"] = int((time.perf_counter() - t_build) * 1000)
         return compact, global_totals, timings
+
+    def _compute_kpi_totals(
+        self,
+        df: pd.DataFrame,
+        context,
+        years: list[int],
+        *,
+        scenario: Scenario,
+        mart_meta: MartMeta | None,
+    ) -> tuple[GlobalTotals, dict[str, int]]:
+        rule_specs = rule_specs_from_context(self._tariff_load, context)
+        return compute_kpi_totals(
+            df,
+            years=years,
+            base_coef_by_year=context.base_coef_by_year,
+            rule_specs=rule_specs,
+            route_set_id=scenario.route_set_id,
+            mart_meta=mart_meta,
+        )

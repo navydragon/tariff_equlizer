@@ -537,6 +537,16 @@ def load_mart_sidecar_dataframe(
 
     if not columns:
         return pd.DataFrame(), timings
+    lengths = {len(value) for value in columns.values()}
+    if len(lengths) != 1:
+        target_len = max(lengths)
+        columns = {
+            key: value
+            for key, value in columns.items()
+            if len(value) == target_len
+        }
+    if not columns:
+        return pd.DataFrame(), timings
     return pd.DataFrame(columns), timings
 
 
