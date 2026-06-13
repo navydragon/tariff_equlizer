@@ -18,6 +18,21 @@ PARAMETER_COLUMN_MAP = {
     "distance_belt": "distance_belt",
 }
 
+_DIM_PARAMETERS = frozenset(
+    {
+        "cargo_group",
+        "cargo_code",
+        "direction",
+        "wagon_kind",
+        "transport_type",
+        "shipment_category",
+        "park_type",
+        "holding",
+        "origin_railroad",
+        "destination_railroad",
+    },
+)
+
 
 def _as_list(value) -> list:
     if value is None:
@@ -77,19 +92,13 @@ def build_rule_mask_numpy(
         if not vals:
             continue
 
-        dim_column = f"dim_{parameter}" if parameter in {
-            "cargo_group",
-            "cargo_code",
-            "direction",
-            "wagon_kind",
-            "transport_type",
-            "shipment_category",
-            "park_type",
-            "holding",
-        } else None
+        dim_parameter = "holding" if parameter == "shipper_holding" else parameter
+        dim_column = (
+            f"dim_{dim_parameter}" if dim_parameter in _DIM_PARAMETERS else None
+        )
 
         if dim_column and dim_column in df.columns and mart_meta is not None:
-            labels = mart_meta.dimension_labels.get(parameter, [])
+            labels = mart_meta.dimension_labels.get(dim_parameter, [])
             compare_codes = _label_codes(vals, labels)
             if not compare_codes:
                 mask &= False

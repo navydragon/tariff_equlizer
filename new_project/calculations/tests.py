@@ -995,6 +995,7 @@ class ScenarioEffectsPandasParityTests(TariffLoadServiceTestMixin, TestCase):
 
         from calculations.domain.services.route_mart_store import (
             MART_RULE_MASK_SIDECAR_COLUMNS,
+            dims_npz_path,
             ensure_compute_sidecars,
             load_masks_npz,
             masks_npz_path,
@@ -1027,6 +1028,15 @@ class ScenarioEffectsPandasParityTests(TariffLoadServiceTestMixin, TestCase):
         self.assertTrue(mask_keys)
         self.assertTrue(mask_keys.issubset(set(MART_RULE_MASK_SIDECAR_COLUMNS)))
         self.assertFalse(mask_keys & {"cargo_code", "cargo_group", "holding", "wagon_kind"})
+        self.assertFalse(
+            mask_keys
+            & {"shipper_holding", "origin_railroad_code", "destination_railroad_code"},
+        )
+
+        with np.load(dims_npz_path(parquet_path), allow_pickle=False) as dims_data:
+            dim_keys = set(dims_data.files)
+        self.assertIn("dim_origin_railroad", dim_keys)
+        self.assertIn("dim_destination_railroad", dim_keys)
 
         stale_path = masks_npz_path(parquet_path)
         np.savez(

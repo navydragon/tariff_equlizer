@@ -23,16 +23,18 @@ MASKS_NPZ_SUFFIX = ".masks.npz"
 
 MART_COMPUTE_BASE_COLUMNS = ("freight_charge_rub",)
 
-# Колонки для masks.npz: только то, что не покрыто dim_* + meta (build_rule_mask_numpy).
-# Строковые cargo/wagon/holding и т.п. читаются через dim_{parameter}, их в sidecar не храним.
+# Доп. измерения для масок правил (кодируются в dims.npz, не в masks.npz).
+_MART_MASK_DIM_SOURCES: dict[str, str] = {
+    "origin_railroad": "origin_railroad_code",
+    "destination_railroad": "destination_railroad_code",
+}
+
+# Колонки для masks.npz: только числовые поля, не покрытые dim_*.
 MART_RULE_MASK_SIDECAR_COLUMNS = (
     "distance_belt_midpoint_km",
     "shipper_id",
     "shipment_type_id",
     "message_type_id",
-    "shipper_holding",
-    "origin_railroad_code",
-    "destination_railroad_code",
 )
 
 _MASK_SIDECAR_INT_COLUMNS = frozenset(
@@ -154,6 +156,10 @@ def resolve_light_mart_columns(*, has_rules: bool) -> list[str]:
         dim_column = f"dim_{column}"
         if dim_column not in columns:
             columns.append(dim_column)
+    for param in _MART_MASK_DIM_SOURCES:
+        dim_column = f"dim_{param}"
+        if dim_column not in columns:
+            columns.append(dim_column)
     for column in MART_RULE_MASK_SIDECAR_COLUMNS:
         if column not in columns:
             columns.append(column)
@@ -182,7 +188,19 @@ def encode_mart_dimensions(df: pd.DataFrame) -> dict[str, list[str]]:
         codes, uniques = pd.factorize(df[column].astype(str), sort=False)
         df[f"dim_{column}"] = codes.astype(np.int32, copy=False)
         dimension_labels[column] = uniques.tolist()
+    for param, source_column in _MART_MASK_DIM_SOURCES.items():
+        if source_column not in df.columns:
+            continue
+        codes, uniques = pd.factorize(df[source_column].astype(str), sort=False)
+        df[f"dim_{param}"] = codes.astype(np.int32, copy=False)
+        dimension_labels[param] = uniques.tolist()
     return dimension_labels
+
+
+def _dim_npz_column_names() -> list[str]:
+    columns = [f"dim_{column}" for column in _DIMENSION_COLUMNS]
+    columns.extend(f"dim_{param}" for param in _MART_MASK_DIM_SOURCES)
+    return columns
 
 
 def build_filter_options_from_labels(dimension_labels: dict[str, list[str]]) -> dict[str, list[str]]:
@@ -322,9 +340,51 @@ def _mask_sidecar_array(series: pd.Series, column: str) -> np.ndarray:
             dtype=np.float64,
             copy=False,
         )
-    values = series.astype(str).to_numpy()
-    max_len = max((len(value) for value in values), default=1)
-    return values.astype(f"U{max_len}", copy=False)
+    raise ValueError(f"Unexpected masks sidecar column: {column}")
+
+
+def _dims_npz_needs_rebuild(parquet_path: Path) -> bool:
+    path = dims_npz_path(parquet_path)
+    if not path.is_file():
+        return True
+    available = _parquet_column_names(parquet_path)
+    required: set[str] = set()
+    for param, source_column in _MART_MASK_DIM_SOURCES.items():
+        dim_column = f"dim_{param}"
+        if dim_column in available or source_column in available:
+            required.add(dim_column)
+    if not required:
+        return False
+    try:
+        with np.load(path, allow_pickle=False) as data:
+            keys = set(data.files)
+    except OSError:
+        return True
+    return bool(required - keys)
+
+
+def _encode_mask_dims_into_df(
+    df: pd.DataFrame,
+    *,
+    meta: MartMeta | None,
+) -> MartMeta | None:
+    updated_labels = dict(meta.dimension_labels) if meta is not None else {}
+    for param, source_column in _MART_MASK_DIM_SOURCES.items():
+        dim_column = f"dim_{param}"
+        if dim_column in df.columns or source_column not in df.columns:
+            continue
+        codes, uniques = pd.factorize(df[source_column].astype(str), sort=False)
+        df[dim_column] = codes.astype(np.int32, copy=False)
+        updated_labels[param] = uniques.tolist()
+    if meta is None:
+        return None
+    return MartMeta(
+        dimension_labels=updated_labels,
+        skipped_charge=meta.skipped_charge,
+        routes_without_volume=meta.routes_without_volume,
+        row_count=meta.row_count,
+        filter_options=meta.filter_options,
+    )
 
 
 def _masks_npz_needs_rebuild(parquet_path: Path) -> bool:
@@ -344,8 +404,7 @@ def _masks_npz_needs_rebuild(parquet_path: Path) -> bool:
 
 def save_dims_npz(df: pd.DataFrame, parquet_path: Path) -> None:
     arrays: dict[str, np.ndarray] = {}
-    for column in _DIMENSION_COLUMNS:
-        dim_column = f"dim_{column}"
+    for dim_column in _dim_npz_column_names():
         if dim_column not in df.columns:
             continue
         arrays[dim_column] = df[dim_column].to_numpy(dtype=np.int32, copy=False)
@@ -390,6 +449,7 @@ def _sidecars_complete(parquet_path: Path) -> bool:
         charge_npy_path(parquet_path).is_file()
         and dims_npz_path(parquet_path).is_file()
         and masks_npz_path(parquet_path).is_file()
+        and not _dims_npz_needs_rebuild(parquet_path)
         and not _masks_npz_needs_rebuild(parquet_path)
     )
 
@@ -402,15 +462,17 @@ def ensure_compute_sidecars(parquet_path: Path) -> bool:
         return False
 
     need_charge = not charge_npy_path(parquet_path).is_file()
-    need_dims = not dims_npz_path(parquet_path).is_file()
+    need_dims = _dims_npz_needs_rebuild(parquet_path)
     need_masks = _masks_npz_needs_rebuild(parquet_path)
 
     columns_to_read: list[str] = list(MART_COMPUTE_BASE_COLUMNS)
     if need_dims:
-        for column in _DIMENSION_COLUMNS:
-            dim_column = f"dim_{column}"
+        for dim_column in _dim_npz_column_names():
             if dim_column not in columns_to_read:
                 columns_to_read.append(dim_column)
+        for source_column in _MART_MASK_DIM_SOURCES.values():
+            if source_column not in columns_to_read:
+                columns_to_read.append(source_column)
     if need_masks:
         for column in MART_RULE_MASK_SIDECAR_COLUMNS:
             if column not in columns_to_read:
@@ -423,10 +485,20 @@ def ensure_compute_sidecars(parquet_path: Path) -> bool:
     if df.empty:
         return False
 
+    meta = load_mart_meta(parquet_path)
+
     if need_charge:
         save_charge_npy(df, parquet_path)
     if need_dims:
+        meta = _encode_mask_dims_into_df(df, meta=meta) or meta
+        if dims_npz_path(parquet_path).is_file():
+            try:
+                dims_npz_path(parquet_path).unlink()
+            except OSError:
+                pass
         save_dims_npz(df, parquet_path)
+        if meta is not None:
+            save_mart_meta(parquet_path=parquet_path, meta=meta)
     if need_masks:
         if masks_npz_path(parquet_path).is_file():
             try:
