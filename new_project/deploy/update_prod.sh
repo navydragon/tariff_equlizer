@@ -43,9 +43,31 @@ export DJANGO_SETTINGS_MODULE="config.settings_prod"
 python manage.py migrate
 python manage.py collectstatic --noinput
 
-echo "==> Перезапускаем сервис (tariff-equlizer)"
-sudo systemctl restart tariff-equlizer
+SERVICE_USER="${TARIFF_SERVICE_USER:-tariff}"
+
+if [[ -z "${SKIP_CACHE_REFRESH:-}" ]]; then
+  echo "==> Останавливаем сервис (tariff-equlizer) перед обновлением кешей"
+  sudo systemctl stop tariff-equlizer
+
+  echo "==> Очищаем кеши и прогреваем витрины маршрутов"
+  if [[ "$(id -un)" == "$SERVICE_USER" ]]; then
+    python manage.py refresh_deploy_caches
+  else
+    sudo -u "$SERVICE_USER" bash -c "
+      cd \"${PROJECT_DIR}\" &&
+      source .venv/bin/activate &&
+      export DJANGO_SETTINGS_MODULE=config.settings_prod &&
+      python manage.py refresh_deploy_caches
+    "
+  fi
+
+  echo "==> Запускаем сервис (tariff-equlizer)"
+  sudo systemctl start tariff-equlizer
+else
+  echo "==> Обновление кешей пропущено (SKIP_CACHE_REFRESH=1)"
+  echo "==> Перезапускаем сервис (tariff-equlizer)"
+  sudo systemctl restart tariff-equlizer
+fi
 
 echo "==> Готово. Статус сервиса:"
 sudo systemctl --no-pager --full status tariff-equlizer || true
-

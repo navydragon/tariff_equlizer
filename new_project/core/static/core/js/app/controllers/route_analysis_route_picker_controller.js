@@ -58,6 +58,8 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
         boundSearchHandler: null,
         boundConfirmHandler: null,
         boundScrollHandler: null,
+        boundFiltersToggleHandler: null,
+        boundHoldingInteractHandler: null,
         searchTimeout: null,
         routesRequestInFlight: null,
         routesPage: 1,
@@ -95,6 +97,7 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
       this.state.boundSearchHandler = this.onSearchInput.bind(this);
 
       this._bindFiltersCollapseListener();
+      this._ensureModalHandlers();
       this._resetUi();
       this._renderRouteDetails(null);
       this._updateEqualizerVisibility(false);
@@ -118,6 +121,15 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
       this._ensureHoldingTomSelect();
     }
 
+    toggleFilters(event) {
+      if (event && typeof event.preventDefault === "function") {
+        event.preventDefault();
+      }
+      const collapseEl = document.getElementById("routeAnalysisFiltersCollapse");
+      if (!collapseEl || typeof bootstrap === "undefined") return;
+      bootstrap.Collapse.getOrCreateInstance(collapseEl).toggle();
+    }
+
     onHoldingFilterInteract() {
       this._ensureHoldingTomSelect();
     }
@@ -128,7 +140,18 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
       collapseEl.dataset.holdingCollapseBound = "1";
       collapseEl.addEventListener("shown.bs.collapse", () => {
         this._ensureHoldingTomSelect();
+        this._syncFiltersToggleAria(true);
       });
+      collapseEl.addEventListener("hidden.bs.collapse", () => {
+        this._syncFiltersToggleAria(false);
+      });
+    }
+
+    _syncFiltersToggleAria(expanded) {
+      const btn = document.getElementById("routeAnalysisFiltersToggle");
+      if (btn) {
+        btn.setAttribute("aria-expanded", expanded ? "true" : "false");
+      }
     }
 
     onHoldingFilterChange() {
@@ -152,25 +175,6 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
           append: false,
         });
       }, this.searchDebounceMsValue || 400);
-    }
-
-    resetHoldingFilter() {
-      this._clearHoldingFilter();
-      const search = this._getSearchInputEl()
-        ? this._getSearchInputEl().value
-        : "";
-      if (!search.trim()) {
-        this._resetRouteListOnly();
-        return;
-      }
-      this.state.routesPage = 1;
-      this.state.routesHasNext = false;
-      this._loadRoutes({
-        search,
-        holding: "",
-        page: 1,
-        append: false,
-      });
     }
 
     onDiagramTypeChange() {
@@ -1555,6 +1559,44 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
         listEl.removeEventListener("scroll", this.state.boundScrollHandler);
         listEl.addEventListener("scroll", this.state.boundScrollHandler);
       }
+
+      const filtersBtn = document.getElementById("routeAnalysisFiltersToggle");
+      if (filtersBtn) {
+        if (!this.state.boundFiltersToggleHandler) {
+          this.state.boundFiltersToggleHandler = (event) => {
+            this.toggleFilters(event);
+          };
+        }
+        filtersBtn.removeEventListener("click", this.state.boundFiltersToggleHandler);
+        filtersBtn.addEventListener("click", this.state.boundFiltersToggleHandler);
+      }
+
+      const holdingSelect = this._getHoldingFilterSelectEl();
+      if (holdingSelect) {
+        if (!this.state.boundHoldingInteractHandler) {
+          this.state.boundHoldingInteractHandler = () => {
+            this.onHoldingFilterInteract();
+          };
+        }
+        holdingSelect.removeEventListener(
+          "focus",
+          this.state.boundHoldingInteractHandler,
+        );
+        holdingSelect.removeEventListener(
+          "mousedown",
+          this.state.boundHoldingInteractHandler,
+        );
+        holdingSelect.addEventListener(
+          "focus",
+          this.state.boundHoldingInteractHandler,
+        );
+        holdingSelect.addEventListener(
+          "mousedown",
+          this.state.boundHoldingInteractHandler,
+        );
+      }
+
+      this._bindFiltersCollapseListener();
     }
 
     _getModalEl() {

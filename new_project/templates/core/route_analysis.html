@@ -217,10 +217,9 @@
           <div class="row g-3">
             <div class="col-12">
               <button
+                id="routeAnalysisFiltersToggle"
                 class="btn btn-link px-0 text-decoration-none"
                 type="button"
-                data-bs-toggle="collapse"
-                data-bs-target="#routeAnalysisFiltersCollapse"
                 aria-expanded="false"
                 aria-controls="routeAnalysisFiltersCollapse"
               >
@@ -231,31 +230,16 @@
                 id="routeAnalysisFiltersCollapse"
                 class="collapse"
                 data-route-analysis-route-picker-target="filtersCollapse"
-                data-action="shown.bs.collapse->route-analysis-route-picker#onFiltersShown"
               >
                 <div class="border rounded p-3 bg-light">
-                  <div class="row g-2 align-items-end">
-                    <div class="col">
-                      <label class="form-label" for="routeAnalysisHoldingFilter">Холдинг</label>
-                      <select
-                        id="routeAnalysisHoldingFilter"
-                        data-route-analysis-route-picker-target="holdingFilterSelect"
-                        data-action="focus->route-analysis-route-picker#onHoldingFilterInteract mousedown->route-analysis-route-picker#onHoldingFilterInteract"
-                        placeholder="Начните вводить название холдинга…"
-                      >
-                        <option value="">Все холдинги</option>
-                      </select>
-                    </div>
-                    <div class="col-auto">
-                      <button
-                        type="button"
-                        class="btn btn-outline-secondary"
-                        data-action="click->route-analysis-route-picker#resetHoldingFilter"
-                      >
-                        Сбросить
-                      </button>
-                    </div>
-                  </div>
+                  <label class="form-label" for="routeAnalysisHoldingFilter">Холдинг</label>
+                  <select
+                    id="routeAnalysisHoldingFilter"
+                    data-route-analysis-route-picker-target="holdingFilterSelect"
+                    placeholder="Начните вводить название холдинга…"
+                  >
+                    <option value="">Все холдинги</option>
+                  </select>
                 </div>
               </div>
             </div>

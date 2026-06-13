@@ -137,17 +137,33 @@ Smoke в браузере:
 
 ## 8. Обновление релиза
 
+Рекомендуемый способ — скрипт [`deploy/update_prod.sh`](deploy/update_prod.sh):
+
 ```bash
-git pull
-source .venv/bin/activate
-pip install -r requirements.txt
-export DJANGO_SETTINGS_MODULE=config.settings_prod
-python manage.py migrate
-python manage.py collectstatic --noinput
-sudo systemctl restart tariff-equlizer
+cd /opt/tariff_equlizer/new_project
+./deploy/update_prod.sh
 ```
 
-Кэш на диске (`/var/lib/tariff_equlizer/cache/`) между релизами сохраняйте.
+Скрипт выполняет `git pull`, `migrate`, `collectstatic`, затем **останавливает сервис**, очищает все кеши (диск + Redis) и **прогревает parquet-витрины маршрутов**, после чего запускает gunicorn. Это переносит тяжёлый SQL JOIN (~50 с на больших наборах) из первого клика пользователя в окно деплоя.
+
+Пропустить очистку и прогрев кешей:
+
+```bash
+SKIP_CACHE_REFRESH=1 ./deploy/update_prod.sh
+```
+
+Ручной запуск (от пользователя сервиса `tariff`):
+
+```bash
+export DJANGO_SETTINGS_MODULE=config.settings_prod
+python manage.py refresh_deploy_caches          # очистка + прогрев
+python manage.py refresh_deploy_caches --clear-only
+python manage.py refresh_deploy_caches --warm-only --route-set-id 1
+```
+
+После деплоя первый заход в «Куб эффектов» всё ещё может занять время на pandas-расчёт и маски правил (пока не прогрет `scenario_compute`), но **без** повторной сборки route mart из БД.
+
+Каталоги кеша на prod: `/var/lib/tariff_equlizer/cache/{route_mart,scenario_compute,route_masks}` (см. §2).
 
 ---
 
