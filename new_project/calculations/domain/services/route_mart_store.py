@@ -23,24 +23,20 @@ MASKS_NPZ_SUFFIX = ".masks.npz"
 
 MART_COMPUTE_BASE_COLUMNS = ("freight_charge_rub",)
 
-# Колонки для масок правил (если dim_* отсутствует в витрине).
-MART_RULE_MASK_FALLBACK_COLUMNS = (
+# Колонки для masks.npz: только то, что не покрыто dim_* + meta (build_rule_mask_numpy).
+# Строковые cargo/wagon/holding и т.п. читаются через dim_{parameter}, их в sidecar не храним.
+MART_RULE_MASK_SIDECAR_COLUMNS = (
     "distance_belt_midpoint_km",
     "shipper_id",
-    "wagon_kind_id",
     "shipment_type_id",
     "message_type_id",
     "shipper_holding",
-    "cargo_group_code",
-    "cargo_code",
     "origin_railroad_code",
     "destination_railroad_code",
-    "wagon_kind",
-    "transport_type",
-    "shipment_category",
-    "park_type",
-    "holding",
-    "cargo_group",
+)
+
+_MASK_SIDECAR_INT_COLUMNS = frozenset(
+    {"shipper_id", "shipment_type_id", "message_type_id"},
 )
 
 ROUTE_MART_REFS_VERSION_CODE = "route_mart_refs_version"
@@ -158,7 +154,7 @@ def resolve_light_mart_columns(*, has_rules: bool) -> list[str]:
         dim_column = f"dim_{column}"
         if dim_column not in columns:
             columns.append(dim_column)
-    for column in MART_RULE_MASK_FALLBACK_COLUMNS:
+    for column in MART_RULE_MASK_SIDECAR_COLUMNS:
         if column not in columns:
             columns.append(column)
     return columns
@@ -306,12 +302,44 @@ def ensure_charge_npy(parquet_path: Path) -> np.ndarray | None:
     return charge_df["freight_charge_rub"].to_numpy(dtype=np.float64, copy=False)
 
 
-def _mask_fallback_columns_in_df(df: pd.DataFrame) -> list[str]:
+def _mask_sidecar_columns_in_df(df: pd.DataFrame) -> list[str]:
     return [
         column
-        for column in MART_RULE_MASK_FALLBACK_COLUMNS
+        for column in MART_RULE_MASK_SIDECAR_COLUMNS
         if column in df.columns
     ]
+
+
+def _mask_sidecar_array(series: pd.Series, column: str) -> np.ndarray:
+    if column in _MASK_SIDECAR_INT_COLUMNS:
+        return (
+            pd.to_numeric(series, errors="coerce")
+            .fillna(-1)
+            .to_numpy(dtype=np.int32, copy=False)
+        )
+    if column == "distance_belt_midpoint_km":
+        return pd.to_numeric(series, errors="coerce").to_numpy(
+            dtype=np.float64,
+            copy=False,
+        )
+    values = series.astype(str).to_numpy()
+    max_len = max((len(value) for value in values), default=1)
+    return values.astype(f"U{max_len}", copy=False)
+
+
+def _masks_npz_needs_rebuild(parquet_path: Path) -> bool:
+    path = masks_npz_path(parquet_path)
+    if not path.is_file():
+        return True
+    try:
+        with np.load(path, allow_pickle=False) as data:
+            keys = frozenset(data.files)
+    except OSError:
+        return True
+    if not keys:
+        return True
+    allowed = frozenset(MART_RULE_MASK_SIDECAR_COLUMNS)
+    return bool(keys - allowed)
 
 
 def save_dims_npz(df: pd.DataFrame, parquet_path: Path) -> None:
@@ -331,13 +359,8 @@ def save_dims_npz(df: pd.DataFrame, parquet_path: Path) -> None:
 
 def save_masks_npz(df: pd.DataFrame, parquet_path: Path) -> None:
     arrays: dict[str, np.ndarray] = {}
-    for column in _mask_fallback_columns_in_df(df):
-        series = df[column]
-        if pd.api.types.is_numeric_dtype(series):
-            arrays[column] = series.to_numpy(copy=False)
-        else:
-            max_len = max((len(str(value)) for value in series), default=1)
-            arrays[column] = series.astype(str).to_numpy(dtype=f"U{max_len}")
+    for column in _mask_sidecar_columns_in_df(df):
+        arrays[column] = _mask_sidecar_array(df[column], column)
     if not arrays:
         return
     out_path = masks_npz_path(parquet_path)
@@ -358,8 +381,8 @@ def load_masks_npz(parquet_path: Path) -> dict[str, np.ndarray]:
     path = masks_npz_path(parquet_path)
     if not path.is_file():
         return {}
-    with np.load(path, allow_pickle=False) as data:
-        return {key: data[key] for key in data.files}
+    with np.load(path, allow_pickle=False, mmap_mode="r") as data:
+        return {key: np.asarray(data[key]) for key in data.files}
 
 
 def _sidecars_complete(parquet_path: Path) -> bool:
@@ -367,6 +390,7 @@ def _sidecars_complete(parquet_path: Path) -> bool:
         charge_npy_path(parquet_path).is_file()
         and dims_npz_path(parquet_path).is_file()
         and masks_npz_path(parquet_path).is_file()
+        and not _masks_npz_needs_rebuild(parquet_path)
     )
 
 
@@ -377,19 +401,38 @@ def ensure_compute_sidecars(parquet_path: Path) -> bool:
     if not parquet_path.is_file():
         return False
 
-    columns = resolve_light_mart_columns(has_rules=True)
+    need_charge = not charge_npy_path(parquet_path).is_file()
+    need_dims = not dims_npz_path(parquet_path).is_file()
+    need_masks = _masks_npz_needs_rebuild(parquet_path)
+
+    columns_to_read: list[str] = list(MART_COMPUTE_BASE_COLUMNS)
+    if need_dims:
+        for column in _DIMENSION_COLUMNS:
+            dim_column = f"dim_{column}"
+            if dim_column not in columns_to_read:
+                columns_to_read.append(dim_column)
+    if need_masks:
+        for column in MART_RULE_MASK_SIDECAR_COLUMNS:
+            if column not in columns_to_read:
+                columns_to_read.append(column)
+
     df = load_route_mart_parquet(
         parquet_path,
-        columns=_filter_existing_columns(parquet_path, columns),
+        columns=_filter_existing_columns(parquet_path, columns_to_read),
     )
     if df.empty:
         return False
 
-    if not charge_npy_path(parquet_path).is_file():
+    if need_charge:
         save_charge_npy(df, parquet_path)
-    if not dims_npz_path(parquet_path).is_file():
+    if need_dims:
         save_dims_npz(df, parquet_path)
-    if not masks_npz_path(parquet_path).is_file():
+    if need_masks:
+        if masks_npz_path(parquet_path).is_file():
+            try:
+                masks_npz_path(parquet_path).unlink()
+            except OSError:
+                pass
         save_masks_npz(df, parquet_path)
     return _sidecars_complete(parquet_path)
 

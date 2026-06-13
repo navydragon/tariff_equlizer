@@ -990,6 +990,55 @@ class ScenarioEffectsPandasParityTests(TariffLoadServiceTestMixin, TestCase):
         self.assertFalse(meta_first.get("route_mart_cache_hit"))
         self.assertTrue(meta_second.get("route_mart_cache_hit"))
 
+    def test_masks_sidecar_minimal_columns(self) -> None:
+        import numpy as np
+
+        from calculations.domain.services.route_mart_store import (
+            MART_RULE_MASK_SIDECAR_COLUMNS,
+            ensure_compute_sidecars,
+            load_masks_npz,
+            masks_npz_path,
+            resolve_mart_parquet_path,
+            route_mart_cache_dir,
+        )
+        import shutil
+
+        self._setup_btd("1.1000")
+        scenario = Scenario.objects.select_related("route_set").get(
+            pk=self.scenario.pk,
+        )
+        TariffRule.objects.create(
+            scenario=scenario,
+            name="Mask sidecar rule",
+            base_percent=Decimal("100"),
+            position=1,
+        )
+
+        shutil.rmtree(
+            route_mart_cache_dir(route_set_id=scenario.route_set_id),
+            ignore_errors=True,
+        )
+        self.pandas_service.compute_pandas(
+            scenario=scenario,
+            user_id=self.user.id,
+        )
+        parquet_path = resolve_mart_parquet_path(route_set_id=scenario.route_set_id)
+        mask_keys = set(load_masks_npz(parquet_path))
+        self.assertTrue(mask_keys)
+        self.assertTrue(mask_keys.issubset(set(MART_RULE_MASK_SIDECAR_COLUMNS)))
+        self.assertFalse(mask_keys & {"cargo_code", "cargo_group", "holding", "wagon_kind"})
+
+        stale_path = masks_npz_path(parquet_path)
+        np.savez(
+            stale_path,
+            cargo_code=np.array(["A", "B"], dtype="U1"),
+            shipper_id=np.array([1, 2], dtype=np.int32),
+        )
+        self.assertTrue(ensure_compute_sidecars(parquet_path))
+        rebuilt_keys = set(load_masks_npz(parquet_path))
+        self.assertNotIn("cargo_code", rebuilt_keys)
+        self.assertTrue(rebuilt_keys.issubset(set(MART_RULE_MASK_SIDECAR_COLUMNS)))
+
     def test_prewarm_rule_mask_on_create(self) -> None:
         from calculations.domain.services.route_effects_loader import (
             fetch_routes_dataframe_cached_timed,
