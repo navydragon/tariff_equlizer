@@ -21,7 +21,7 @@ CHARGE_NPY_SUFFIX = ".charge.npy"
 DIMS_NPZ_SUFFIX = ".dims.npz"
 MASKS_NPZ_SUFFIX = ".masks.npz"
 
-MART_COMPUTE_BASE_COLUMNS = ("freight_charge_rub",)
+MART_COMPUTE_BASE_COLUMNS = ("freight_charge_rub", "transport_volume_tons")
 
 # Доп. измерения для масок правил (кодируются в dims.npz, не в masks.npz).
 _MART_MASK_DIM_SOURCES: dict[str, str] = {
@@ -149,14 +149,14 @@ def is_rules_light_mart_columns(columns: list[str] | None) -> bool:
 
 
 def resolve_light_mart_columns(*, has_rules: bool) -> list[str]:
-    """Минимальный набор колонок для синхронного KPI-расчёта."""
-    if not has_rules:
-        return list(MART_COMPUTE_BASE_COLUMNS)
+    """Минимальный набор колонок для синхронного KPI-расчёта и предагрегатов."""
     columns = list(MART_COMPUTE_BASE_COLUMNS)
     for column in _DIMENSION_COLUMNS:
         dim_column = f"dim_{column}"
         if dim_column not in columns:
             columns.append(dim_column)
+    if not has_rules:
+        return columns
     for param in _MART_MASK_DIM_SOURCES:
         dim_column = f"dim_{param}"
         if dim_column not in columns:

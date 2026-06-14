@@ -14,8 +14,17 @@ from django.conf import settings
 from calculations.domain.services.scenario_effects_cache import CompactRouteEffects
 from calculations.domain.services.scenario_effects_compact import _DIMENSION_COLUMNS
 from calculations.domain.services.scenario_effects_formatting import GlobalTotals
+from calculations.domain.services.scenario_effects_preaggregate import (
+    DensePairBucket,
+    DenseTripleBucket,
+    EffectsPreAggregate,
+    SingleBucket,
+    SparsePairBucket,
+    SparseTripleBucket,
+)
 
 NPZ_FILENAME = "arrays.npz"
+PREAGG_FILENAME = "preagg.npz"
 RULE_BY_YEAR_FILENAME = "rule_by_year.npy"
 METADATA_FILENAME = "metadata.json"
 
@@ -23,6 +32,7 @@ METADATA_FILENAME = "metadata.json"
 @dataclass
 class ScenarioComputeBundle:
     compact: CompactRouteEffects | None
+    preaggregate: EffectsPreAggregate | None
     global_totals: GlobalTotals
     filter_options: dict[str, list[str]]
     skipped_charge: int
@@ -59,6 +69,164 @@ def _global_totals_from_json(payload: dict) -> GlobalTotals:
     for key, value in (payload.get("charge_by_year") or {}).items():
         totals.charge_by_year[int(key)] = Decimal(value)
     return totals
+
+
+def _pair_key(outer: str, inner: str) -> str:
+    return f"{outer}__{inner}"
+
+
+def _triple_key(a: str, b: str, c: str) -> str:
+    return f"{a}__{b}__{c}"
+
+
+def _preaggregate_arrays_for_store(preagg: EffectsPreAggregate) -> tuple[dict[str, np.ndarray], dict]:
+    arrays: dict[str, np.ndarray] = {}
+    layout: dict[str, list] = {
+        "singles": [],
+        "pairs_dense": [],
+        "pairs_sparse": [],
+        "triples_dense": [],
+        "triples_sparse": [],
+    }
+
+    for dim, bucket in preagg.singles.items():
+        key = _pair_key("single", dim)
+        layout["singles"].append(dim)
+        arrays[f"{key}_base"] = bucket.base.astype(np.float32, copy=False)
+        arrays[f"{key}_rules"] = bucket.rules.astype(np.float32, copy=False)
+        arrays[f"{key}_charge"] = bucket.charge.astype(np.float32, copy=False)
+        arrays[f"{key}_volume"] = bucket.volume.astype(np.float32, copy=False)
+
+    for (outer, inner), bucket in preagg.pairs_dense.items():
+        pk = _pair_key(outer, inner)
+        layout["pairs_dense"].append([outer, inner])
+        arrays[f"pd_{pk}_base"] = bucket.base.astype(np.float32, copy=False)
+        arrays[f"pd_{pk}_rules"] = bucket.rules.astype(np.float32, copy=False)
+        arrays[f"pd_{pk}_charge"] = bucket.charge.astype(np.float32, copy=False)
+        arrays[f"pd_{pk}_volume"] = bucket.volume.astype(np.float32, copy=False)
+
+    for (outer, inner), bucket in preagg.pairs_sparse.items():
+        pk = _pair_key(outer, inner)
+        layout["pairs_sparse"].append([outer, inner, bucket.n_outer, bucket.n_inner])
+        arrays[f"ps_{pk}_outer_idx"] = bucket.outer_idx.astype(np.int32, copy=False)
+        arrays[f"ps_{pk}_inner_idx"] = bucket.inner_idx.astype(np.int32, copy=False)
+        arrays[f"ps_{pk}_base"] = bucket.base.astype(np.float32, copy=False)
+        arrays[f"ps_{pk}_rules"] = bucket.rules.astype(np.float32, copy=False)
+        arrays[f"ps_{pk}_charge"] = bucket.charge.astype(np.float32, copy=False)
+        arrays[f"ps_{pk}_volume"] = bucket.volume.astype(np.float32, copy=False)
+
+    for (a, b, c), bucket in preagg.triples_dense.items():
+        tk = _triple_key(a, b, c)
+        layout["triples_dense"].append([a, b, c, list(bucket.shape)])
+        arrays[f"td_{tk}_base"] = bucket.base.astype(np.float32, copy=False)
+        arrays[f"td_{tk}_rules"] = bucket.rules.astype(np.float32, copy=False)
+        arrays[f"td_{tk}_charge"] = bucket.charge.astype(np.float32, copy=False)
+        arrays[f"td_{tk}_volume"] = bucket.volume.astype(np.float32, copy=False)
+
+    for (a, b, c), bucket in preagg.triples_sparse.items():
+        tk = _triple_key(a, b, c)
+        layout["triples_sparse"].append([a, b, c, list(bucket.shape)])
+        arrays[f"ts_{tk}_flat_idx"] = bucket.flat_idx.astype(np.int64, copy=False)
+        arrays[f"ts_{tk}_base"] = bucket.base.astype(np.float32, copy=False)
+        arrays[f"ts_{tk}_rules"] = bucket.rules.astype(np.float32, copy=False)
+        arrays[f"ts_{tk}_charge"] = bucket.charge.astype(np.float32, copy=False)
+        arrays[f"ts_{tk}_volume"] = bucket.volume.astype(np.float32, copy=False)
+
+    return arrays, layout
+
+
+def _load_preaggregate_from_npz(
+    data,
+    *,
+    years: list[int],
+    dimension_labels: dict[str, list[str]],
+    layout: dict,
+) -> EffectsPreAggregate:
+    singles: dict[str, SingleBucket] = {}
+    for dim in layout.get("singles") or []:
+        key = _pair_key("single", dim)
+        singles[dim] = SingleBucket(
+            base=data[f"{key}_base"],
+            rules=data[f"{key}_rules"],
+            charge=data[f"{key}_charge"],
+            volume=data[f"{key}_volume"],
+        )
+
+    pairs_dense: dict[tuple[str, str], DensePairBucket] = {}
+    for outer, inner in layout.get("pairs_dense") or []:
+        pk = _pair_key(outer, inner)
+        n_outer = len(dimension_labels.get(outer, []))
+        n_inner = len(dimension_labels.get(inner, []))
+        pairs_dense[(outer, inner)] = DensePairBucket(
+            outer_dim=outer,
+            inner_dim=inner,
+            n_outer=n_outer,
+            n_inner=n_inner,
+            base=data[f"pd_{pk}_base"],
+            rules=data[f"pd_{pk}_rules"],
+            charge=data[f"pd_{pk}_charge"],
+            volume=data[f"pd_{pk}_volume"],
+        )
+
+    pairs_sparse: dict[tuple[str, str], SparsePairBucket] = {}
+    for entry in layout.get("pairs_sparse") or []:
+        outer, inner, n_outer, n_inner = entry[0], entry[1], int(entry[2]), int(entry[3])
+        pk = _pair_key(outer, inner)
+        pairs_sparse[(outer, inner)] = SparsePairBucket(
+            outer_dim=outer,
+            inner_dim=inner,
+            n_outer=n_outer,
+            n_inner=n_inner,
+            outer_idx=data[f"ps_{pk}_outer_idx"],
+            inner_idx=data[f"ps_{pk}_inner_idx"],
+            base=data[f"ps_{pk}_base"],
+            rules=data[f"ps_{pk}_rules"],
+            charge=data[f"ps_{pk}_charge"],
+            volume=data[f"ps_{pk}_volume"],
+        )
+
+    triples_dense: dict[tuple[str, str, str], DenseTripleBucket] = {}
+    for entry in layout.get("triples_dense") or []:
+        a, b, c = entry[0], entry[1], entry[2]
+        shape = tuple(int(x) for x in entry[3])
+        tk = _triple_key(a, b, c)
+        triples_dense[(a, b, c)] = DenseTripleBucket(
+            dim_a=a,
+            dim_b=b,
+            dim_c=c,
+            shape=shape,
+            base=data[f"td_{tk}_base"],
+            rules=data[f"td_{tk}_rules"],
+            charge=data[f"td_{tk}_charge"],
+            volume=data[f"td_{tk}_volume"],
+        )
+
+    triples_sparse: dict[tuple[str, str, str], SparseTripleBucket] = {}
+    for entry in layout.get("triples_sparse") or []:
+        a, b, c = entry[0], entry[1], entry[2]
+        shape = tuple(int(x) for x in entry[3])
+        tk = _triple_key(a, b, c)
+        triples_sparse[(a, b, c)] = SparseTripleBucket(
+            dim_a=a,
+            dim_b=b,
+            dim_c=c,
+            shape=shape,
+            flat_idx=data[f"ts_{tk}_flat_idx"],
+            base=data[f"ts_{tk}_base"],
+            rules=data[f"ts_{tk}_rules"],
+            charge=data[f"ts_{tk}_charge"],
+            volume=data[f"ts_{tk}_volume"],
+        )
+
+    return EffectsPreAggregate(
+        years=years,
+        dimension_labels=dimension_labels,
+        singles=singles,
+        pairs_dense=pairs_dense,
+        pairs_sparse=pairs_sparse,
+        triples_dense=triples_dense,
+        triples_sparse=triples_sparse,
+    )
 
 
 def _compact_arrays_for_store(compact: CompactRouteEffects) -> dict[str, np.ndarray]:
@@ -131,7 +299,11 @@ def _remove_compact_sidecars(
 
         skip_npz = is_deferred_running(scenario_id, data_version)
 
-    for path in (cache_dir / NPZ_FILENAME, cache_dir / RULE_BY_YEAR_FILENAME):
+    for path in (
+        cache_dir / NPZ_FILENAME,
+        cache_dir / PREAGG_FILENAME,
+        cache_dir / RULE_BY_YEAR_FILENAME,
+    ):
         if path.name == NPZ_FILENAME and skip_npz:
             continue
         if path.is_file():
@@ -159,6 +331,57 @@ def save_scenario_compute_kpi_only(
     metadata = {
         "kpi_only": True,
         "years": years,
+        "filter_options": filter_options,
+        "global_totals": _global_totals_to_json(global_totals),
+        "skipped_charge": skipped_charge,
+        "routes_without_volume": routes_without_volume,
+    }
+    _write_metadata(cache_dir, metadata)
+    from calculations.domain.services.scenario_effects_cache import (
+        set_scenario_effects_revision,
+    )
+
+    set_scenario_effects_revision(
+        scenario_id=scenario_id,
+        data_version=data_version,
+    )
+    return cache_dir
+
+
+def save_scenario_compute_preaggregate(
+    *,
+    scenario_id: int,
+    data_version: str,
+    years: list[int],
+    preaggregate: EffectsPreAggregate,
+    global_totals: GlobalTotals,
+    filter_options: dict[str, list[str]],
+    skipped_charge: int,
+    routes_without_volume: int,
+) -> Path:
+    cache_dir = scenario_compute_dir(scenario_id=scenario_id, data_version=data_version)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    _remove_compact_sidecars(
+        cache_dir,
+        scenario_id=scenario_id,
+        data_version=data_version,
+    )
+
+    arrays, layout = _preaggregate_arrays_for_store(preaggregate)
+    tmp_path = cache_dir / "preagg.write.npz"
+    with open(tmp_path, "wb") as handle:
+        np.savez(handle, **arrays)
+        handle.flush()
+        os.fsync(handle.fileno())
+    _atomic_replace(tmp_path, cache_dir / PREAGG_FILENAME)
+
+    metadata = {
+        "kpi_only": False,
+        "preaggregate": True,
+        "include_rule_breakdown": False,
+        "years": years,
+        "dimension_labels": preaggregate.dimension_labels,
+        "preaggregate_layout": layout,
         "filter_options": filter_options,
         "global_totals": _global_totals_to_json(global_totals),
         "skipped_charge": skipped_charge,
@@ -253,7 +476,34 @@ def is_scenario_compact_on_disk(*, scenario_id: int, data_version: str) -> bool:
     metadata = json.loads(meta_path.read_text(encoding="utf-8"))
     if metadata.get("kpi_only"):
         return False
+    if metadata.get("preaggregate"):
+        return (cache_dir / PREAGG_FILENAME).is_file()
     return (cache_dir / NPZ_FILENAME).is_file()
+
+
+def is_scenario_preaggregate_on_disk(*, scenario_id: int, data_version: str) -> bool:
+    cache_dir = scenario_compute_dir(scenario_id=scenario_id, data_version=data_version)
+    meta_path = cache_dir / METADATA_FILENAME
+    if not meta_path.is_file():
+        return False
+    metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+    return bool(metadata.get("preaggregate")) and (cache_dir / PREAGG_FILENAME).is_file()
+
+
+def _bundle_from_metadata(
+    metadata: dict,
+    *,
+    compact: CompactRouteEffects | None = None,
+    preaggregate: EffectsPreAggregate | None = None,
+) -> ScenarioComputeBundle:
+    return ScenarioComputeBundle(
+        compact=compact,
+        preaggregate=preaggregate,
+        global_totals=_global_totals_from_json(metadata["global_totals"]),
+        filter_options=metadata.get("filter_options") or {},
+        skipped_charge=int(metadata.get("skipped_charge", 0)),
+        routes_without_volume=int(metadata.get("routes_without_volume", 0)),
+    )
 
 
 def try_load_scenario_compute(
@@ -269,13 +519,20 @@ def try_load_scenario_compute(
 
     metadata = json.loads(meta_path.read_text(encoding="utf-8"))
     if metadata.get("kpi_only"):
-        return ScenarioComputeBundle(
-            compact=None,
-            global_totals=_global_totals_from_json(metadata["global_totals"]),
-            filter_options=metadata.get("filter_options") or {},
-            skipped_charge=int(metadata.get("skipped_charge", 0)),
-            routes_without_volume=int(metadata.get("routes_without_volume", 0)),
-        )
+        return _bundle_from_metadata(metadata)
+
+    if metadata.get("preaggregate"):
+        preagg_path = cache_dir / PREAGG_FILENAME
+        if not preagg_path.is_file():
+            return None
+        with np.load(preagg_path, allow_pickle=False) as data:
+            preaggregate = _load_preaggregate_from_npz(
+                data,
+                years=[int(year) for year in metadata["years"]],
+                dimension_labels=metadata.get("dimension_labels") or {},
+                layout=metadata.get("preaggregate_layout") or {},
+            )
+        return _bundle_from_metadata(metadata, preaggregate=preaggregate)
 
     if not npz_path.is_file():
         return None
@@ -299,10 +556,4 @@ def try_load_scenario_compute(
             rule_by_year=rule_by_year,
         )
 
-    return ScenarioComputeBundle(
-        compact=compact,
-        global_totals=_global_totals_from_json(metadata["global_totals"]),
-        filter_options=metadata.get("filter_options") or {},
-        skipped_charge=int(metadata.get("skipped_charge", 0)),
-        routes_without_volume=int(metadata.get("routes_without_volume", 0)),
-    )
+    return _bundle_from_metadata(metadata, compact=compact)

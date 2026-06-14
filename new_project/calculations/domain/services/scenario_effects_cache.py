@@ -6,11 +6,15 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 import numpy as np
 from django.core.cache import cache
 
 from calculations.domain.services.scenario_effects_formatting import GlobalTotals
+
+if TYPE_CHECKING:
+    from calculations.domain.services.scenario_effects_preaggregate import EffectsPreAggregate
 from scenarios.models import Scenario, TariffRule
 
 CACHE_PREFIX = "scenario_effects"
@@ -63,6 +67,7 @@ class ScenarioEffectsCachePayload:
     baseline_total: Decimal
     facts: list[RouteEffectFact] = field(default_factory=list)
     compact: CompactRouteEffects | None = None
+    preaggregate: EffectsPreAggregate | None = None
     compact_pending: bool = False
     data_version: str | None = None
 
@@ -172,6 +177,7 @@ def _payload_for_redis(payload: ScenarioEffectsCachePayload) -> ScenarioEffectsC
         baseline_total=payload.baseline_total,
         facts=payload.facts,
         compact=None,
+        preaggregate=None,
         compact_pending=payload.compact_pending,
         data_version=payload.data_version,
     )
@@ -184,7 +190,7 @@ def store_payload(*, cache_key: str, payload: ScenarioEffectsCachePayload) -> No
 def _hydrate_payload_from_disk(
     payload: ScenarioEffectsCachePayload,
 ) -> ScenarioEffectsCachePayload:
-    if payload.compact is not None or not payload.data_version:
+    if (payload.compact is not None or payload.preaggregate is not None) or not payload.data_version:
         return payload
 
     from calculations.domain.services.scenario_compute_store import (
@@ -199,8 +205,9 @@ def _hydrate_payload_from_disk(
         return payload
 
     compact = bundle.compact
+    preaggregate = bundle.preaggregate
     compact_pending = payload.compact_pending
-    if compact is not None:
+    if compact is not None or preaggregate is not None:
         compact_pending = False
 
     return ScenarioEffectsCachePayload(
@@ -212,6 +219,7 @@ def _hydrate_payload_from_disk(
         baseline_total=payload.baseline_total,
         facts=payload.facts,
         compact=compact,
+        preaggregate=preaggregate,
         compact_pending=compact_pending,
         data_version=payload.data_version,
     )
@@ -235,7 +243,7 @@ def get_payload_ready(
         payload = get_payload(cache_key)
         if payload is None:
             return None
-        if payload.compact is not None or not payload.compact_pending:
+        if payload.compact is not None or payload.preaggregate is not None or not payload.compact_pending:
             return payload
         if time.perf_counter() >= deadline:
             return payload
@@ -298,9 +306,13 @@ def get_compact_status(*, cache_key: str) -> dict[str, object]:
     if payload.compact_pending and data_version:
         from calculations.domain.services.scenario_compute_store import (
             is_scenario_compact_on_disk,
+            is_scenario_preaggregate_on_disk,
         )
 
-        if is_scenario_compact_on_disk(
+        if is_scenario_preaggregate_on_disk(
+            scenario_id=payload.scenario_id,
+            data_version=data_version,
+        ) or is_scenario_compact_on_disk(
             scenario_id=payload.scenario_id,
             data_version=data_version,
         ):

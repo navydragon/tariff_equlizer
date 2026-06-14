@@ -114,18 +114,31 @@ class ScenarioEffectsCubeService:
         if access_errors:
             return None, access_errors
 
-        if payload.compact is None:
+        if (
+            payload.compact is None
+            and payload.preaggregate is None
+            and payload.compact_pending
+        ):
             return None, ["Расчёт ещё выполняется. Повторите запрос через несколько секунд."]
 
-        if (
+        needs_rule_breakdown = (
             request.group_by == "tariff_decision"
             or request.group_by_inner == "tariff_decision"
-        ) and payload.compact.rule_by_year is None:
-            if payload.compact.rule_meta:
+        )
+        has_rule_meta = bool(
+            payload.compact.rule_meta if payload.compact is not None else False,
+        )
+        if needs_rule_breakdown and (
+            payload.compact is None or payload.compact.rule_by_year is None
+        ):
+            if has_rule_meta or payload.preaggregate is not None:
                 return None, [
                     "Требуется полный пересчёт с разбивкой по правилам. "
                     "Обновите страницу.",
                 ]
+
+        if payload.compact is None and payload.preaggregate is None:
+            return None, ["Расчёт ещё выполняется. Повторите запрос через несколько секунд."]
 
         if not _payload_has_effects_data(payload):
             return None, [

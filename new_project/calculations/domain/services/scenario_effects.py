@@ -17,6 +17,9 @@ from calculations.domain.dto.scenario_effects import (
 )
 from calculations.domain.services.grouping import build_group_keys
 from calculations.domain.services.scenario_effects_compact import aggregate_compact_buckets
+from calculations.domain.services.scenario_effects_preaggregate import (
+    aggregate_preaggregate_buckets,
+)
 from calculations.domain.services.scenario_effects_cache import (
     COMPACT_API_WAIT_TIMEOUT_SECONDS,
     RouteEffectFact,
@@ -120,10 +123,14 @@ class ScenarioEffectsService:
         if access_errors:
             return None, access_errors
 
-        if payload.compact is None and payload.compact_pending:
+        if payload.compact is None and payload.preaggregate is None and payload.compact_pending:
             return None, ["Расчёт ещё выполняется. Повторите запрос через несколько секунд."]
 
-        if payload.compact is None and not payload.facts:
+        if (
+            payload.compact is None
+            and payload.preaggregate is None
+            and not payload.facts
+        ):
             return None, ["Расчёт устарел. Выберите сценарий заново."]
 
         years = payload.years
@@ -142,6 +149,7 @@ class ScenarioEffectsService:
             cargo_groups=request.cargo_groups,
             holdings=request.holdings,
             compact=payload.compact,
+            preaggregate=payload.preaggregate,
         )
 
         if request.group_by_inner == "none":
@@ -346,10 +354,26 @@ class ScenarioEffectsService:
         cargo_groups: list[str],
         holdings: list[str],
         compact=None,
+        preaggregate=None,
     ) -> dict[tuple[str, ...], _AggBucket]:
         if compact is not None:
             raw_buckets = aggregate_compact_buckets(
                 compact,
+                year=year,
+                prev_year=prev_year,
+                group_by=group_by,
+                group_by_inner=group_by_inner,
+                cargo_groups=cargo_groups,
+                holdings=holdings,
+            )
+            return {
+                key: _AggBucket(base=base, rules=rules, prev_charge=prev_charge)
+                for key, (base, rules, prev_charge) in raw_buckets.items()
+            }
+
+        if preaggregate is not None:
+            raw_buckets = aggregate_preaggregate_buckets(
+                preaggregate,
                 year=year,
                 prev_year=prev_year,
                 group_by=group_by,

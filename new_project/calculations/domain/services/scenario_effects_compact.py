@@ -28,6 +28,8 @@ _COMPUTE_DTYPE = np.float64
 
 
 def extract_volume_array(df: pd.DataFrame) -> np.ndarray:
+    if "transport_volume_tons" not in df.columns:
+        return np.zeros(len(df), dtype=_FLOAT_DTYPE)
     series = df["transport_volume_tons"]
     if pd.api.types.is_numeric_dtype(series):
         return np.nan_to_num(
