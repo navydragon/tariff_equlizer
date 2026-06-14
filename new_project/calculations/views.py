@@ -141,6 +141,7 @@ def scenario_effects_compute_pandas_api(request):
 
     dto = ScenarioEffectsComputeRequestDTO(
         scenario_id=data.get("scenario_id"),
+        include_rule_breakdown=bool(data.get("include_rule_breakdown", False)),
     )
     errors = dto.validate()
     if errors:
@@ -156,6 +157,7 @@ def scenario_effects_compute_pandas_api(request):
     response_dto, calc_errors, meta = service.compute_pandas(
         scenario=scenario,
         user_id=request.user.id,
+        include_rule_breakdown=dto.include_rule_breakdown,
     )
     if calc_errors:
         return JsonResponse({"success": False, "errors": calc_errors}, status=400)

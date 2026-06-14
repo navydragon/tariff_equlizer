@@ -168,7 +168,10 @@ import { clearToasts, showToast } from "../lib/toast.js";
       try {
         const { response, data } = await fetchJson(computeUrl, {
           method: "POST",
-          body: { scenario_id: this.state.selectedScenarioId },
+          body: {
+            scenario_id: this.state.selectedScenarioId,
+            include_rule_breakdown: true,
+          },
         });
 
         if (!response.ok || !data || !data.success) {

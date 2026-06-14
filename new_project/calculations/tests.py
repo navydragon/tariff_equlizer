@@ -981,6 +981,7 @@ class ScenarioEffectsPandasParityTests(TariffLoadServiceTestMixin, TestCase):
         result, errors, meta = self.pandas_service.compute_pandas(
             scenario=scenario,
             user_id=self.user.id,
+            include_rule_breakdown=True,
         )
         self.assertEqual(errors, [])
         assert result is not None
@@ -993,6 +994,55 @@ class ScenarioEffectsPandasParityTests(TariffLoadServiceTestMixin, TestCase):
         assert payload.compact is not None
         self.assertGreater(len(payload.compact.rule_meta), 0)
         self.assertIsNotNone(payload.compact.rule_by_year)
+
+    def test_deferred_aggregate_skips_rule_by_year(self) -> None:
+        from calculations.domain.services.scenario_compute_store import (
+            RULE_BY_YEAR_FILENAME,
+            METADATA_FILENAME,
+            scenario_compute_dir,
+        )
+
+        self._setup_btd("1.1000")
+        scenario = Scenario.objects.select_related("route_set").get(
+            pk=self.scenario.pk,
+        )
+        rule = TariffRule.objects.create(
+            scenario=scenario,
+            name="Aggregate rule",
+            base_percent=Decimal("100"),
+            position=1,
+        )
+        TariffRuleYearValue.objects.create(
+            tariff_rule=rule,
+            year=2026,
+            coefficient=Decimal("1.0500"),
+        )
+
+        result, errors, meta = self.pandas_service.compute_pandas(
+            scenario=scenario,
+            user_id=self.user.id,
+            include_rule_breakdown=False,
+        )
+        self.assertEqual(errors, [])
+        assert result is not None
+        self.assertEqual(meta["timings"].get("rule_by_year_ms"), 0)
+
+        payload = get_payload_ready(result.cache_key)
+        self.assertIsNotNone(payload)
+        assert payload is not None
+        assert payload.compact is not None
+        self.assertGreater(len(payload.compact.rule_meta), 0)
+        self.assertIsNone(payload.compact.rule_by_year)
+
+        data_version = meta.get("data_version")
+        assert data_version
+        cache_dir = scenario_compute_dir(
+            scenario_id=scenario.id,
+            data_version=data_version,
+        )
+        metadata = json.loads((cache_dir / METADATA_FILENAME).read_text(encoding="utf-8"))
+        self.assertFalse(metadata.get("include_rule_breakdown"))
+        self.assertFalse((cache_dir / RULE_BY_YEAR_FILENAME).is_file())
 
     def test_scenario_snapshot_cache_hit(self) -> None:
         self._setup_btd("1.1000")
@@ -1771,7 +1821,12 @@ class ScenarioEffectsCubeApiTests(TariffLoadServiceTestMixin, TestCase):
     def _compute_cache_key(self) -> str:
         response = self.client.post(
             reverse("calculations:scenario_effects_compute_pandas_api"),
-            data=json.dumps({"scenario_id": self.scenario.id}),
+            data=json.dumps(
+                {
+                    "scenario_id": self.scenario.id,
+                    "include_rule_breakdown": True,
+                },
+            ),
             content_type="application/json",
         )
         cache_key = response.json()["cache_key"]
@@ -1802,6 +1857,37 @@ class ScenarioEffectsCubeApiTests(TariffLoadServiceTestMixin, TestCase):
         self.assertIn("Отдельные тарифные решения", effect_labels)
         self.assertIn("Правило тест", effect_labels)
         self.assertEqual(payload["unit"], "млрд руб.")
+
+    def test_cube_tariff_decision_requires_rule_breakdown(self) -> None:
+        response = self.client.post(
+            reverse("calculations:scenario_effects_compute_pandas_api"),
+            data=json.dumps(
+                {
+                    "scenario_id": self.scenario.id,
+                    "include_rule_breakdown": False,
+                },
+            ),
+            content_type="application/json",
+        )
+        cache_key = response.json()["cache_key"]
+        get_payload_ready(cache_key)
+
+        response = self.client.post(
+            reverse("calculations:scenario_effects_cube_api"),
+            data=json.dumps(
+                {
+                    "scenario_id": self.scenario.id,
+                    "cache_key": cache_key,
+                    "group_by": "tariff_decision",
+                    "group_by_inner": "none",
+                },
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(response.json()["success"])
+        self.assertIn("полный пересчёт", response.json()["errors"][0].lower())
 
     def test_cube_export_returns_xlsx(self) -> None:
         cache_key = self._compute_cache_key()
@@ -1870,6 +1956,7 @@ class ScenarioEffectsCubeApiTests(TariffLoadServiceTestMixin, TestCase):
         compute_result, errors, _meta = pandas_service.compute_pandas(
             scenario=self.scenario,
             user_id=self.user.id,
+            include_rule_breakdown=True,
         )
         self.assertEqual(errors, [])
         assert compute_result is not None

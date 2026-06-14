@@ -117,6 +117,16 @@ class ScenarioEffectsCubeService:
         if payload.compact is None:
             return None, ["Расчёт ещё выполняется. Повторите запрос через несколько секунд."]
 
+        if (
+            request.group_by == "tariff_decision"
+            or request.group_by_inner == "tariff_decision"
+        ) and payload.compact.rule_by_year is None:
+            if payload.compact.rule_meta:
+                return None, [
+                    "Требуется полный пересчёт с разбивкой по правилам. "
+                    "Обновите страницу.",
+                ]
+
         if not _payload_has_effects_data(payload):
             return None, [
                 "Кэш расчёта устарел или недоступен. Выполните пересчёт.",
@@ -164,8 +174,9 @@ class ScenarioEffectsCubeService:
         ]
 
         if payload.compact is not None:
-            for rule_id, rule_name in payload.compact.rule_meta:
-                slices.append((f"rule:{rule_id}", rule_name))
+            if payload.compact.rule_by_year is not None:
+                for rule_id, rule_name in payload.compact.rule_meta:
+                    slices.append((f"rule:{rule_id}", rule_name))
         else:
             rules = TariffRule.objects.filter(scenario_id=scenario.id).order_by(
                 "position",

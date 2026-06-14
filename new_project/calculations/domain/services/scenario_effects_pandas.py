@@ -49,6 +49,18 @@ from calculations.domain.services.tariff_load import TariffLoadService
 from scenarios.models import Scenario
 
 
+def _compact_meets_request(
+    compact: CompactRouteEffects | None,
+    *,
+    include_rule_breakdown: bool,
+) -> bool:
+    if compact is None:
+        return False
+    if include_rule_breakdown and compact.rule_by_year is None:
+        return False
+    return True
+
+
 class ScenarioEffectsPandasService:
     def __init__(self) -> None:
         self._tariff_load = TariffLoadService()
@@ -58,6 +70,7 @@ class ScenarioEffectsPandasService:
         *,
         scenario: Scenario,
         user_id: int,
+        include_rule_breakdown: bool = False,
     ) -> tuple[ScenarioEffectsComputeResponseDTO | None, list[str], dict]:
         started = time.perf_counter()
         context = self._tariff_load.build_scenario_context(scenario)
@@ -91,9 +104,12 @@ class ScenarioEffectsPandasService:
             filter_options = scenario_bundle.filter_options
             skipped_charge = scenario_bundle.skipped_charge
             skipped_volume = scenario_bundle.routes_without_volume
-            compact_ready = compact is not None
+            compact_ready = _compact_meets_request(
+                compact,
+                include_rule_breakdown=include_rule_breakdown,
+            )
             t_load = t_compute = t_post_compute = time.perf_counter()
-            if compact is None:
+            if not compact_ready:
                 parquet_path = resolve_mart_parquet_path(
                     route_set_id=scenario.route_set_id,
                 )
@@ -114,6 +130,7 @@ class ScenarioEffectsPandasService:
                     routes_without_volume=skipped_volume,
                     parquet_path=parquet_path,
                     mart_meta=mart_meta,
+                    include_rule_breakdown=include_rule_breakdown,
                 )
         else:
             light_columns = resolve_light_mart_columns(has_rules=bool(context.rules))
@@ -173,6 +190,7 @@ class ScenarioEffectsPandasService:
                 routes_without_volume=skipped_volume,
                 parquet_path=Path(str(load_timings.get("mart_cache_path") or "")),
                 mart_meta=mart_meta,
+                include_rule_breakdown=include_rule_breakdown,
             )
 
         cards = build_cards_from_totals(global_totals, years)
@@ -213,6 +231,7 @@ class ScenarioEffectsPandasService:
                     filter_options=deferred_job.filter_options,
                     skipped_charge=deferred_job.skipped_charge,
                     routes_without_volume=deferred_job.routes_without_volume,
+                    include_rule_breakdown=deferred_job.include_rule_breakdown,
                 ),
             )
 
@@ -226,6 +245,7 @@ class ScenarioEffectsPandasService:
             "route_mart_cache_hit": route_mart_hit,
             "scenario_compute_cache_hit": scenario_compute_hit,
             "compact_ready": compact_ready,
+            "include_rule_breakdown": include_rule_breakdown,
             "mart_cache_path": load_timings.get("mart_cache_path"),
             "timings": {
                 "context_ms": int((t_context - started) * 1000),
@@ -298,6 +318,7 @@ class ScenarioEffectsPandasService:
         routes_without_volume: int,
         parquet_path: Path,
         mart_meta: MartMeta | None,
+        include_rule_breakdown: bool = False,
     ) -> DeferredFullComputeJob:
         return DeferredFullComputeJob(
             cache_key="",
@@ -314,6 +335,7 @@ class ScenarioEffectsPandasService:
             filter_options=filter_options,
             skipped_charge=skipped_charge,
             routes_without_volume=routes_without_volume,
+            include_rule_breakdown=include_rule_breakdown,
         )
 
     def _compute_arrays(

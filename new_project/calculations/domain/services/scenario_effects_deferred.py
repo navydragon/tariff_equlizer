@@ -52,6 +52,7 @@ class DeferredFullComputeJob:
     filter_options: dict[str, list[str]]
     skipped_charge: int
     routes_without_volume: int
+    include_rule_breakdown: bool = False
 
 
 def _job_data_version_stale(job: DeferredFullComputeJob) -> bool:
@@ -97,6 +98,7 @@ def _run_deferred_full_compute(job: DeferredFullComputeJob) -> None:
             route_set_id=job.route_set_id,
             mart_meta=mart_meta,
             mask_cache_dir=Path(job.mask_cache_dir_path),
+            include_rule_by_year=job.include_rule_breakdown,
         )
         if arrays is None:
             return

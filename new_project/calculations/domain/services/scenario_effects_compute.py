@@ -226,6 +226,7 @@ def compute_arrays_full(
     route_set_id: int,
     mart_meta: MartMeta | None,
     mask_cache_dir: Path | None = None,
+    include_rule_by_year: bool = True,
 ) -> tuple[GlobalTotals, dict[str, int], FullComputeArrays | None]:
     import time
 
@@ -254,7 +255,7 @@ def compute_arrays_full(
     n_rules = len(rule_meta)
     rule_by_year_arr = (
         np.zeros((n_rules, n_routes, n_years), dtype=_COMPUTE_DTYPE)
-        if n_rules
+        if n_rules and include_rule_by_year
         else None
     )
 

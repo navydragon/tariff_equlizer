@@ -154,5 +154,6 @@ def warm_scenario_after_rule_change(
             filter_options=filter_options,
             skipped_charge=skipped_charge,
             routes_without_volume=skipped_volume,
+            include_rule_breakdown=False,
         ),
     )

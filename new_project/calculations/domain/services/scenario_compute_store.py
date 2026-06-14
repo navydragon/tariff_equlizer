@@ -215,11 +215,16 @@ def save_scenario_compute(
         os.fsync(handle.fileno())
     _atomic_replace(tmp_path, cache_dir / NPZ_FILENAME)
 
+    rule_by_year_path = cache_dir / RULE_BY_YEAR_FILENAME
     if compact.rule_by_year is not None:
-        _save_rule_by_year(cache_dir / RULE_BY_YEAR_FILENAME, compact.rule_by_year)
+        _save_rule_by_year(rule_by_year_path, compact.rule_by_year)
+    elif rule_by_year_path.is_file():
+        rule_by_year_path.unlink()
 
+    include_rule_breakdown = compact.rule_by_year is not None
     metadata = {
         "kpi_only": False,
+        "include_rule_breakdown": include_rule_breakdown,
         "years": compact.years,
         "dimension_labels": compact.dimension_labels,
         "rule_meta": [[rule_id, name] for rule_id, name in compact.rule_meta],

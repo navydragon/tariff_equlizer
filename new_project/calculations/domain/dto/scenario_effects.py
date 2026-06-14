@@ -15,6 +15,7 @@ GROUP_BY_INNER_CHOICES = EFFECTS_GROUP_BY_INNER_CHOICES
 @dataclass(frozen=True)
 class ScenarioEffectsComputeRequestDTO:
     scenario_id: int
+    include_rule_breakdown: bool = False
 
     def validate(self) -> list[str]:
         if not isinstance(self.scenario_id, int) or self.scenario_id <= 0:
