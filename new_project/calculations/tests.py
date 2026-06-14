@@ -997,7 +997,6 @@ class ScenarioEffectsPandasParityTests(TariffLoadServiceTestMixin, TestCase):
 
     def test_deferred_aggregate_skips_rule_by_year(self) -> None:
         from calculations.domain.services.scenario_compute_store import (
-            PREAGG_FILENAME,
             RULE_BY_YEAR_FILENAME,
             METADATA_FILENAME,
             scenario_compute_dir,
@@ -1027,13 +1026,13 @@ class ScenarioEffectsPandasParityTests(TariffLoadServiceTestMixin, TestCase):
         self.assertEqual(errors, [])
         assert result is not None
         self.assertEqual(meta["timings"].get("rule_by_year_ms"), 0)
-        self.assertTrue(meta.get("compact_ready"))
 
-        payload = get_payload(result.cache_key)
+        payload = get_payload_ready(result.cache_key)
         self.assertIsNotNone(payload)
         assert payload is not None
-        self.assertFalse(payload.compact_pending)
-        assert payload.preaggregate is not None or payload.compact is not None
+        assert payload.compact is not None
+        self.assertGreater(len(payload.compact.rule_meta), 0)
+        self.assertIsNone(payload.compact.rule_by_year)
 
         data_version = meta.get("data_version")
         assert data_version
@@ -1042,127 +1041,8 @@ class ScenarioEffectsPandasParityTests(TariffLoadServiceTestMixin, TestCase):
             data_version=data_version,
         )
         metadata = json.loads((cache_dir / METADATA_FILENAME).read_text(encoding="utf-8"))
-        self.assertTrue(metadata.get("preaggregate"))
         self.assertFalse(metadata.get("include_rule_breakdown"))
-        self.assertTrue((cache_dir / PREAGG_FILENAME).is_file())
         self.assertFalse((cache_dir / RULE_BY_YEAR_FILENAME).is_file())
-
-    def test_preaggregate_matches_compact_for_tables(self) -> None:
-        from calculations.domain.services.scenario_effects_compact import (
-            aggregate_compact_buckets,
-        )
-        from calculations.domain.services.scenario_effects_preaggregate import (
-            aggregate_preaggregate_buckets,
-        )
-        from calculations.domain.services.scenario_compute_store import (
-            save_scenario_compute_preaggregate,
-            try_load_scenario_compute,
-        )
-        from calculations.domain.services.scenario_effects_cache import (
-            compute_scenario_data_version,
-        )
-
-        self._setup_btd("1.1000")
-        scenario = Scenario.objects.select_related("route_set").get(
-            pk=self.scenario.pk,
-        )
-        rule = TariffRule.objects.create(
-            scenario=scenario,
-            name="Parity rule",
-            base_percent=Decimal("100"),
-            position=1,
-        )
-        TariffRuleYearValue.objects.create(
-            tariff_rule=rule,
-            year=2026,
-            coefficient=Decimal("1.0500"),
-        )
-
-        df, context, mart_meta, _ = self._load_df_and_context(scenario)
-        compact, _, _ = self.pandas_service._compute_compact(
-            df,
-            context,
-            context.years,
-            scenario=scenario,
-            mart_meta=mart_meta,
-        )
-        assert compact is not None
-
-        from calculations.domain.services.scenario_effects_compute import (
-            compute_kpi_and_preaggregates,
-            rule_specs_from_context,
-        )
-
-        rule_specs = rule_specs_from_context(self.pandas_service._tariff_load, context)
-        totals, _, preaggregate = compute_kpi_and_preaggregates(
-            df,
-            years=context.years,
-            base_coef_by_year=context.base_coef_by_year,
-            rule_specs=rule_specs,
-            route_set_id=scenario.route_set_id,
-            mart_meta=mart_meta,
-        )
-        assert preaggregate is not None
-        data_version = compute_scenario_data_version(
-            scenario=scenario,
-            base_coef_by_year=context.base_coef_by_year,
-            rules=context.rules,
-        )
-        save_scenario_compute_preaggregate(
-            scenario_id=scenario.id,
-            data_version=data_version,
-            years=context.years,
-            preaggregate=preaggregate,
-            global_totals=totals,
-            filter_options={"cargo_groups": ["—"], "holdings": ["Прочие"]},
-            skipped_charge=0,
-            routes_without_volume=0,
-        )
-        loaded = try_load_scenario_compute(
-            scenario_id=scenario.id,
-            data_version=data_version,
-        )
-        assert loaded is not None
-        assert loaded.preaggregate is not None
-
-        year = context.years[1]
-        prev_year = context.years[0]
-        for group_by, group_by_inner in (
-            ("cargo_group", "none"),
-            ("holding", "none"),
-        ):
-            compact_buckets = aggregate_compact_buckets(
-                compact,
-                year=year,
-                prev_year=prev_year,
-                group_by=group_by,
-                group_by_inner=group_by_inner,
-                cargo_groups=[],
-                holdings=[],
-            )
-            preagg_buckets = aggregate_preaggregate_buckets(
-                loaded.preaggregate,
-                year=year,
-                prev_year=prev_year,
-                group_by=group_by,
-                group_by_inner=group_by_inner,
-                cargo_groups=[],
-                holdings=[],
-            )
-            self.assertEqual(set(compact_buckets), set(preagg_buckets))
-            for key in compact_buckets:
-                self.assertEqual(compact_buckets[key], preagg_buckets[key], key)
-
-    def _load_df_and_context(self, scenario):
-        from calculations.domain.services.route_effects_loader import (
-            fetch_routes_dataframe_cached_timed,
-        )
-
-        context = self.pandas_service._tariff_load.build_scenario_context(scenario)
-        df, mart_meta, timings = fetch_routes_dataframe_cached_timed(
-            scenario.route_set_id,
-        )
-        return df, context, mart_meta, timings
 
     def test_scenario_snapshot_cache_hit(self) -> None:
         self._setup_btd("1.1000")
@@ -1545,7 +1425,6 @@ class ScenarioRuleWarmTests(TariffLoadServiceTestMixin, TestCase):
         self.assertIsNotNone(bundle)
         assert bundle is not None
         self.assertIsNone(bundle.compact)
-        self.assertIsNotNone(bundle.preaggregate)
         self.assertGreater(bundle.global_totals.baseline_total, 0)
 
     def test_compute_pandas_hits_kpi_only_snapshot(self) -> None:
@@ -1570,30 +1449,8 @@ class ScenarioRuleWarmTests(TariffLoadServiceTestMixin, TestCase):
             user_id=self.user.id,
         )
         self.assertTrue(meta.get("scenario_compute_cache_hit"))
-        self.assertTrue(meta.get("compact_ready"))
+        self.assertFalse(meta.get("compact_ready"))
         self.assertEqual(meta["timings"].get("compute_ms"), 0)
-
-        from calculations.domain.services.scenario_compute_store import (
-            try_load_scenario_compute,
-        )
-        from calculations.domain.services.scenario_effects_cache import (
-            compute_scenario_data_version,
-        )
-
-        context = self.pandas_service._tariff_load.build_scenario_context(scenario)
-        data_version = compute_scenario_data_version(
-            scenario=scenario,
-            base_coef_by_year=context.base_coef_by_year,
-            rules=context.rules,
-        )
-        bundle = try_load_scenario_compute(
-            scenario_id=scenario.id,
-            data_version=data_version,
-        )
-        self.assertIsNotNone(bundle)
-        assert bundle is not None
-        self.assertIsNone(bundle.compact)
-        self.assertIsNotNone(bundle.preaggregate)
 
     def test_prewarm_on_create_without_conditions_field(self) -> None:
         from calculations.domain.services.route_effects_loader import (
@@ -1826,14 +1683,13 @@ class ScenarioEffectsComputePandasApiTests(TariffLoadServiceTestMixin, TestCase)
         cached = cache.get(cache_key)
         self.assertIsNotNone(cached)
         self.assertIsNone(cached.compact)
-        self.assertFalse(cached.compact_pending)
+        self.assertTrue(cached.compact_pending)
         self.assertTrue(cached.data_version)
 
-        resolved = get_payload(cache_key)
+        resolved = get_payload_ready(cache_key)
         self.assertIsNotNone(resolved)
-        self.assertTrue(
-            resolved.preaggregate is not None or resolved.compact is not None,
-        )
+        self.assertIsNotNone(resolved.compact)
+        self.assertGreater(len(resolved.compact.baseline_rub), 0)
 
     def setUp(self) -> None:
         super().setUp()

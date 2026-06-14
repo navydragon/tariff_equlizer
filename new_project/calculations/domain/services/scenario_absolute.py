@@ -14,10 +14,6 @@ from calculations.domain.services.scenario_effects_compact import (
     aggregate_compact_value,
     aggregate_compact_year_values,
 )
-from calculations.domain.services.scenario_effects_preaggregate import (
-    aggregate_preaggregate_value,
-    aggregate_preaggregate_year_values,
-)
 from calculations.domain.services.scenario_effects_cache import (
     COMPACT_API_WAIT_TIMEOUT_SECONDS,
     ScenarioEffectsCachePayload,
@@ -98,19 +94,6 @@ class ScenarioAbsoluteService:
                 key: {year: volume for year in payload.years}
                 for key, volume in volume_buckets.items()
             }
-        elif payload.preaggregate is not None:
-            volume_buckets = aggregate_preaggregate_value(
-                payload.preaggregate,
-                group_by=request.group_by,
-                group_by_inner=request.group_by_inner,
-                cargo_groups=[],
-                holdings=[],
-                metric="volume",
-            )
-            year_values = {
-                key: {year: volume for year in payload.years}
-                for key, volume in volume_buckets.items()
-            }
         else:
             volume_buckets = aggregate_by_groups(
                 payload.facts,
@@ -162,7 +145,7 @@ class ScenarioAbsoluteService:
         if access_errors:
             return None, access_errors
 
-        if payload.compact is None and payload.preaggregate is None and payload.compact_pending:
+        if payload.compact is None and payload.compact_pending:
             return None, ["Расчёт ещё выполняется. Повторите запрос через несколько секунд."]
 
         return payload, []
@@ -183,16 +166,6 @@ class ScenarioAbsoluteService:
                 cargo_groups=[],
                 holdings=[],
                 values_by_year=values_matrix,
-            )
-
-        if payload.preaggregate is not None:
-            return aggregate_preaggregate_year_values(
-                payload.preaggregate,
-                group_by=request.group_by,
-                group_by_inner=request.group_by_inner,
-                cargo_groups=[],
-                holdings=[],
-                metric="charge",
             )
 
         year_values: dict[tuple[str, ...], dict[int, Decimal]] = {}

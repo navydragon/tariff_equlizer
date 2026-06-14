@@ -127,7 +127,6 @@ def _run_deferred_full_compute(job: DeferredFullComputeJob) -> None:
             data_version=job.data_version,
             bundle=ScenarioComputeBundle(
                 compact=compact,
-                preaggregate=None,
                 global_totals=job.global_totals,
                 filter_options=job.filter_options,
                 skipped_charge=job.skipped_charge,

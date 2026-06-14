@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from decimal import Decimal
 from pathlib import Path
 from typing import Literal
 
@@ -16,12 +17,16 @@ from calculations.domain.services.route_mart_store import (
 from calculations.domain.services.rule_mask_prewarm import prewarm_rule_mask
 from calculations.domain.services.scenario_compute_store import (
     purge_stale_scenario_compute,
-    save_scenario_compute_preaggregate,
+    save_scenario_compute_kpi_only,
 )
 from calculations.domain.services.scenario_effects_cache import compute_scenario_data_version
 from calculations.domain.services.scenario_effects_compute import (
-    compute_kpi_and_preaggregates,
+    compute_kpi_totals,
     rule_specs_from_context,
+)
+from calculations.domain.services.scenario_effects_deferred import (
+    DeferredFullComputeJob,
+    schedule_deferred_full_compute,
 )
 from calculations.domain.services.scenario_effects_pandas import ScenarioEffectsPandasService
 from calculations.domain.services.tariff_load import TariffLoadService
@@ -85,7 +90,7 @@ def warm_scenario_after_rule_change(
         return
 
     mart_meta = load_mart_meta(parquet_path)
-    global_totals, _compute_timings, preaggregate = compute_kpi_and_preaggregates(
+    global_totals, _compute_timings = compute_kpi_totals(
         df,
         years=years,
         base_coef_by_year=context.base_coef_by_year,
@@ -93,8 +98,6 @@ def warm_scenario_after_rule_change(
         route_set_id=scenario.route_set_id,
         mart_meta=mart_meta,
     )
-    if preaggregate is None:
-        return
     filter_options = ScenarioEffectsPandasService._collect_filter_options(df, mart_meta)
     if mart_meta is not None:
         skipped_charge = mart_meta.skipped_charge
@@ -102,11 +105,10 @@ def warm_scenario_after_rule_change(
     else:
         skipped_charge, skipped_volume = fetch_route_set_stats(scenario.route_set_id)
 
-    save_scenario_compute_preaggregate(
+    save_scenario_compute_kpi_only(
         scenario_id=scenario.id,
         data_version=data_version,
         years=years,
-        preaggregate=preaggregate,
         global_totals=global_totals,
         filter_options=filter_options,
         skipped_charge=skipped_charge,
@@ -133,4 +135,25 @@ def warm_scenario_after_rule_change(
     purge_stale_mask_cache_dirs(
         route_set_id=scenario.route_set_id,
         keep_cache_dir=resolved_mask_dir,
+    )
+
+    base_coef_by_year: dict[int, Decimal] = context.base_coef_by_year
+    schedule_deferred_full_compute(
+        DeferredFullComputeJob(
+            cache_key="",
+            scenario_id=scenario.id,
+            route_set_id=scenario.route_set_id,
+            data_version=data_version,
+            years=years,
+            base_coef_by_year=base_coef_by_year,
+            rule_specs=rule_specs,
+            parquet_path=str(parquet_path),
+            mask_cache_dir_path=str(resolved_mask_dir),
+            mart_meta=mart_meta,
+            global_totals=global_totals,
+            filter_options=filter_options,
+            skipped_charge=skipped_charge,
+            routes_without_volume=skipped_volume,
+            include_rule_breakdown=False,
+        ),
     )

@@ -14,11 +14,6 @@ from calculations.domain.services.route_mask_cache import build_or_load_rule_mas
 from calculations.domain.services.route_mart_store import MartMeta
 from calculations.domain.services.scenario_effects_compact import _COMPUTE_DTYPE
 from calculations.domain.services.scenario_effects_formatting import GlobalTotals
-from calculations.domain.services.scenario_effects_preaggregate import (
-    EffectsPreAggregate,
-    EffectsPreAggregateBuilder,
-    build_preaggregate_builder,
-)
 from calculations.domain.services.tariff_load import ScenarioTariffContext, TariffLoadService
 
 
@@ -160,33 +155,11 @@ def compute_kpi_totals(
     route_set_id: int,
     mart_meta: MartMeta | None,
 ) -> tuple[GlobalTotals, dict[str, int]]:
-    totals, timings, _preagg = compute_kpi_and_preaggregates(
-        df,
-        years=years,
-        base_coef_by_year=base_coef_by_year,
-        rule_specs=rule_specs,
-        route_set_id=route_set_id,
-        mart_meta=mart_meta,
-        build_preaggregate=False,
-    )
-    return totals, timings
-
-
-def compute_kpi_and_preaggregates(
-    df: pd.DataFrame,
-    *,
-    years: list[int],
-    base_coef_by_year: dict[int, Decimal],
-    rule_specs: list[RuleComputeSpec],
-    route_set_id: int,
-    mart_meta: MartMeta | None,
-    build_preaggregate: bool = True,
-) -> tuple[GlobalTotals, dict[str, int], EffectsPreAggregate | None]:
     import time
 
     timings: dict[str, int] = {}
     if df.empty:
-        return GlobalTotals(), timings, None
+        return GlobalTotals(), timings
 
     initial = df["freight_charge_rub"].to_numpy(dtype=_COMPUTE_DTYPE, copy=False)
     base_coef_arr = _base_coef_array(years, base_coef_by_year)
@@ -203,22 +176,13 @@ def compute_kpi_and_preaggregates(
     timings.update(mask_timings)
     has_rules = bool(rule_meta)
 
-    preagg_builder: EffectsPreAggregateBuilder | None = None
-    if build_preaggregate:
-        preagg_builder = build_preaggregate_builder(df, years=years, mart_meta=mart_meta)
-
     global_totals = GlobalTotals()
     global_totals.baseline_total = _to_decimal(float(initial.sum(dtype=np.float64)))
     global_totals.charge_by_year[years[0]] = global_totals.baseline_total
 
     prev = initial.copy()
     current = np.empty_like(prev)
-    zero_inc = np.zeros_like(prev)
     t_years = time.perf_counter()
-
-    if preagg_builder is not None:
-        preagg_builder.accumulate_initial_charge(charge_vals=prev)
-
     for year_index, year in enumerate(years):
         if year_index == 0:
             continue
@@ -228,15 +192,15 @@ def compute_kpi_and_preaggregates(
             np.multiply(prev, base_coef, out=current)
             np.round(current, 2, out=current)
             base_inc = np.round(prev * (base_coef - 1.0), 2)
-            rules_inc = zero_inc
             rules_inc_sum = 0.0
         else:
             rules_column = rules_coef[:, year_index]
             np.multiply(prev, base_coef + rules_column - 1.0, out=current)
             np.round(current, 2, out=current)
             base_inc = np.round(prev * (base_coef - 1.0), 2)
-            rules_inc = np.round(prev * (rules_column - 1.0), 2)
-            rules_inc_sum = float(rules_inc.sum(dtype=np.float64))
+            rules_inc_sum = float(
+                np.round(prev * (rules_column - 1.0), 2).sum(dtype=np.float64),
+            )
 
         global_totals.charge_by_year[year] = _to_decimal(
             float(current.sum(dtype=np.float64)),
@@ -245,22 +209,12 @@ def compute_kpi_and_preaggregates(
         if has_rules:
             global_totals.rules_by_year[year] = _to_decimal(rules_inc_sum)
 
-        if preagg_builder is not None:
-            preagg_builder.accumulate_year(
-                year_index=year_index,
-                base_inc=base_inc,
-                rules_inc=rules_inc,
-                charge_vals=current,
-            )
-
         prev, current = current, prev
 
     timings["years_loop_ms"] = int((time.perf_counter() - t_years) * 1000)
     timings["rule_by_year_ms"] = 0
     timings["totals_ms"] = 0
-
-    preaggregate = preagg_builder.finalize() if preagg_builder is not None else None
-    return global_totals, timings, preaggregate
+    return global_totals, timings
 
 
 def compute_arrays_full(
