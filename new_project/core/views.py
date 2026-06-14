@@ -15,6 +15,8 @@ from core.domain.cargo.dto import CreateCargoDTO, UpdateCargoDTO
 from core.domain.cargo.services import CargoService
 from core.domain.route_analysis.dto import RouteAnalysisRequestDTO
 from core.domain.route_analysis.services import RouteAnalysisService
+from core.domain.route_analytics.dto import RouteAnalyticsRequestDTO
+from core.domain.route_analytics.services import RouteAnalyticsService
 from core.domain.services.app_settings import AppSettingsService
 from core.domain.railroad.dto import CreateRailRoadDTO, UpdateRailRoadDTO
 from core.domain.railroad.services import RailRoadService
@@ -116,6 +118,14 @@ def route_analysis(request):
     Страница «Экономика грузов».
     """
     return render(request, "core/route_analysis.html")
+
+
+@login_required
+def route_analytics(request):
+    """
+    Страница «Аналитика маршрутов».
+    """
+    return render(request, "core/route_analytics.html")
 
 
 # === Cargo: HTML-страницы ===
@@ -2105,4 +2115,31 @@ def route_analysis_api(request):
             **response_dto.to_api_dict(),
         }
     )
+
+
+@login_required
+@require_http_methods(["GET"])
+def route_analytics_aggregate_api(request):
+    try:
+        route_set_id = int(request.GET.get("route_set_id", "0"))
+    except (TypeError, ValueError):
+        route_set_id = 0
+
+    dimension = (request.GET.get("dimension") or "").strip()
+    metric = (request.GET.get("metric") or "").strip()
+
+    dto = RouteAnalyticsRequestDTO(
+        route_set_id=route_set_id,
+        dimension=dimension,
+        metric=metric,
+    )
+
+    service = RouteAnalyticsService()
+    result, errors = service.aggregate(dto)
+    if errors:
+        status = 404 if "не найден" in errors[0] else 400
+        return JsonResponse({"success": False, "errors": errors}, status=status)
+
+    assert result is not None
+    return JsonResponse({"success": True, **result.to_api_dict()})
 

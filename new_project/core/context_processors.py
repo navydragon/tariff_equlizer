@@ -34,6 +34,10 @@ def breadcrumbs(request):
             {"title": home_title, "url": home_url},
             {"title": "Куб эффектов", "url": None},
         ],
+        "route_analytics": [
+            {"title": home_title, "url": home_url},
+            {"title": "Аналитика маршрутов", "url": None},
+        ],
         "effects_cube_legacy": [
             {"title": home_title, "url": home_url},
             {"title": "Куб эффектов", "url": None},

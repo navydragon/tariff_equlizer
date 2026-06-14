@@ -17,7 +17,7 @@
 <div class="row row-cards mt-3">
   {% for item in menu_items %}
     <div class="col-md-6 col-lg-3">
-      {% if item.title == "Аналитика" or item.title == "Помощь" %}
+      {% if item.title == "Помощь" %}
         <div class="card card-sm" style="opacity: 0.5; cursor: not-allowed; pointer-events: none;">
       {% else %}
         <a
@@ -36,7 +36,7 @@
             </div>
           </div>
         </div>
-      {% if item.title == "Аналитика" or item.title == "Помощь" %}
+      {% if item.title == "Помощь" %}
         </div>
       {% else %}
         </a>

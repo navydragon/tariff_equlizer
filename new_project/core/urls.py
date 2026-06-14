@@ -31,6 +31,7 @@ urlpatterns = [
         name="dashboard_2",
     ),
     path("route-analysis/", views.route_analysis, name="route_analysis"),
+    path("route-analytics/", views.route_analytics, name="route_analytics"),
     path("hello/", views.hello_partial, name="hello_partial"),
     # Справочники
     path("references/", views.references_view, name="references"),
@@ -310,6 +311,11 @@ urlpatterns = [
         "analysis/api/route-analysis/",
         views.route_analysis_api,
         name="route_analysis_api",
+    ),
+    path(
+        "analysis/api/route-analytics/aggregate/",
+        views.route_analytics_aggregate_api,
+        name="route_analytics_aggregate_api",
     ),
 ]
 

@@ -6,7 +6,7 @@
 
   {"position": 3, "title": "Куб эффектов", "icon": "ti-box", "url_name": "effects_cube"},
 
-  {"position": 4, "title": "Аналитика", "icon": "ti-chart-bar"},
+  {"position": 4, "title": "Аналитика маршрутов", "icon": "ti-chart-bar", "url_name": "route_analytics"},
 
   {"position": 5, "title": "Помощь", "icon": "ti-help-circle"},
 

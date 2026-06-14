@@ -1,0 +1,29 @@
+.route-analytics-table-wrap {
+  min-height: 320px;
+}
+
+.route-analytics-table-wrap--loading {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.route-analytics-chart-wrap {
+  min-height: 420px;
+  position: relative;
+}
+
+.route-analytics-chart-wrap canvas {
+  max-height: 420px;
+}
+
+.route-analytics-table-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 200px;
+}
+
+.route-analytics-table-wrap .table tbody tr:last-child {
+  font-weight: 600;
+  background-color: rgba(6, 57, 113, 0.04);
+}

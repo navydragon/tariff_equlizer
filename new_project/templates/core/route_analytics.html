@@ -1,0 +1,272 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Аналитика маршрутов · Цифровой тарифный инструментарий{% endblock %}
+
+{% block extra_css %}
+  <link rel="stylesheet" href="{% static 'core/css/route-analytics.css' %}" />
+{% endblock %}
+
+{% block content %}
+<div
+  data-controller="route-analytics"
+  data-route-analytics-route-set-list-url-value="{% url 'route_set_list_api' %}"
+  data-route-analytics-aggregate-url-value="{% url 'route_analytics_aggregate_api' %}"
+>
+  <div class="page-header d-print-none">
+    <div class="row align-items-center">
+      <div class="col">
+        <h2 class="page-title">Аналитика маршрутов</h2>
+        <div class="text-muted mt-1">
+          Группировка маршрутов набора по категориальным параметрам
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card mt-4">
+    <div class="card-body">
+      <div class="row g-3 align-items-end">
+        <div class="col-md-6 col-lg-4">
+          <label class="form-label" for="routeAnalyticsRouteSetSelect">Набор маршрутов</label>
+          <select
+            id="routeAnalyticsRouteSetSelect"
+            class="form-select form-select-sm"
+            data-route-analytics-target="routeSetSelect"
+            data-action="change->route-analytics#onFilterChange"
+          >
+            <option value="">Загрузка...</option>
+          </select>
+        </div>
+        <div class="col-md-6 col-lg-4">
+          <label class="form-label" for="routeAnalyticsDimensionSelect">Параметр группировки</label>
+          <select
+            id="routeAnalyticsDimensionSelect"
+            class="form-select form-select-sm"
+            data-route-analytics-target="dimensionSelect"
+            data-action="change->route-analytics#onFilterChange"
+          >
+            <option value="cargo_group">Группа груза</option>
+            <option value="cargo_code">Код груза</option>
+            <option value="direction">Направление</option>
+            <option value="origin_railroad">Дорога отправления</option>
+            <option value="destination_railroad">Дорога назначения</option>
+            <option value="wagon_kind">Род вагона</option>
+            <option value="shipment_type">Тип отправки</option>
+            <option value="message_type">Вид сообщения</option>
+            <option value="shipper_holding">Холдинг</option>
+            <option value="shipper">Грузоотправитель</option>
+            <option value="distance_belt">Пояс дальности</option>
+            <option value="shipment_category">Категория отпр.</option>
+            <option value="park_type">Тип парка</option>
+            <option value="special_container_type">Вид спец. контейнера</option>
+          </select>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card mt-4">
+    <div class="card-header">
+      <ul class="nav nav-tabs card-header-tabs" role="tablist">
+        <li class="nav-item" role="presentation">
+          <button
+            class="nav-link active"
+            id="route-analytics-tab-count"
+            data-bs-toggle="tab"
+            data-bs-target="#route-analytics-pane-count"
+            type="button"
+            role="tab"
+            aria-controls="route-analytics-pane-count"
+            aria-selected="true"
+            data-route-analytics-metric-param="count"
+            data-action="shown.bs.tab->route-analytics#onTabShown"
+          >
+            Количество
+          </button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button
+            class="nav-link"
+            id="route-analytics-tab-money"
+            data-bs-toggle="tab"
+            data-bs-target="#route-analytics-pane-money"
+            type="button"
+            role="tab"
+            aria-controls="route-analytics-pane-money"
+            aria-selected="false"
+            data-route-analytics-metric-param="money"
+            data-action="shown.bs.tab->route-analytics#onTabShown"
+          >
+            Деньги
+          </button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button
+            class="nav-link"
+            id="route-analytics-tab-volume"
+            data-bs-toggle="tab"
+            data-bs-target="#route-analytics-pane-volume"
+            type="button"
+            role="tab"
+            aria-controls="route-analytics-pane-volume"
+            aria-selected="false"
+            data-route-analytics-metric-param="volume"
+            data-action="shown.bs.tab->route-analytics#onTabShown"
+          >
+            Погрузка
+          </button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button
+            class="nav-link"
+            id="route-analytics-tab-turnover"
+            data-bs-toggle="tab"
+            data-bs-target="#route-analytics-pane-turnover"
+            type="button"
+            role="tab"
+            aria-controls="route-analytics-pane-turnover"
+            aria-selected="false"
+            data-route-analytics-metric-param="turnover"
+            data-action="shown.bs.tab->route-analytics#onTabShown"
+          >
+            Грузооборот
+          </button>
+        </li>
+      </ul>
+    </div>
+    <div class="card-body">
+      <div class="tab-content">
+        <div
+          class="tab-pane fade show active"
+          id="route-analytics-pane-count"
+          role="tabpanel"
+          aria-labelledby="route-analytics-tab-count"
+          data-route-analytics-target="tabPanel"
+          data-metric="count"
+        >
+          <div class="route-analytics-pane-placeholder text-muted py-4 text-center">
+            Выберите набор маршрутов и параметр группировки.
+          </div>
+          <div class="row g-3 route-analytics-pane-content d-none">
+            <div class="col-lg-6">
+              <div
+                class="route-analytics-table-wrap"
+                data-route-analytics-target="tableWrap"
+                data-metric="count"
+              ></div>
+            </div>
+            <div class="col-lg-6">
+              <div class="route-analytics-chart-wrap">
+                <canvas
+                  data-route-analytics-target="chartCanvas"
+                  data-metric="count"
+                  aria-label="Диаграмма: количество маршрутов"
+                ></canvas>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div
+          class="tab-pane fade"
+          id="route-analytics-pane-money"
+          role="tabpanel"
+          aria-labelledby="route-analytics-tab-money"
+          data-route-analytics-target="tabPanel"
+          data-metric="money"
+        >
+          <div class="route-analytics-pane-placeholder text-muted py-4 text-center">
+            Выберите набор маршрутов и параметр группировки.
+          </div>
+          <div class="row g-3 route-analytics-pane-content d-none">
+            <div class="col-lg-6">
+              <div
+                class="route-analytics-table-wrap"
+                data-route-analytics-target="tableWrap"
+                data-metric="money"
+              ></div>
+            </div>
+            <div class="col-lg-6">
+              <div class="route-analytics-chart-wrap">
+                <canvas
+                  data-route-analytics-target="chartCanvas"
+                  data-metric="money"
+                  aria-label="Диаграмма: сумма денег"
+                ></canvas>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div
+          class="tab-pane fade"
+          id="route-analytics-pane-volume"
+          role="tabpanel"
+          aria-labelledby="route-analytics-tab-volume"
+          data-route-analytics-target="tabPanel"
+          data-metric="volume"
+        >
+          <div class="route-analytics-pane-placeholder text-muted py-4 text-center">
+            Выберите набор маршрутов и параметр группировки.
+          </div>
+          <div class="row g-3 route-analytics-pane-content d-none">
+            <div class="col-lg-6">
+              <div
+                class="route-analytics-table-wrap"
+                data-route-analytics-target="tableWrap"
+                data-metric="volume"
+              ></div>
+            </div>
+            <div class="col-lg-6">
+              <div class="route-analytics-chart-wrap">
+                <canvas
+                  data-route-analytics-target="chartCanvas"
+                  data-metric="volume"
+                  aria-label="Диаграмма: погрузка"
+                ></canvas>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div
+          class="tab-pane fade"
+          id="route-analytics-pane-turnover"
+          role="tabpanel"
+          aria-labelledby="route-analytics-tab-turnover"
+          data-route-analytics-target="tabPanel"
+          data-metric="turnover"
+        >
+          <div class="route-analytics-pane-placeholder text-muted py-4 text-center">
+            Выберите набор маршрутов и параметр группировки.
+          </div>
+          <div class="row g-3 route-analytics-pane-content d-none">
+            <div class="col-lg-6">
+              <div
+                class="route-analytics-table-wrap"
+                data-route-analytics-target="tableWrap"
+                data-metric="turnover"
+              ></div>
+            </div>
+            <div class="col-lg-6">
+              <div class="route-analytics-chart-wrap">
+                <canvas
+                  data-route-analytics-target="chartCanvas"
+                  data-metric="turnover"
+                  aria-label="Диаграмма: грузооборот"
+                ></canvas>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+  <script src="{% static 'core/vendor/chartjs/chart.umd.min.js' %}"></script>
+  <script src="{% static 'core/vendor/chartjs/chartjs-plugin-datalabels.min.js' %}"></script>
+{% endblock %}
