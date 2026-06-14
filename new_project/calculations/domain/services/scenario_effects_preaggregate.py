@@ -1,13 +1,14 @@
 ﻿from __future__ import annotations
 
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from decimal import Decimal
 from itertools import permutations
 
 import numpy as np
 
-from calculations.domain.constants import GROUP_BY_CHOICES
+from calculations.domain.constants import GROUP_BY_CHOICES, EFFECTS_GROUP_BY_CHOICES
 from calculations.domain.services.scenario_effects_compact import (
     _COMPUTE_DTYPE,
     _DIMENSION_COLUMNS,
@@ -17,8 +18,37 @@ from calculations.domain.services.scenario_effects_compact import (
 
 DENSE_PAIR_MAX_CELLS = 1_048_576
 DENSE_TRIPLE_MAX_CELLS = 1_048_576
+SMALL_PAIR_MAX_CELLS = 65_536
 FILTER_OUTER = "cargo_group"
 FILTER_INNER = "holding"
+SKIP_PAIR_KEYS = frozenset({("cargo_code", "cargo_code")})
+
+
+def _should_build_pair(outer: str, inner: str, n_outer: int, n_inner: int) -> bool:
+    if (outer, inner) in SKIP_PAIR_KEYS:
+        return False
+    n_cells = n_outer * n_inner
+    if n_cells > DENSE_PAIR_MAX_CELLS:
+        return False
+    if n_cells <= SMALL_PAIR_MAX_CELLS:
+        return True
+    if outer in EFFECTS_GROUP_BY_CHOICES or inner in EFFECTS_GROUP_BY_CHOICES:
+        return True
+    if FILTER_OUTER in {outer, inner} or FILTER_INNER in {outer, inner}:
+        return True
+    if "cargo_code" in {outer, inner}:
+        return True
+    return False
+
+
+def _should_build_filter_triple(n_a: int, n_b: int, n_c: int) -> bool:
+    return n_a * n_b * n_c <= DENSE_TRIPLE_MAX_CELLS
+
+
+def _pair_worker_count(n_pairs: int) -> int:
+    if n_pairs <= 1:
+        return 1
+    return min(8, n_pairs)
 
 
 @dataclass
@@ -99,7 +129,7 @@ def _label_for_code(preagg: EffectsPreAggregate, dimension: str, code: int) -> s
     labels = preagg.dimension_labels.get(dimension, [])
     if 0 <= code < len(labels):
         return labels[code]
-    return "вЂ”"
+    return "—"
 
 
 def _allowed_indices(
@@ -143,14 +173,13 @@ class EffectsPreAggregateBuilder:
 
         self.pairs_dense: dict[tuple[str, str], DensePairBucket] = {}
         self.pairs_sparse: dict[tuple[str, str], SparsePairBucket] = {}
-        self._sparse_pair_bufs: dict[tuple[str, str], dict[str, np.ndarray]] = {}
 
         self.triples_dense: dict[tuple[str, str, str], DenseTripleBucket] = {}
         self.triples_sparse: dict[tuple[str, str, str], SparseTripleBucket] = {}
-        self._sparse_triple_bufs: dict[tuple[str, str, str], dict[str, np.ndarray]] = {}
 
         self._init_pairs()
         self._init_filter_triples()
+        self._accumulate_volumes_to_pairs_and_triples()
 
         np.add.at(
             self.singles[FILTER_OUTER].volume,
@@ -173,26 +202,19 @@ class EffectsPreAggregateBuilder:
             n_inner = len(self.dimension_labels.get(inner, []))
             if n_outer == 0 or n_inner == 0:
                 continue
+            if not _should_build_pair(outer, inner, n_outer, n_inner):
+                continue
             key = (outer, inner)
-            n_cells = n_outer * n_inner
-            if n_cells <= DENSE_PAIR_MAX_CELLS:
-                self.pairs_dense[key] = DensePairBucket(
-                    outer_dim=outer,
-                    inner_dim=inner,
-                    n_outer=n_outer,
-                    n_inner=n_inner,
-                    base=np.zeros((n_outer, n_inner, self.n_years), dtype=_FLOAT_DTYPE),
-                    rules=np.zeros((n_outer, n_inner, self.n_years), dtype=_FLOAT_DTYPE),
-                    charge=np.zeros((n_outer, n_inner, self.n_years), dtype=_FLOAT_DTYPE),
-                    volume=np.zeros((n_outer, n_inner), dtype=_FLOAT_DTYPE),
-                )
-            else:
-                self._sparse_pair_bufs[key] = {
-                    "base": np.zeros((n_cells, self.n_years), dtype=_FLOAT_DTYPE),
-                    "rules": np.zeros((n_cells, self.n_years), dtype=_FLOAT_DTYPE),
-                    "charge": np.zeros((n_cells, self.n_years), dtype=_FLOAT_DTYPE),
-                    "volume": np.zeros(n_cells, dtype=_FLOAT_DTYPE),
-                }
+            self.pairs_dense[key] = DensePairBucket(
+                outer_dim=outer,
+                inner_dim=inner,
+                n_outer=n_outer,
+                n_inner=n_inner,
+                base=np.zeros((n_outer, n_inner, self.n_years), dtype=_FLOAT_DTYPE),
+                rules=np.zeros((n_outer, n_inner, self.n_years), dtype=_FLOAT_DTYPE),
+                charge=np.zeros((n_outer, n_inner, self.n_years), dtype=_FLOAT_DTYPE),
+                volume=np.zeros((n_outer, n_inner), dtype=_FLOAT_DTYPE),
+            )
 
     def _init_filter_triples(self) -> None:
         for third in GROUP_BY_CHOICES:
@@ -204,43 +226,56 @@ class EffectsPreAggregateBuilder:
             n_c = len(self.dimension_labels.get(third, []))
             if n_a == 0 or n_b == 0 or n_c == 0:
                 continue
-            n_cells = n_a * n_b * n_c
-            if n_cells <= DENSE_TRIPLE_MAX_CELLS:
-                self.triples_dense[key] = DenseTripleBucket(
-                    dim_a=FILTER_OUTER,
-                    dim_b=FILTER_INNER,
-                    dim_c=third,
-                    shape=(n_a, n_b, n_c),
-                    base=np.zeros((n_a, n_b, n_c, self.n_years), dtype=_FLOAT_DTYPE),
-                    rules=np.zeros((n_a, n_b, n_c, self.n_years), dtype=_FLOAT_DTYPE),
-                    charge=np.zeros((n_a, n_b, n_c, self.n_years), dtype=_FLOAT_DTYPE),
-                    volume=np.zeros((n_a, n_b, n_c), dtype=_FLOAT_DTYPE),
-                )
-            else:
-                self._sparse_triple_bufs[key] = {
-                    "base": np.zeros((n_cells, self.n_years), dtype=_FLOAT_DTYPE),
-                    "rules": np.zeros((n_cells, self.n_years), dtype=_FLOAT_DTYPE),
-                    "charge": np.zeros((n_cells, self.n_years), dtype=_FLOAT_DTYPE),
-                    "volume": np.zeros(n_cells, dtype=_FLOAT_DTYPE),
-                }
+            if not _should_build_filter_triple(n_a, n_b, n_c):
+                continue
+            self.triples_dense[key] = DenseTripleBucket(
+                dim_a=FILTER_OUTER,
+                dim_b=FILTER_INNER,
+                dim_c=third,
+                shape=(n_a, n_b, n_c),
+                base=np.zeros((n_a, n_b, n_c, self.n_years), dtype=_FLOAT_DTYPE),
+                rules=np.zeros((n_a, n_b, n_c, self.n_years), dtype=_FLOAT_DTYPE),
+                charge=np.zeros((n_a, n_b, n_c, self.n_years), dtype=_FLOAT_DTYPE),
+                volume=np.zeros((n_a, n_b, n_c), dtype=_FLOAT_DTYPE),
+            )
 
-    def _flat_pair_idx(self, outer: str, inner: str) -> np.ndarray:
-        outer_codes = self.dim_codes[outer]
-        inner_codes = self.dim_codes[inner]
-        n_inner = len(self.dimension_labels.get(inner, []))
-        return outer_codes.astype(np.int64) * n_inner + inner_codes.astype(np.int64)
+    def _accumulate_volumes_to_pairs_and_triples(self) -> None:
+        pair_keys = list(self.pairs_dense.keys())
+        if not pair_keys:
+            return
+        workers = _pair_worker_count(len(pair_keys))
 
-    def _flat_triple_idx(self, a: str, b: str, c: str) -> np.ndarray:
-        a_codes = self.dim_codes[a]
-        b_codes = self.dim_codes[b]
-        c_codes = self.dim_codes[c]
-        n_b = len(self.dimension_labels.get(b, []))
-        n_c = len(self.dimension_labels.get(c, []))
-        return (
-            a_codes.astype(np.int64) * (n_b * n_c)
-            + b_codes.astype(np.int64) * n_c
-            + c_codes.astype(np.int64)
-        )
+        def _accumulate_pair_volume(key: tuple[str, str]) -> None:
+            bucket = self.pairs_dense[key]
+            outer_codes = self.dim_codes[bucket.outer_dim]
+            inner_codes = self.dim_codes[bucket.inner_dim]
+            np.add.at(bucket.volume, (outer_codes, inner_codes), self.volume)
+
+        if workers == 1:
+            for key in pair_keys:
+                _accumulate_pair_volume(key)
+        else:
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                list(executor.map(_accumulate_pair_volume, pair_keys))
+
+        triple_keys = list(self.triples_dense.keys())
+        if not triple_keys:
+            return
+        workers = _pair_worker_count(len(triple_keys))
+
+        def _accumulate_triple_volume(key: tuple[str, str, str]) -> None:
+            bucket = self.triples_dense[key]
+            a_codes = self.dim_codes[bucket.dim_a]
+            b_codes = self.dim_codes[bucket.dim_b]
+            c_codes = self.dim_codes[bucket.dim_c]
+            np.add.at(bucket.volume, (a_codes, b_codes, c_codes), self.volume)
+
+        if workers == 1:
+            for key in triple_keys:
+                _accumulate_triple_volume(key)
+        else:
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                list(executor.map(_accumulate_triple_volume, triple_keys))
 
     def _accumulate_single(
         self,
@@ -275,21 +310,6 @@ class EffectsPreAggregateBuilder:
         np.add.at(bucket.rules[:, :, year_index], (outer_codes, inner_codes), rules_inc)
         np.add.at(bucket.charge[:, :, year_index], (outer_codes, inner_codes), charge_vals)
 
-    def _accumulate_sparse_pair_buf(
-        self,
-        key: tuple[str, str],
-        *,
-        year_index: int,
-        base_inc: np.ndarray,
-        rules_inc: np.ndarray,
-        charge_vals: np.ndarray,
-    ) -> None:
-        buf = self._sparse_pair_bufs[key]
-        flat_idx = self._flat_pair_idx(key[0], key[1])
-        np.add.at(buf["base"][:, year_index], flat_idx, base_inc)
-        np.add.at(buf["rules"][:, year_index], flat_idx, rules_inc)
-        np.add.at(buf["charge"][:, year_index], flat_idx, charge_vals)
-
     def _accumulate_dense_triple(
         self,
         key: tuple[str, str, str],
@@ -306,21 +326,6 @@ class EffectsPreAggregateBuilder:
         np.add.at(bucket.base[:, :, :, year_index], (a_codes, b_codes, c_codes), base_inc)
         np.add.at(bucket.rules[:, :, :, year_index], (a_codes, b_codes, c_codes), rules_inc)
         np.add.at(bucket.charge[:, :, :, year_index], (a_codes, b_codes, c_codes), charge_vals)
-
-    def _accumulate_sparse_triple_buf(
-        self,
-        key: tuple[str, str, str],
-        *,
-        year_index: int,
-        base_inc: np.ndarray,
-        rules_inc: np.ndarray,
-        charge_vals: np.ndarray,
-    ) -> None:
-        buf = self._sparse_triple_bufs[key]
-        flat_idx = self._flat_triple_idx(key[0], key[1], key[2])
-        np.add.at(buf["base"][:, year_index], flat_idx, base_inc)
-        np.add.at(buf["rules"][:, year_index], flat_idx, rules_inc)
-        np.add.at(buf["charge"][:, year_index], flat_idx, charge_vals)
 
     def accumulate_year(
         self,
@@ -339,7 +344,11 @@ class EffectsPreAggregateBuilder:
                 charge_vals=charge_vals,
             )
 
-        for key in self.pairs_dense:
+        pair_keys = list(self.pairs_dense.keys())
+        triple_keys = list(self.triples_dense.keys())
+        workers = _pair_worker_count(len(pair_keys) + len(triple_keys))
+
+        def _accumulate_pair(key: tuple[str, str]) -> None:
             self._accumulate_dense_pair(
                 key,
                 year_index=year_index,
@@ -347,16 +356,8 @@ class EffectsPreAggregateBuilder:
                 rules_inc=rules_inc,
                 charge_vals=charge_vals,
             )
-        for key in self._sparse_pair_bufs:
-            self._accumulate_sparse_pair_buf(
-                key,
-                year_index=year_index,
-                base_inc=base_inc,
-                rules_inc=rules_inc,
-                charge_vals=charge_vals,
-            )
 
-        for key in self.triples_dense:
+        def _accumulate_triple(key: tuple[str, str, str]) -> None:
             self._accumulate_dense_triple(
                 key,
                 year_index=year_index,
@@ -364,14 +365,24 @@ class EffectsPreAggregateBuilder:
                 rules_inc=rules_inc,
                 charge_vals=charge_vals,
             )
-        for key in self._sparse_triple_bufs:
-            self._accumulate_sparse_triple_buf(
-                key,
-                year_index=year_index,
-                base_inc=base_inc,
-                rules_inc=rules_inc,
-                charge_vals=charge_vals,
-            )
+
+        if workers == 1:
+            for key in pair_keys:
+                _accumulate_pair(key)
+            for key in triple_keys:
+                _accumulate_triple(key)
+        else:
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                futures = [
+                    executor.submit(_accumulate_pair, key)
+                    for key in pair_keys
+                ]
+                futures.extend(
+                    executor.submit(_accumulate_triple, key)
+                    for key in triple_keys
+                )
+                for future in futures:
+                    future.result()
 
     def accumulate_initial_charge(self, *, charge_vals: np.ndarray) -> None:
         self.accumulate_year(
@@ -381,86 +392,7 @@ class EffectsPreAggregateBuilder:
             charge_vals=charge_vals,
         )
 
-    def accumulate_volumes_to_pairs_and_triples(self) -> None:
-        for key, bucket in self.pairs_dense.items():
-            outer_codes = self.dim_codes[bucket.outer_dim]
-            inner_codes = self.dim_codes[bucket.inner_dim]
-            np.add.at(bucket.volume, (outer_codes, inner_codes), self.volume)
-
-        for key, buf in self._sparse_pair_bufs.items():
-            flat_idx = self._flat_pair_idx(key[0], key[1])
-            np.add.at(buf["volume"], flat_idx, self.volume)
-
-        for key, bucket in self.triples_dense.items():
-            a_codes = self.dim_codes[bucket.dim_a]
-            b_codes = self.dim_codes[bucket.dim_b]
-            c_codes = self.dim_codes[bucket.dim_c]
-            np.add.at(bucket.volume, (a_codes, b_codes, c_codes), self.volume)
-
-        for key, buf in self._sparse_triple_bufs.items():
-            flat_idx = self._flat_triple_idx(key[0], key[1], key[2])
-            np.add.at(buf["volume"], flat_idx, self.volume)
-
-    def _finalize_sparse_pairs(self) -> None:
-        for key, buf in self._sparse_pair_bufs.items():
-            outer, inner = key
-            n_outer = len(self.dimension_labels.get(outer, []))
-            n_inner = len(self.dimension_labels.get(inner, []))
-            active = (
-                (buf["volume"] != 0)
-                | np.any(buf["base"] != 0, axis=1)
-                | np.any(buf["rules"] != 0, axis=1)
-                | np.any(buf["charge"] != 0, axis=1)
-            )
-            nonzero = np.nonzero(active)[0]
-            if nonzero.size == 0:
-                continue
-            outer_idx = (nonzero // n_inner).astype(np.int32)
-            inner_idx = (nonzero % n_inner).astype(np.int32)
-            self.pairs_sparse[key] = SparsePairBucket(
-                outer_dim=outer,
-                inner_dim=inner,
-                n_outer=n_outer,
-                n_inner=n_inner,
-                outer_idx=outer_idx,
-                inner_idx=inner_idx,
-                base=buf["base"][nonzero],
-                rules=buf["rules"][nonzero],
-                charge=buf["charge"][nonzero],
-                volume=buf["volume"][nonzero],
-            )
-
-    def _finalize_sparse_triples(self) -> None:
-        for key, buf in self._sparse_triple_bufs.items():
-            a, b, c = key
-            n_a = len(self.dimension_labels.get(a, []))
-            n_b = len(self.dimension_labels.get(b, []))
-            n_c = len(self.dimension_labels.get(c, []))
-            active = (
-                (buf["volume"] != 0)
-                | np.any(buf["base"] != 0, axis=1)
-                | np.any(buf["rules"] != 0, axis=1)
-                | np.any(buf["charge"] != 0, axis=1)
-            )
-            nonzero = np.nonzero(active)[0]
-            if nonzero.size == 0:
-                continue
-            self.triples_sparse[key] = SparseTripleBucket(
-                dim_a=a,
-                dim_b=b,
-                dim_c=c,
-                shape=(n_a, n_b, n_c),
-                flat_idx=nonzero.astype(np.int64),
-                base=buf["base"][nonzero],
-                rules=buf["rules"][nonzero],
-                charge=buf["charge"][nonzero],
-                volume=buf["volume"][nonzero],
-            )
-
     def finalize(self) -> EffectsPreAggregate:
-        self.accumulate_volumes_to_pairs_and_triples()
-        self._finalize_sparse_pairs()
-        self._finalize_sparse_triples()
         return EffectsPreAggregate(
             years=self.years,
             dimension_labels=self.dimension_labels,
@@ -786,7 +718,7 @@ def _codes_to_labels(
     if include_subtotals and inner is not None:
         for o_code, total in outer_totals.items():
             outer_label = _label_for_code(preagg, outer, int(o_code))
-            buckets[(outer_label, "РРўРћР“Рћ")] = total
+            buckets[(outer_label, "ИТОГО")] = total
 
     return dict(buckets)
 
