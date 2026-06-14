@@ -896,16 +896,34 @@ import { clearToasts, showToast } from "../lib/toast.js";
 
       this._destroyChart();
 
-      const labels = (chartData && chartData.labels) || [];
-      const baseValues = ((chartData && chartData.base_bln) || []).map((v) =>
+      const rawLabels = (chartData && chartData.labels) || [];
+      const rawBase = ((chartData && chartData.base_bln) || []).map((v) =>
         Number(String(v).replace(",", ".")),
       );
-      const rulesValues = ((chartData && chartData.rules_bln) || []).map((v) =>
+      const rawRules = ((chartData && chartData.rules_bln) || []).map((v) =>
         Number(String(v).replace(",", ".")),
       );
 
-      if (!labels.length) {
+      if (!rawLabels.length) {
         return;
+      }
+
+      const rows = rawLabels.map((label, index) => {
+        const base = rawBase[index] || 0;
+        const rules = rawRules[index] || 0;
+        return { label, base, rules, total: base + rules };
+      });
+      rows.sort((a, b) => b.total - a.total);
+
+      const labels = rows.map((row) => row.label);
+      const baseValues = rows.map((row) => row.base);
+      const rulesValues = rows.map((row) => row.rules);
+      const totalValues = rows.map((row) => row.total);
+
+      const ChartDataLabelsPlugin =
+        window.ChartDataLabels || window.ChartDataLabelsPlugin || null;
+      if (ChartDataLabelsPlugin && window.Chart) {
+        window.Chart.register(ChartDataLabelsPlugin);
       }
 
       const ctx = this.chartCanvasTarget.getContext("2d");
@@ -919,6 +937,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
               data: baseValues,
               backgroundColor: "#003256",
               stack: "effects",
+              datalabels: { display: false },
             },
             {
               label: "Отдельные решения",
@@ -932,6 +951,9 @@ import { clearToasts, showToast } from "../lib/toast.js";
           indexAxis: "y",
           responsive: true,
           maintainAspectRatio: false,
+          layout: {
+            padding: { right: 56 },
+          },
           scales: {
             x: {
               stacked: true,
@@ -946,6 +968,22 @@ import { clearToasts, showToast } from "../lib/toast.js";
           plugins: {
             legend: {
               position: "bottom",
+            },
+            datalabels: {
+              display(context) {
+                return context.datasetIndex === context.chart.data.datasets.length - 1;
+              },
+              formatter(_value, context) {
+                const total = totalValues[context.dataIndex];
+                if (!Number.isFinite(total)) return "";
+                return total.toFixed(1);
+              },
+              anchor: "end",
+              align: "end",
+              offset: 6,
+              color: "#111827",
+              font: { size: 11, weight: "600" },
+              clip: false,
             },
           },
         },

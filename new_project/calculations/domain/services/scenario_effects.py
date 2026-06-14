@@ -486,8 +486,8 @@ class ScenarioEffectsService:
                 if len(key) == 2 and key[1] == "ИТОГО"
             ]
 
-        candidates.sort(key=lambda item: item[1].total)
-        top = candidates[-10:]
+        candidates.sort(key=lambda item: item[1].total, reverse=True)
+        top = candidates[:10]
 
         return EffectChartDTO(
             labels=[label for label, _ in top],
