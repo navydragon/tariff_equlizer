@@ -144,9 +144,9 @@ cd /opt/tariff_equlizer/new_project
 ./deploy/update_prod.sh
 ```
 
-Скрипт выполняет `git pull`, `migrate`, `collectstatic`, затем **останавливает сервис**, очищает все кеши (диск + Redis) и **прогревает parquet-витрины маршрутов**, после чего запускает gunicorn. Это переносит тяжёлый SQL JOIN (~50 с на больших наборах) из первого клика пользователя в окно деплоя.
+Скрипт выполняет `git pull`, `migrate`, `collectstatic`, затем **останавливает сервис**, очищает все кеши (диск + Redis) и **запускает gunicorn**. По умолчанию **прогрев parquet не выполняется** — на ~2M маршрутов он требует много RAM и без swap процесс получает `Killed` (OOM). Прогрев: `./deploy/update_prod.sh --warm-caches` или вручную `refresh_deploy_caches --warm-only` при остановленном сервисе.
 
-Пропустить очистку и прогрев кешей (флаг или переменная окружения):
+Пропустить очистку кешей (флаг или переменная окружения):
 
 ```bash
 ./deploy/update_prod.sh --skip-cache-refresh
@@ -155,6 +155,14 @@ cd /opt/tariff_equlizer/new_project
 
 # через переменную окружения:
 SKIP_CACHE_REFRESH=1 ./deploy/update_prod.sh
+```
+
+Прогреть витрины при деплое (только если хватает RAM или включён swap):
+
+```bash
+./deploy/update_prod.sh --warm-caches
+# или:
+WARM_DEPLOY_CACHES=1 ./deploy/update_prod.sh
 ```
 
 Справка по всем опциям: `./deploy/update_prod.sh --help`

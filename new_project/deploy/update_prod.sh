@@ -6,24 +6,32 @@ usage() {
 Использование: ./deploy/update_prod.sh [опции]
 
 Опции:
-  -n, --skip-cache-refresh   Не останавливать сервис, не очищать кеши и не прогревать
-                             parquet-витрины маршрутов (только migrate + collectstatic + restart)
+  -n, --skip-cache-refresh   Не останавливать сервис, не очищать кеши
+                             (только migrate + collectstatic + restart)
+  --warm-caches              После очистки прогреть parquet-витрины (нужно много RAM;
+                             на ~2M маршрутов без swap процесс может быть убит OOM)
   --skip-git-pull            Не выполнять git pull
   -h, --help                 Показать эту справку
 
 Переменные окружения (эквивалент флагов):
   SKIP_CACHE_REFRESH=1       то же, что --skip-cache-refresh
+  WARM_DEPLOY_CACHES=1       то же, что --warm-caches
   SKIP_GIT_PULL=1            то же, что --skip-git-pull
 EOF
 }
 
 SKIP_CACHE_REFRESH="${SKIP_CACHE_REFRESH:-}"
+WARM_DEPLOY_CACHES="${WARM_DEPLOY_CACHES:-}"
 SKIP_GIT_PULL="${SKIP_GIT_PULL:-}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -n|--skip-cache-refresh)
       SKIP_CACHE_REFRESH=1
+      shift
+      ;;
+    --warm-caches)
+      WARM_DEPLOY_CACHES=1
       shift
       ;;
     --skip-git-pull)
@@ -86,20 +94,35 @@ python manage.py collectstatic --noinput
 
 SERVICE_USER="${TARIFF_SERVICE_USER:-tariff}"
 
-if [[ -z "${SKIP_CACHE_REFRESH}" ]]; then
-  echo "==> Останавливаем сервис (tariff-equlizer) перед обновлением кешей"
-  sudo systemctl stop tariff-equlizer
-
-  echo "==> Очищаем кеши и прогреваем витрины маршрутов"
+run_manage_as_service_user() {
+  local manage_args="$1"
   if [[ "$(id -un)" == "$SERVICE_USER" ]]; then
-    python manage.py refresh_deploy_caches
+    python manage.py $manage_args
   else
     sudo -u "$SERVICE_USER" bash -c "
       cd \"${PROJECT_DIR}\" &&
       source .venv/bin/activate &&
       export DJANGO_SETTINGS_MODULE=config.settings_prod &&
-      python manage.py refresh_deploy_caches
+      python manage.py $manage_args
     "
+  fi
+}
+
+if [[ -z "${SKIP_CACHE_REFRESH}" ]]; then
+  echo "==> Останавливаем сервис (tariff-equlizer) перед обновлением кешей"
+  sudo systemctl stop tariff-equlizer
+
+  echo "==> Очищаем дисковые кеши и Redis/LocMem (--clear-only)"
+  run_manage_as_service_user "refresh_deploy_caches --clear-only"
+
+  if [[ -n "${WARM_DEPLOY_CACHES}" ]]; then
+    echo "==> Прогреваем parquet-витрины маршрутов (может занять несколько минут и много RAM)"
+    if ! run_manage_as_service_user "refresh_deploy_caches --warm-only"; then
+      echo "WARNING: прогрев кешей не завершился (часто OOM на больших наборах маршрутов)." >&2
+      echo "         Сервис будет запущен; прогрейте вручную: refresh_deploy_caches --warm-only" >&2
+    fi
+  else
+    echo "==> Прогрев витрин пропущен (по умолчанию). Для прогрева: ./deploy/update_prod.sh --warm-caches"
   fi
 
   echo "==> Запускаем сервис (tariff-equlizer)"
