@@ -198,6 +198,7 @@ class ScenarioEffectsPandasService:
         t_cards = time.perf_counter()
 
         cache_key = make_cache_key(user_id=user_id, scenario_id=scenario.id)
+        compact_for_cache = compact if compact_ready else None
         store_payload(
             cache_key=cache_key,
             payload=ScenarioEffectsCachePayload(
@@ -208,7 +209,7 @@ class ScenarioEffectsPandasService:
                 routes_without_volume=skipped_volume,
                 baseline_total=global_totals.baseline_total,
                 facts=[],
-                compact=compact,
+                compact=compact_for_cache,
                 compact_pending=deferred_job is not None,
                 data_version=data_version,
             ),

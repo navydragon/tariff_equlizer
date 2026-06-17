@@ -2128,7 +2128,7 @@ class ScenarioEffectsCubeApiTests(TariffLoadServiceTestMixin, TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertFalse(response.json()["success"])
-        self.assertIn("полный пересчёт", response.json()["errors"][0].lower())
+        self.assertIn("выполняется", response.json()["errors"][0].lower())
 
     def test_cube_export_returns_xlsx(self) -> None:
         cache_key = self._compute_cache_key()

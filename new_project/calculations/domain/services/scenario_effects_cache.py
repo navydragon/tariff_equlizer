@@ -201,7 +201,10 @@ def _hydrate_payload_from_disk(
     compact = bundle.compact
     compact_pending = payload.compact_pending
     if compact is not None:
-        compact_pending = False
+        if compact.rule_meta and compact.rule_by_year is None:
+            compact_pending = True
+        else:
+            compact_pending = False
 
     return ScenarioEffectsCachePayload(
         user_id=payload.user_id,

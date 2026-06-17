@@ -24,6 +24,8 @@ import { clearToasts, showToast } from "../lib/toast.js";
       scenariosUrl: String,
       computeUrl: String,
       computePandasUrl: String,
+      warmStatusUrl: String,
+      compactStatusUrl: String,
       cubeUrl: String,
       exportUrl: String,
       activeScenarioId: String,
@@ -41,14 +43,19 @@ import { clearToasts, showToast } from "../lib/toast.js";
         cubeTimer: null,
         suppressFilterEvents: false,
         computing: false,
+        compactPending: false,
         groupByInnerLabel: null,
         groupByLabel: "Группа груза",
       };
+
+      this._onTariffRulesChanged = this._onTariffRulesChanged.bind(this);
+      document.addEventListener("tariff-rules-changed", this._onTariffRulesChanged);
 
       this._loadScenarios();
     }
 
     disconnect() {
+      document.removeEventListener("tariff-rules-changed", this._onTariffRulesChanged);
       this._destroyTomSelects();
     }
 
@@ -157,6 +164,83 @@ import { clearToasts, showToast } from "../lib/toast.js";
       return this.computePandasUrlValue || this.computeUrlValue;
     }
 
+    _onTariffRulesChanged(event) {
+      const scenarioId = event?.detail?.scenarioId;
+      if (
+        scenarioId &&
+        this.state.selectedScenarioId &&
+        Number(scenarioId) === Number(this.state.selectedScenarioId)
+      ) {
+        this.state.cacheKey = null;
+        this._computeEffects();
+      }
+    }
+
+    async _waitForWarmKpi(scenarioId, startedAt = Date.now()) {
+      if (!this.hasWarmStatusUrlValue || !scenarioId) {
+        return;
+      }
+      const timeoutMs = 120000;
+      if (Date.now() - startedAt > timeoutMs) {
+        return;
+      }
+
+      const url = `${this.warmStatusUrlValue}?scenario_id=${encodeURIComponent(
+        String(scenarioId),
+      )}`;
+      try {
+        const { data } = await fetchJson(url);
+        if (!data || !data.success || !data.phase) {
+          return;
+        }
+        if (data.phase === "error") {
+          console.error("[effects-cube] scenario warm failed", data.error);
+          return;
+        }
+        if (data.kpi_ready || data.phase === "done") {
+          return;
+        }
+        await this._sleep(300);
+        return this._waitForWarmKpi(scenarioId, startedAt);
+      } catch (error) {
+        console.error("[effects-cube] warm status poll failed", error);
+        await this._sleep(500);
+        return this._waitForWarmKpi(scenarioId, startedAt);
+      }
+    }
+
+    _sleep(ms) {
+      return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
+    _isCubePendingMessage(message) {
+      return (
+        typeof message === "string" &&
+        (message.includes("ещё выполняется") ||
+          message.includes("еще выполняется"))
+      );
+    }
+
+    async _waitForCompactReady() {
+      if (!this.compactStatusUrlValue || !this.state.cacheKey) {
+        await this._sleep(2000);
+        return;
+      }
+
+      try {
+        const { data } = await fetchJson(this.compactStatusUrlValue, {
+          method: "POST",
+          body: { cache_key: this.state.cacheKey },
+        });
+        if (data && data.success) {
+          this.state.compactPending = !data.compact_ready;
+        }
+      } catch (error) {
+        console.error("[effects-cube] compact-status failed", error);
+      }
+      await this._sleep(2000);
+    }
+
     async _computeEffects() {
       const computeUrl = this._resolveComputeUrl();
       if (!computeUrl || !this.state.selectedScenarioId) return;
@@ -166,6 +250,8 @@ import { clearToasts, showToast } from "../lib/toast.js";
       this.state.computing = true;
 
       try {
+        await this._waitForWarmKpi(this.state.selectedScenarioId);
+
         const { response, data } = await fetchJson(computeUrl, {
           method: "POST",
           body: {
@@ -185,6 +271,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
         }
 
         this.state.cacheKey = data.cache_key || null;
+        this.state.compactPending = data.compact_ready === false;
         this.state.scenarioYears = data.years || [];
         this._renderWarning(
           data.routes_without_charge,
@@ -208,7 +295,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
       }
     }
 
-    async _aggregateCube({ showTableLoading = false } = {}) {
+    async _aggregateCube({ showTableLoading = false, attempt = 0 } = {}) {
       if (
         !this.cubeUrlValue ||
         !this.state.selectedScenarioId ||
@@ -217,9 +304,11 @@ import { clearToasts, showToast } from "../lib/toast.js";
         return;
       }
 
-      if (showTableLoading) {
+      if (showTableLoading && attempt === 0) {
         this._setTableLoading(true, "Загрузка таблицы…");
       }
+
+      const maxAttempts = this.state.compactPending ? 45 : 8;
 
       try {
         const { response, data } = await fetchJson(this.cubeUrlValue, {
@@ -239,11 +328,26 @@ import { clearToasts, showToast } from "../lib/toast.js";
             this._computeEffects();
             return;
           }
+          if (this.state.compactPending && attempt + 1 < maxAttempts) {
+            await this._waitForCompactReady();
+            return this._aggregateCube({
+              showTableLoading,
+              attempt: attempt + 1,
+            });
+          }
+          if (this._isCubePendingMessage(message) && attempt + 1 < maxAttempts) {
+            await this._sleep(2000);
+            return this._aggregateCube({
+              showTableLoading,
+              attempt: attempt + 1,
+            });
+          }
           this._setTableMessage("Нет данных.");
           this._showError(message);
           return;
         }
 
+        this.state.compactPending = false;
         this.state.groupByLabel = data.group_by_label || this.state.groupByLabel;
         this.state.groupByInnerLabel = data.group_by_inner_label;
         this._renderCubeTable(data);

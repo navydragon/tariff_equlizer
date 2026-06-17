@@ -13,6 +13,8 @@
   data-effects-cube-scenarios-url-value="{% url 'scenarios:api_list' %}"
   data-effects-cube-compute-url-value="{% url 'calculations:scenario_effects_compute_api' %}"
   data-effects-cube-compute-pandas-url-value="{% url 'calculations:scenario_effects_compute_pandas_api' %}"
+  data-effects-cube-warm-status-url-value="{% url 'calculations:scenario_warm_status_api' %}"
+  data-effects-cube-compact-status-url-value="{% url 'calculations:scenario_effects_compact_status_api' %}"
   data-effects-cube-cube-url-value="{% url 'calculations:scenario_effects_cube_api' %}"
   data-effects-cube-export-url-value="{% url 'calculations:scenario_effects_cube_export_api' %}"
   data-effects-cube-active-scenario-id-value="{{ request.user.active_scenario_id|default:'' }}"

@@ -124,8 +124,7 @@ class ScenarioEffectsCubeService:
         ) and payload.compact.rule_by_year is None:
             if payload.compact.rule_meta:
                 return None, [
-                    "Требуется полный пересчёт с разбивкой по правилам. "
-                    "Обновите страницу.",
+                    "Расчёт ещё выполняется. Повторите запрос через несколько секунд.",
                 ]
 
         if not _payload_has_effects_data(payload):

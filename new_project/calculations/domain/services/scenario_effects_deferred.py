@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 
 _deferred_locks_guard = threading.Lock()
 _deferred_locks: dict[tuple[int, str], threading.Lock] = {}
+_pending_jobs: dict[tuple[int, str], DeferredFullComputeJob] = {}
 
 
 @dataclass
@@ -183,15 +184,31 @@ def is_deferred_running(scenario_id: int, data_version: str) -> bool:
 
 
 def schedule_deferred_full_compute(job: DeferredFullComputeJob) -> None:
+    key = (job.scenario_id, job.data_version)
     lock = _deferred_lock_for(job)
     if not lock.acquire(blocking=False):
+        with _deferred_locks_guard:
+            pending = _pending_jobs.get(key)
+            if pending is None or (
+                job.include_rule_breakdown and not pending.include_rule_breakdown
+            ):
+                _pending_jobs[key] = job
         return
 
     def runner() -> None:
+        follow_up: DeferredFullComputeJob | None = None
         try:
             _run_deferred_full_compute(job)
         finally:
             lock.release()
+            with _deferred_locks_guard:
+                pending = _pending_jobs.pop(key, None)
+            if pending is not None and (
+                pending.include_rule_breakdown and not job.include_rule_breakdown
+            ):
+                follow_up = pending
+        if follow_up is not None:
+            schedule_deferred_full_compute(follow_up)
 
     thread = threading.Thread(
         target=runner,
