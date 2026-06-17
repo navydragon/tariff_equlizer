@@ -12,6 +12,7 @@ from django.shortcuts import redirect, render
 from django.views.decorators.http import require_http_methods
 
 from core.domain.cargo.dto import CreateCargoDTO, UpdateCargoDTO
+from core.domain.cargo.formatting import format_etsng_code
 from core.domain.cargo.services import CargoService
 from core.domain.route_analysis.dto import RouteAnalysisRequestDTO
 from core.domain.route_analysis.services import RouteAnalysisService
@@ -203,6 +204,7 @@ def cargo_list_api(request):
             "items": [
                 {
                     "code": item.code,
+                    "code_display": format_etsng_code(item.code),
                     "name": item.name,
                     "cargo_group_code": item.cargo_group_code,
                     "cargo_group_name": item.cargo_group_name,
@@ -233,6 +235,7 @@ def cargo_detail_api(request, code: int):
             "success": True,
             "item": {
                 "code": cargo.code,
+                "code_display": format_etsng_code(cargo.code),
                 "name": cargo.name,
                 "cargo_group_code": cargo.cargo_group_code,
                 "cargo_group_name": cargo.cargo_group_name,
@@ -292,6 +295,7 @@ def cargo_create_api(request):
             "success": True,
             "item": {
                 "code": cargo.code,
+                "code_display": format_etsng_code(cargo.code),
                 "name": cargo.name,
                 "cargo_group_code": cargo.cargo_group_code,
                 "cargo_group_name": cargo.cargo_group_name,
@@ -347,6 +351,7 @@ def cargo_update_api(request, code: int):
             "success": True,
             "item": {
                 "code": cargo.code,
+                "code_display": format_etsng_code(cargo.code),
                 "name": cargo.name,
                 "cargo_group_code": cargo.cargo_group_code,
                 "cargo_group_name": cargo.cargo_group_name,

@@ -6,6 +6,8 @@ from typing import Optional
 
 from django.db.models import Q, QuerySet
 
+from core.domain.cargo.formatting import parse_etsng_code
+
 from core.models import Cargo, CargoGroup
 
 
@@ -50,9 +52,12 @@ class CargoRepository:
 
         return qs.order_by("code")
 
-    def get_by_code(self, code: int) -> Optional[Cargo]:
+    def get_by_code(self, code: str) -> Optional[Cargo]:
+        normalized = parse_etsng_code(code)
+        if normalized is None:
+            return None
         try:
-            return self._base_queryset().get(code=code)
+            return self._base_queryset().get(code=normalized)
         except Cargo.DoesNotExist:
             return None
 
@@ -66,7 +71,7 @@ class CargoRepository:
         cargo = Cargo.objects.create(**data)
         return self._base_queryset().get(code=cargo.code)
 
-    def update(self, code: int, data: dict) -> Optional[Cargo]:
+    def update(self, code: str, data: dict) -> Optional[Cargo]:
         cargo = self.get_by_code(code)
         if not cargo:
             return None
@@ -75,7 +80,7 @@ class CargoRepository:
         cargo.save()
         return self._base_queryset().get(code=cargo.code)
 
-    def delete(self, code: int) -> bool:
+    def delete(self, code: str) -> bool:
         cargo = self.get_by_code(code)
         if not cargo:
             return False

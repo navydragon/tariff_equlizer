@@ -12,6 +12,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.utils import timezone
 
+from core.domain.cargo.formatting import parse_etsng_code
 from core.management.reference_clear import clear_routes_for_route_set
 from core.management.rzd_paths import RZD_TABLE, get_rzd_db_path
 from core.models import (
@@ -569,7 +570,7 @@ class Command(BaseCommand):
             bump_skip("empty_index")
             return None
 
-        cargo_code = _parse_int(row[COL_CARGO_CODE])
+        cargo_code = parse_etsng_code(row[COL_CARGO_CODE])
         if cargo_code is None:
             bump_skip("invalid_cargo_code")
             return None

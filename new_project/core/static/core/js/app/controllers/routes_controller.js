@@ -313,7 +313,7 @@ import {
             }
             const options = data.items.map((item) => ({
               value: String(item.code),
-              text: `${item.code} — ${item.name}`,
+              text: `${item.code_display || item.code} — ${item.name}`,
             }));
             callback(options);
           } catch (e) {
@@ -720,8 +720,9 @@ import {
     }
 
     createRouteRow(item) {
+      const cargoCode = item.cargo_code_display || item.cargo_code;
       const cargo =
-        (item.cargo_code ? escapeHtml(String(item.cargo_code)) : "") +
+        (cargoCode ? escapeHtml(String(cargoCode)) : "") +
         (item.cargo_name ? " — " + escapeHtml(item.cargo_name) : "");
       const origin =
         (item.origin_esr_code != null
@@ -934,9 +935,10 @@ import {
         const code = it.cargo_code;
         if (code != null) {
           const value = String(code);
+          const displayCode = it.cargo_code_display || value;
           this.cargoSelectInstance.addOption({
             value,
-            text: `${value} — ${it.cargo_name || ""}`,
+            text: `${displayCode} — ${it.cargo_name || ""}`,
           });
           this.cargoSelectInstance.setValue(value, true);
         } else {

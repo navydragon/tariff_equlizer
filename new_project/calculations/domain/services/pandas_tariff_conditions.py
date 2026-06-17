@@ -8,6 +8,9 @@ from calculations.domain.services.route_mart_store import MartMeta
 PARAMETER_COLUMN_MAP = {
     "cargo_group": "cargo_group_code",
     "cargo_code": "cargo_code",
+    "cargo_code_3": "cargo_code_3",
+    "cargo_code_izpod_3": "cargo_code_izpod_3",
+    "cargo_group_izpod": "cargo_group_izpod",
     "origin_railroad": "origin_railroad_code",
     "destination_railroad": "destination_railroad_code",
     "wagon_kind": "wagon_kind_id",

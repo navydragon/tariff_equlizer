@@ -2635,6 +2635,278 @@ class ShipmentCategoryTariffConditionsTests(TariffLoadServiceTestMixin, TestCase
         self.assertEqual(cached.shape, (len(df),))
 
 
+class RouteCargoIzpodTariffConditionsTests(TariffLoadServiceTestMixin, TestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.route_a = self._create_route(
+            rzd=Decimal("100.00"),
+            route_code="R-IZPOD-A",
+        )
+        self.route_a.cargo_code_3 = "123"
+        self.route_a.cargo_code_izpod_3 = "456"
+        self.route_a.cargo_group_izpod = "Группа A"
+        self.route_a.save(
+            update_fields=[
+                "cargo_code_3",
+                "cargo_code_izpod_3",
+                "cargo_group_izpod",
+            ],
+        )
+
+        self.route_b = self._create_route(
+            rzd=Decimal("200.00"),
+            route_code="R-IZPOD-B",
+        )
+        self.route_b.cargo_code_3 = "789"
+        self.route_b.cargo_code_izpod_3 = "456"
+        self.route_b.cargo_group_izpod = "Группа B"
+        self.route_b.save(
+            update_fields=[
+                "cargo_code_3",
+                "cargo_code_izpod_3",
+                "cargo_group_izpod",
+            ],
+        )
+
+    def test_apply_tariff_conditions_include_cargo_code_3(self) -> None:
+        qs = Route.objects.filter(route_set=self.route_set)
+        matched = apply_tariff_conditions(
+            qs,
+            [
+                {
+                    "parameter": "cargo_code_3",
+                    "operator": "include",
+                    "values": ["123"],
+                }
+            ],
+        )
+        ids = set(matched.values_list("id", flat=True))
+        self.assertIn(self.route_a.id, ids)
+        self.assertNotIn(self.route_b.id, ids)
+
+    def test_apply_tariff_conditions_include_cargo_code_izpod_3(self) -> None:
+        qs = Route.objects.filter(route_set=self.route_set)
+        matched = apply_tariff_conditions(
+            qs,
+            [
+                {
+                    "parameter": "cargo_code_izpod_3",
+                    "operator": "include",
+                    "values": ["456"],
+                }
+            ],
+        )
+        ids = set(matched.values_list("id", flat=True))
+        self.assertIn(self.route_a.id, ids)
+        self.assertIn(self.route_b.id, ids)
+
+    def test_apply_tariff_conditions_include_cargo_group_izpod(self) -> None:
+        qs = Route.objects.filter(route_set=self.route_set)
+        matched = apply_tariff_conditions(
+            qs,
+            [
+                {
+                    "parameter": "cargo_group_izpod",
+                    "operator": "include",
+                    "values": ["Группа B"],
+                }
+            ],
+        )
+        ids = set(matched.values_list("id", flat=True))
+        self.assertNotIn(self.route_a.id, ids)
+        self.assertIn(self.route_b.id, ids)
+
+    def test_build_rule_mask_numpy_cargo_izpod_fields(self) -> None:
+        df = pd.DataFrame(
+            {
+                "cargo_code_3": ["123", "789", ""],
+                "cargo_code_izpod_3": ["456", "456", "111"],
+                "cargo_group_izpod": ["Группа A", "Группа B", ""],
+            }
+        )
+        mask_code_3 = build_rule_mask_numpy(
+            df,
+            [
+                {
+                    "parameter": "cargo_code_3",
+                    "operator": "include",
+                    "values": ["789"],
+                }
+            ],
+        )
+        self.assertFalse(mask_code_3[0])
+        self.assertTrue(mask_code_3[1])
+        self.assertFalse(mask_code_3[2])
+
+        mask_group = build_rule_mask_numpy(
+            df,
+            [
+                {
+                    "parameter": "cargo_group_izpod",
+                    "operator": "exclude",
+                    "values": ["Группа B"],
+                }
+            ],
+        )
+        self.assertTrue(mask_group[0])
+        self.assertFalse(mask_group[1])
+        self.assertTrue(mask_group[2])
+
+    def test_tariff_rule_options_api_cargo_izpod_fields(self) -> None:
+        self.client = Client()
+        self.client.force_login(self.user)
+        url = reverse("scenarios:tariff_rule_options", args=[self.scenario.id])
+
+        for parameter, expected in (
+            ("cargo_code_3", "123"),
+            ("cargo_code_izpod_3", "456"),
+            ("cargo_group_izpod", "Группа A"),
+        ):
+            with self.subTest(parameter=parameter):
+                response = self.client.get(url, {"parameter": parameter})
+                self.assertEqual(response.status_code, 200)
+                payload = response.json()
+                self.assertTrue(payload["success"])
+                values = [item["value"] for item in payload["items"]]
+                self.assertIn(expected, values)
+                self.assertNotIn("", values)
+
+    def test_masks_npz_includes_cargo_izpod_sidecars(self) -> None:
+        from calculations.domain.services.route_effects_loader import (
+            fetch_routes_dataframe_cached_timed,
+        )
+        from calculations.domain.services.route_mart_store import (
+            MART_RULE_MASK_SIDECAR_COLUMNS,
+            load_masks_npz,
+            resolve_mart_parquet_path,
+            route_mart_cache_dir,
+        )
+        import shutil
+
+        self.route_a.cargo_code_3 = "111"
+        self.route_a.save(update_fields=["cargo_code_3"])
+
+        shutil.rmtree(
+            route_mart_cache_dir(route_set_id=self.route_set.id),
+            ignore_errors=True,
+        )
+        fetch_routes_dataframe_cached_timed(self.route_set.id)
+        parquet_path = resolve_mart_parquet_path(route_set_id=self.route_set.id)
+        mask_keys = set(load_masks_npz(parquet_path))
+        self.assertTrue(
+            {"cargo_code_3", "cargo_code_izpod_3", "cargo_group_izpod"}.issubset(
+                mask_keys,
+            ),
+        )
+        self.assertTrue(mask_keys.issubset(set(MART_RULE_MASK_SIDECAR_COLUMNS)))
+
+    def test_stale_parquet_without_cargo_izpod_columns_is_rebuilt(self) -> None:
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
+        from calculations.domain.services.route_effects_loader import (
+            fetch_routes_dataframe_cached_timed,
+        )
+        from calculations.domain.services.route_mart_store import (
+            MART_PARQUET_REQUIRED_COLUMNS,
+            load_masks_npz,
+            resolve_mart_parquet_path,
+            route_mart_cache_dir,
+            save_mart_meta,
+            MartMeta,
+        )
+        import shutil
+
+        shutil.rmtree(
+            route_mart_cache_dir(route_set_id=self.route_set.id),
+            ignore_errors=True,
+        )
+
+        parquet_path = resolve_mart_parquet_path(route_set_id=self.route_set.id)
+        parquet_path.parent.mkdir(parents=True, exist_ok=True)
+        stale_table = pa.table(
+            {
+                "id": [self.route_a.id],
+                "freight_charge_rub": [100.0],
+                "cargo_group": ["—"],
+                "cargo_code": ["1001"],
+                "shipment_category": ["—"],
+                "park_type": ["—"],
+            },
+        )
+        pq.write_table(stale_table, parquet_path)
+        save_mart_meta(
+            parquet_path=parquet_path,
+            meta=MartMeta(
+                dimension_labels={"cargo_group": ["—"], "cargo_code": ["1001"]},
+                row_count=1,
+            ),
+        )
+
+        df, meta, timings = fetch_routes_dataframe_cached_timed(self.route_set.id)
+        self.assertEqual(timings.get("mart_schema_stale"), 1)
+        self.assertIn("cargo_code_3", df.columns)
+        self.assertTrue(MART_PARQUET_REQUIRED_COLUMNS.issubset(set(df.columns)))
+        mask_keys = set(load_masks_npz(parquet_path))
+        self.assertTrue(
+            {"cargo_code_3", "cargo_code_izpod_3", "cargo_group_izpod"}.issubset(
+                mask_keys,
+            ),
+        )
+        self.assertIsNotNone(meta)
+
+    def test_rule_mask_cache_hit_cargo_code_3(self) -> None:
+        from calculations.domain.services.route_effects_loader import (
+            fetch_routes_dataframe_cached_timed,
+        )
+        from calculations.domain.services.route_mask_cache import (
+            build_or_load_rule_mask,
+            try_load_rule_mask,
+        )
+
+        scenario = Scenario.objects.select_related("route_set").get(pk=self.scenario.pk)
+        rule = TariffRule.objects.create(
+            scenario=scenario,
+            name="Cargo code 3 mask rule",
+            base_percent=Decimal("100"),
+            position=1,
+        )
+        conditions = [
+            {
+                "position": 0,
+                "parameter": "cargo_code_3",
+                "operator": "include",
+                "values": ["123"],
+            }
+        ]
+        TariffRuleCondition.objects.create(
+            tariff_rule=rule,
+            position=0,
+            parameter="cargo_code_3",
+            operator="include",
+            values=["123"],
+        )
+
+        df, mart_meta, _timings = fetch_routes_dataframe_cached_timed(
+            scenario.route_set_id,
+        )
+        build_or_load_rule_mask(
+            route_set_id=scenario.route_set_id,
+            rule_id=rule.id,
+            conditions=conditions,
+            df=df,
+            mart_meta=mart_meta,
+        )
+        cached = try_load_rule_mask(
+            route_set_id=scenario.route_set_id,
+            rule_id=rule.id,
+            conditions=conditions,
+            n_routes=len(df),
+        )
+        self.assertIsNotNone(cached)
+        self.assertEqual(cached.shape, (len(df),))
+
+
 class TariffRulesCacheAuditTests(TariffLoadServiceTestMixin, TestCase):
     def setUp(self) -> None:
         super().setUp()

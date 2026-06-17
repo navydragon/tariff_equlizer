@@ -9,6 +9,9 @@ from core.models import Route
 FIELD_MAP = {
     "cargo_group": "cargo__cargo_group__code",
     "cargo_code": "cargo__code",
+    "cargo_code_3": "cargo_code_3",
+    "cargo_code_izpod_3": "cargo_code_izpod_3",
+    "cargo_group_izpod": "cargo_group_izpod",
     "origin_railroad": "origin_station__railroad__code",
     "destination_railroad": "destination_station__railroad__code",
     "wagon_kind": "wagon_kind__id",

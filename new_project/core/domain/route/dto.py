@@ -14,6 +14,7 @@ from core.models import (
     Station,
     WagonKind,
 )
+from core.domain.cargo.formatting import format_etsng_code, parse_etsng_code
 
 
 def _decimal_to_api_str(value: Decimal) -> str:
@@ -104,7 +105,7 @@ class RouteDTO:
     cargo_group_izpod: str
     cargo_code_3: str
     cargo_code_izpod_3: str
-    cargo_code: Optional[int]
+    cargo_code: Optional[str]
     cargo_name: str
     cargo_group_code: Optional[int]
     cargo_group_name: str
@@ -295,6 +296,7 @@ class RouteDTO:
             "cargo_code_3": self.cargo_code_3,
             "cargo_code_izpod_3": self.cargo_code_izpod_3,
             "cargo_code": self.cargo_code,
+            "cargo_code_display": format_etsng_code(self.cargo_code),
             "cargo_name": self.cargo_name,
             "cargo_group_code": self.cargo_group_code,
             "cargo_group_name": self.cargo_group_name,
@@ -405,9 +407,10 @@ class RouteWriteDTO:
         if cargo_code in (None, "", "null"):
             errors.append("Код груза обязателен")
         else:
+            code = parse_etsng_code(cargo_code) or str(cargo_code).strip()
             try:
-                payload["cargo"] = Cargo.objects.get(code=int(cargo_code))
-            except (ValueError, Cargo.DoesNotExist):
+                payload["cargo"] = Cargo.objects.get(code=code)
+            except Cargo.DoesNotExist:
                 errors.append("Указан несуществующий груз (код ETSNG)")
 
         origin_esr = data.get("origin_esr_code")

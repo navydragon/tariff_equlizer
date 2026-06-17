@@ -176,6 +176,10 @@ def fetch_routes_dataframe_timed(
             wk.name AS wagon_kind,
             COALESCE(NULLIF(TRIM(r.shipment_category), ''), '—') AS shipment_category,
             COALESCE(NULLIF(TRIM(r.park_type), ''), '—') AS park_type,
+            COALESCE(NULLIF(TRIM(r.cargo_code_3), ''), '') AS cargo_code_3,
+            COALESCE(NULLIF(TRIM(r.cargo_code_izpod_3), ''), '') AS cargo_code_izpod_3,
+            COALESCE(NULLIF(TRIM(r.cargo_group_izpod), ''), '') AS cargo_group_izpod,
+            COALESCE(NULLIF(TRIM(r.special_container_type), ''), '') AS special_container_type,
             mt.name AS transport_type
         FROM {route_table} r
         LEFT JOIN {shipper_table} s ON r.shipper_id = s.id

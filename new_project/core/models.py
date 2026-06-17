@@ -97,7 +97,7 @@ class CargoGroup(models.Model):
 
 
 class Cargo(models.Model):
-    code = models.PositiveIntegerField("Код ETSNG", primary_key=True)
+    code = models.CharField("Код ETSNG", max_length=6, primary_key=True)
     name = models.CharField("Наименование", max_length=255)
     cargo_group = models.ForeignKey(
         CargoGroup,

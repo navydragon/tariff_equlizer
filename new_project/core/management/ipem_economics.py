@@ -7,6 +7,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
+from core.domain.cargo.formatting import parse_etsng_code
 from core.models import Cargo, Route, RouteSet
 
 try:
@@ -82,8 +83,8 @@ class IpemMatchRecord:
     origin_esr: int
     dest_esr: int
     cargo_name: str
-    cargo_id: int
-    cargo_code: int
+    cargo_id: str
+    cargo_code: str
     economics: dict[str, Optional[Decimal]]
     rzd_match_count: int = 0
 
@@ -276,8 +277,10 @@ def load_records_from_export_csv(csv_path: Path) -> list[IpemMatchRecord]:
             try:
                 origin_esr = int((row.get("origin_esr") or "").strip())
                 dest_esr = int((row.get("dest_esr") or "").strip())
-                cargo_id = int((row.get("cargo_id") or "").strip())
-                cargo_code = int((row.get("cargo_code") or "").strip())
+                cargo_id = (row.get("cargo_id") or "").strip()
+                cargo_code = parse_etsng_code(row.get("cargo_code"))
+                if not cargo_id or cargo_code is None:
+                    raise ValueError(f"Некорректная строка export CSV: {row}")
             except ValueError as exc:
                 raise ValueError(f"Некорректная строка export CSV: {row}") from exc
 

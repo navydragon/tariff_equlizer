@@ -3,14 +3,16 @@ DTO (Data Transfer Objects) для справочника грузов (Cargo).
 Отделяют формат внешнего ввода/вывода от внутренних моделей Django.
 """
 from dataclasses import dataclass
-from typing import Optional, List
+from typing import List, Optional
+
+from core.domain.cargo.formatting import parse_etsng_code
 
 
 @dataclass
 class CargoDTO:
     """DTO для одного груза."""
 
-    code: int
+    code: str
     name: str
     cargo_group_code: Optional[int]
     cargo_group_name: Optional[str]
@@ -30,14 +32,14 @@ class CargoDTO:
 class CreateCargoDTO:
     """DTO для создания груза."""
 
-    code: int
+    code: str
     name: str
     cargo_group_code: Optional[int] = None
 
     def validate(self) -> list[str]:
         errors: list[str] = []
-        if self.code is None or int(self.code) <= 0:
-            errors.append("Код груза должен быть положительным целым числом")
+        if parse_etsng_code(self.code) is None:
+            errors.append("Код груза должен быть числовым кодом ЕТСНГ")
         if not self.name or not self.name.strip():
             errors.append("Наименование груза обязательно")
         return errors
@@ -66,4 +68,3 @@ class CargoListResultDTO:
     page: int
     page_size: int
     total_pages: int
-

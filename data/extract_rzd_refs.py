@@ -8,6 +8,7 @@ import sqlite3
 from pathlib import Path
 
 DB_PATH = Path(__file__).resolve().parent.parent / "databases" / "01_2026-05-19.db"
+DB_PATH_FALLBACK = Path(__file__).resolve().parent / "01_2026-05-19.db"
 OUT_DIR = Path(__file__).parent / "refs-01"
 TABLE = "ИХ_ГП"
 
@@ -49,20 +50,28 @@ def _region_short_name(full_name: str, region_type: str) -> str:
     return name
 
 
-def _parse_cargo_code(raw: str) -> int | None:
+def _parse_cargo_code(raw: str) -> str | None:
     raw = (raw or "").strip()
     if not raw:
         return None
-    try:
-        return int(raw)
-    except ValueError:
+    if not raw.isdigit():
         return None
+    return raw
+
+
+def _resolve_db_path() -> Path:
+    for candidate in (DB_PATH, DB_PATH_FALLBACK):
+        if candidate.exists():
+            return candidate
+    raise FileNotFoundError(
+        f"База РЖД не найдена: проверены {DB_PATH} и {DB_PATH_FALLBACK}"
+    )
 
 
 def main() -> None:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(_resolve_db_path())
     conn.row_factory = sqlite3.Row
     cur = conn.cursor()
 
@@ -177,7 +186,8 @@ def main() -> None:
                 continue
             name = (row["cargo_name"] or "").strip()
             group_code = row["group_code"]
-            writer.writerow([code, name, group_code if group_code is not None else ""])
+            group_raw = "" if group_code is None else str(group_code).strip()
+            writer.writerow([code, name, group_raw])
 
     # --- Грузоотправители (компании-отправители) ---
     cur.execute(

@@ -35,6 +35,9 @@ MART_RULE_MASK_SIDECAR_COLUMNS = (
     "distance_belt",
     "distance_belt_midpoint_km",
     "special_container_type",
+    "cargo_code_3",
+    "cargo_code_izpod_3",
+    "cargo_group_izpod",
     "shipper_id",
     "shipment_type_id",
     "message_type_id",
@@ -42,6 +45,17 @@ MART_RULE_MASK_SIDECAR_COLUMNS = (
 
 _MASK_SIDECAR_INT_COLUMNS = frozenset(
     {"shipper_id", "shipment_type_id", "message_type_id"},
+)
+
+# Колонки parquet-витрины, обязательные для актуальной схемы масок правил.
+# Если в кеше их нет — витрина пересобирается из БД.
+MART_PARQUET_REQUIRED_COLUMNS = frozenset(
+    {
+        "special_container_type",
+        "cargo_code_3",
+        "cargo_code_izpod_3",
+        "cargo_group_izpod",
+    },
 )
 
 ROUTE_MART_REFS_VERSION_CODE = "route_mart_refs_version"
@@ -181,6 +195,11 @@ def _filter_existing_columns(path: Path, columns: list[str]) -> list[str]:
     if not selected:
         return list(MART_COMPUTE_BASE_COLUMNS)
     return selected
+
+
+def _parquet_schema_is_current(parquet_path: Path) -> bool:
+    available = _parquet_column_names(parquet_path)
+    return MART_PARQUET_REQUIRED_COLUMNS.issubset(available)
 
 
 def encode_mart_dimensions(df: pd.DataFrame) -> dict[str, list[str]]:
@@ -361,8 +380,8 @@ def _mask_sidecar_array(series: pd.Series, column: str) -> np.ndarray:
         )
     if column == "distance_belt":
         return series.fillna("").astype(str).to_numpy(dtype="U32", copy=False)
-    if column == "special_container_type":
-        return series.fillna("").astype(str).to_numpy(dtype="U128", copy=False)
+    if column in MART_RULE_MASK_SIDECAR_COLUMNS:
+        return series.fillna("").astype(str).to_numpy(dtype="U256", copy=False)
     raise ValueError(f"Unexpected masks sidecar column: {column}")
 
 
@@ -633,6 +652,12 @@ def try_load_route_mart(
 
     if not path.is_file():
         timings["cache_hit"] = 0
+        timings["parquet_read_ms"] = 0
+        return None, None, timings
+
+    if not _parquet_schema_is_current(path):
+        timings["cache_hit"] = 0
+        timings["mart_schema_stale"] = 1
         timings["parquet_read_ms"] = 0
         return None, None, timings
 

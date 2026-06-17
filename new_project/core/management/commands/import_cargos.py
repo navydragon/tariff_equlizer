@@ -3,6 +3,7 @@ from pathlib import Path
 
 from django.core.management.base import BaseCommand, CommandError
 
+from core.domain.cargo.formatting import parse_etsng_code
 from core.management.reference_clear import clear_cargos_catalog
 from core.management.refs_paths import get_refs_csv
 from core.models import Cargo, CargoGroup
@@ -27,12 +28,11 @@ def _parse_row(row, stderr, style):
         )
         return None
 
-    try:
-        code = int(raw_code)
-    except ValueError:
+    code = parse_etsng_code(raw_code)
+    if code is None:
         stderr.write(
             style.WARNING(
-                f"Пропуск строки {row!r}: код '{raw_code}' не является целым числом"
+                f"Пропуск строки {row!r}: код '{raw_code}' не является кодом ЕТСНГ"
             )
         )
         return None
