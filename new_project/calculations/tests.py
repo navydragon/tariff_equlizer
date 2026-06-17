@@ -2800,6 +2800,60 @@ class RouteCargoIzpodTariffConditionsTests(TariffLoadServiceTestMixin, TestCase)
         )
         self.assertTrue(mask_keys.issubset(set(MART_RULE_MASK_SIDECAR_COLUMNS)))
 
+    def test_masks_npz_uses_compact_string_dtypes(self) -> None:
+        import numpy as np
+
+        from calculations.domain.services.route_effects_loader import (
+            fetch_routes_dataframe_cached_timed,
+        )
+        from calculations.domain.services.route_mart_store import (
+            MASKS_NPZ_SCHEMA_VERSION,
+            _mask_sidecar_array,
+            ensure_compute_sidecars,
+            load_masks_npz,
+            masks_npz_path,
+            resolve_mart_parquet_path,
+            route_mart_cache_dir,
+        )
+        import shutil
+
+        self.route_a.cargo_code_3 = "111"
+        self.route_a.cargo_code_izpod_3 = "222"
+        self.route_a.cargo_group_izpod = "Группа"
+        self.route_a.special_container_type = "универсальный"
+        self.route_a.save(
+            update_fields=[
+                "cargo_code_3",
+                "cargo_code_izpod_3",
+                "cargo_group_izpod",
+                "special_container_type",
+            ],
+        )
+
+        shutil.rmtree(
+            route_mart_cache_dir(route_set_id=self.route_set.id),
+            ignore_errors=True,
+        )
+        fetch_routes_dataframe_cached_timed(self.route_set.id)
+        parquet_path = resolve_mart_parquet_path(route_set_id=self.route_set.id)
+        self.assertTrue(ensure_compute_sidecars(parquet_path))
+
+        masks = load_masks_npz(parquet_path)
+        self.assertEqual(masks["cargo_code_3"].dtype, np.dtype("U8"))
+        self.assertEqual(masks["cargo_code_izpod_3"].dtype, np.dtype("U8"))
+        self.assertLess(masks_npz_path(parquet_path).stat().st_size, 50 * 1024 * 1024)
+
+        sample = _mask_sidecar_array(
+            __import__("pandas").Series(["abcdefgh"] * 1000),
+            "cargo_code_3",
+        )
+        self.assertEqual(sample.dtype, np.dtype("U8"))
+        with np.load(masks_npz_path(parquet_path), allow_pickle=False) as data:
+            self.assertEqual(
+                int(data["__schema_version__"][0]),
+                MASKS_NPZ_SCHEMA_VERSION,
+            )
+
     def test_stale_parquet_without_cargo_izpod_columns_is_rebuilt(self) -> None:
         import pyarrow as pa
         import pyarrow.parquet as pq

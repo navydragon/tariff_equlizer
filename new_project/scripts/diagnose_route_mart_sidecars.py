@@ -29,11 +29,12 @@ from calculations.domain.services.route_effects_loader import (
 from calculations.domain.services.route_mart_store import (
     MART_PARQUET_REQUIRED_COLUMNS,
     MART_RULE_MASK_SIDECAR_COLUMNS,
+    MASKS_NPZ_META_KEYS,
+    MASKS_NPZ_SCHEMA_VERSION,
     _masks_npz_needs_rebuild,
     _parquet_schema_is_current,
     ensure_compute_sidecars,
     load_mart_sidecar_dataframe,
-    load_masks_npz,
     masks_npz_path,
     resolve_mart_parquet_path,
 )
@@ -59,8 +60,19 @@ def main() -> None:
     if mpath.is_file():
         size_mb = round(mpath.stat().st_size / 2**20, 1)
         print(f"masks_npz exists: True size_mb: {size_mb}")
-        keys = set(load_masks_npz(parquet))
+        if size_mb > 500:
+            print("WARNING: masks.npz > 500 MB — вероятно U256 sidecar, нужна пересборка")
+        import numpy as np
+
+        with np.load(mpath, allow_pickle=False) as data:
+            keys = {k for k in data.files if k not in MASKS_NPZ_META_KEYS}
+            schema = (
+                int(np.asarray(data["__schema_version__"]).reshape(-1)[0])
+                if "__schema_version__" in data.files
+                else None
+            )
         required = {c for c in MART_RULE_MASK_SIDECAR_COLUMNS if c in cols}
+        print(f"masks_npz_schema: {schema} (expected {MASKS_NPZ_SCHEMA_VERSION})")
         print(f"masks keys: {sorted(keys)}")
         print(f"missing_in_masks: {required - keys or '-'}")
         print(f"needs_rebuild: {_masks_npz_needs_rebuild(parquet)}")

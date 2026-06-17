@@ -47,6 +47,19 @@ _MASK_SIDECAR_INT_COLUMNS = frozenset(
     {"shipper_id", "shipment_type_id", "message_type_id"},
 )
 
+# Версия схемы masks.npz; bump при смене dtype/колонок (см. a860068 U256 → компактные типы).
+MASKS_NPZ_SCHEMA_VERSION = 2
+MASKS_NPZ_META_KEYS = frozenset({"__schema_version__"})
+
+# Фиксированная ширина строк в sidecar: U256 на 2.1M строк ≈ 8 ГБ на колонку.
+_MASK_SIDECAR_STRING_DTYPES: dict[str, str] = {
+    "distance_belt": "U32",
+    "special_container_type": "U64",
+    "cargo_code_3": "U8",
+    "cargo_code_izpod_3": "U8",
+    "cargo_group_izpod": "U64",
+}
+
 # Колонки parquet-витрины, обязательные для актуальной схемы масок правил.
 # Если в кеше их нет — витрина пересобирается из БД.
 MART_PARQUET_REQUIRED_COLUMNS = frozenset(
@@ -380,8 +393,11 @@ def _mask_sidecar_array(series: pd.Series, column: str) -> np.ndarray:
         )
     if column == "distance_belt":
         return series.fillna("").astype(str).to_numpy(dtype="U32", copy=False)
+    string_dtype = _MASK_SIDECAR_STRING_DTYPES.get(column)
+    if string_dtype is not None:
+        return series.fillna("").astype(str).to_numpy(dtype=string_dtype, copy=False)
     if column in MART_RULE_MASK_SIDECAR_COLUMNS:
-        return series.fillna("").astype(str).to_numpy(dtype="U256", copy=False)
+        return series.fillna("").astype(str).to_numpy(dtype="U64", copy=False)
     raise ValueError(f"Unexpected masks sidecar column: {column}")
 
 
@@ -436,18 +452,24 @@ def _masks_npz_needs_rebuild(parquet_path: Path) -> bool:
     try:
         with np.load(path, allow_pickle=False) as data:
             keys = frozenset(data.files)
+            if "__schema_version__" not in keys:
+                return True
+            schema_version = int(np.asarray(data["__schema_version__"]).reshape(-1)[0])
+            if schema_version != MASKS_NPZ_SCHEMA_VERSION:
+                return True
     except OSError:
         return True
     if not keys:
         return True
+    data_keys = keys - MASKS_NPZ_META_KEYS
     allowed = frozenset(MART_RULE_MASK_SIDECAR_COLUMNS)
-    if keys - allowed:
+    if data_keys - allowed:
         return True
     available = _parquet_column_names(parquet_path)
     required = {
         column for column in MART_RULE_MASK_SIDECAR_COLUMNS if column in available
     }
-    return bool(required - keys)
+    return bool(required - data_keys)
 
 
 def save_dims_npz(df: pd.DataFrame, parquet_path: Path) -> None:
@@ -470,6 +492,10 @@ def save_masks_npz(df: pd.DataFrame, parquet_path: Path) -> None:
         arrays[column] = _mask_sidecar_array(df[column], column)
     if not arrays:
         return
+    arrays["__schema_version__"] = np.array(
+        [MASKS_NPZ_SCHEMA_VERSION],
+        dtype=np.int32,
+    )
     out_path = masks_npz_path(parquet_path)
     tmp_path = out_path.parent / (out_path.stem + ".write.npz")
     np.savez(tmp_path, **arrays)
@@ -489,7 +515,11 @@ def load_masks_npz(parquet_path: Path) -> dict[str, np.ndarray]:
     if not path.is_file():
         return {}
     with np.load(path, allow_pickle=False) as data:
-        return {key: np.asarray(data[key]) for key in data.files}
+        return {
+            key: np.asarray(data[key])
+            for key in data.files
+            if key not in MASKS_NPZ_META_KEYS
+        }
 
 
 def _sidecars_complete(parquet_path: Path) -> bool:
