@@ -21,6 +21,7 @@ from calculations.domain.services.scenario_effects_cache import (
     validate_cache_access,
 )
 from calculations.domain.units import RUB_PER_BLN, TONS_PER_MLN
+from core.domain.cargo.ordering import cargo_group_sort_key, sort_group_labels
 from scenarios.models import Scenario
 
 _VOLUME_QUANT = Decimal("0.01")
@@ -52,6 +53,7 @@ class ScenarioAbsoluteService:
         rows = self._format_rows(
             year_values,
             years=payload.years,
+            group_by=request.group_by,
             group_by_inner=request.group_by_inner,
             format_value=_format_bln,
         )
@@ -109,6 +111,7 @@ class ScenarioAbsoluteService:
         rows = self._format_rows(
             year_values,
             years=payload.years,
+            group_by=request.group_by,
             group_by_inner=request.group_by_inner,
             format_value=_format_volume,
         )
@@ -187,6 +190,7 @@ class ScenarioAbsoluteService:
         year_values: dict[tuple[str, ...], dict[int, Decimal]],
         *,
         years: list[int],
+        group_by: str,
         group_by_inner: str,
         format_value,
     ) -> list[AbsoluteTableRowDTO]:
@@ -213,11 +217,14 @@ class ScenarioAbsoluteService:
         )
 
         if group_by_inner == "none":
-            keys = sorted(
-                (key for key in year_values if len(key) == 1),
-                key=lambda k: sum(year_values[k].values(), Decimal("0")),
-                reverse=True,
-            )
+            keys = list(key for key in year_values if len(key) == 1)
+            if group_by == "cargo_group":
+                keys.sort(key=lambda k: cargo_group_sort_key(k[0]))
+            else:
+                keys.sort(
+                    key=lambda k: sum(year_values[k].values(), Decimal("0")),
+                    reverse=True,
+                )
             for key in keys:
                 rows.append(
                     _row_from_values(
@@ -230,7 +237,10 @@ class ScenarioAbsoluteService:
                 )
             return rows
 
-        outers = sorted({key[0] for key in year_values if len(key) == 2})
+        outers = sort_group_labels(
+            {key[0] for key in year_values if len(key) == 2},
+            dimension=group_by,
+        )
         for outer in outers:
             subtotal_key = (outer, "ИТОГО")
             if subtotal_key in year_values:
@@ -244,15 +254,18 @@ class ScenarioAbsoluteService:
                     ),
                 )
 
-            inner_keys = sorted(
-                (
-                    key
-                    for key in year_values
-                    if len(key) == 2 and key[0] == outer and key[1] != "ИТОГО"
-                ),
-                key=lambda k: sum(year_values[k].values(), Decimal("0")),
-                reverse=True,
-            )
+            inner_keys = [
+                key
+                for key in year_values
+                if len(key) == 2 and key[0] == outer and key[1] != "ИТОГО"
+            ]
+            if group_by_inner == "cargo_group":
+                inner_keys.sort(key=lambda k: cargo_group_sort_key(k[1]))
+            else:
+                inner_keys.sort(
+                    key=lambda k: sum(year_values[k].values(), Decimal("0")),
+                    reverse=True,
+                )
             for key in inner_keys:
                 rows.append(
                     _row_from_values(

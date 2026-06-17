@@ -25,6 +25,7 @@ from calculations.domain.services.scenario_effects_cache import (
     validate_cache_access,
 )
 from calculations.domain.units import RUB_PER_BLN
+from core.domain.cargo.ordering import group_key_sort_key
 from scenarios.models import Scenario, TariffRule
 
 _BLN_QUANT = Decimal("0.001")
@@ -319,7 +320,11 @@ class ScenarioEffectsCubeService:
         reference_key = effect_slices[0][0]
         group_keys = sorted(
             group_buckets.get(reference_key, {}).keys(),
-            key=lambda key: (key[0], key[1] if len(key) > 1 else ""),
+            key=lambda key: group_key_sort_key(
+                key,
+                group_by=group_by,
+                group_by_inner=group_by_inner,
+            ),
         )
 
         rows: list[CubeTableRowDTO] = []

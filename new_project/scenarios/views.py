@@ -426,7 +426,7 @@ def tariff_rule_options_api(request, scenario_id):
             qs.exclude(cargo__cargo_group__isnull=True)
             .values("cargo__cargo_group__code", "cargo__cargo_group__name")
             .distinct()
-            .order_by("cargo__cargo_group__name")
+            .order_by("cargo__cargo_group__position", "cargo__cargo_group__code")
         )
         items = [{"value": r["cargo__cargo_group__code"], "text": r["cargo__cargo_group__name"]} for r in rows]
     elif parameter == "cargo_code":

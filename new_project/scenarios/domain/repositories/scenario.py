@@ -145,7 +145,7 @@ class ScenarioRepository:
         )
 
         transaction.on_commit(
-            lambda target_id=new_scenario.id: warm_scenario_after_rule_change(
+            lambda target_id=target.id: warm_scenario_after_rule_change(
                 scenario_id=target_id,
                 change="create",
                 mask_changed=False,

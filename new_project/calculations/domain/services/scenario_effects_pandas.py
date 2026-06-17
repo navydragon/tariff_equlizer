@@ -46,6 +46,7 @@ from calculations.domain.services.route_mart_store import (
     resolve_mart_parquet_path,
 )
 from calculations.domain.services.tariff_load import TariffLoadService
+from core.domain.cargo.ordering import sort_cargo_group_names, normalize_filter_options
 from scenarios.models import Scenario
 
 
@@ -364,17 +365,17 @@ class ScenarioEffectsPandasService:
         mart_meta: MartMeta | None,
     ) -> dict[str, list[str]]:
         if mart_meta is not None and mart_meta.filter_options:
-            return mart_meta.filter_options
+            return normalize_filter_options(mart_meta.filter_options)
         if df.empty:
             return {"cargo_groups": ["—"], "holdings": ["Прочие"]}
 
         cargo_groups = set(df["cargo_group"].dropna().astype(str).tolist())
         cargo_groups.add("—")
         holdings = set(df["holding"].dropna().astype(str).tolist())
-        return {
-            "cargo_groups": sorted(cargo_groups),
+        return normalize_filter_options({
+            "cargo_groups": sort_cargo_group_names(cargo_groups),
             "holdings": sorted(holdings),
-        }
+        })
 
     def _compute_compact(
         self,

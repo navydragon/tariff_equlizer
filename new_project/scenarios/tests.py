@@ -909,3 +909,99 @@ class LoadBaseBtdCommandTests(TestCase):
         self.scenario.delete()
         with self.assertRaises(CommandError):
             call_command("load_base_btd")
+
+
+class TariffRuleOptionsApiTests(TestCase):
+    def setUp(self) -> None:
+        from django.test import Client
+        from django.urls import reverse
+
+        from core.models import (
+            Cargo,
+            CargoGroup,
+            MessageType,
+            RailRoad,
+            Region,
+            Route,
+            ShipmentType,
+            Station,
+            WagonKind,
+        )
+
+        self.client = Client()
+        self.user = User.objects.create_user(login="options_user", password="test_pass")
+        self.client.force_login(self.user)
+        self.route_set = RouteSet.objects.create(name="RS_OPT", code="RS_OPT")
+        self.scenario = Scenario.objects.create(
+            name="Options scenario",
+            start_year=2025,
+            end_year=2026,
+            route_set=self.route_set,
+            author=self.user,
+        )
+        self.reverse = reverse
+
+        group_low, _ = CargoGroup.objects.update_or_create(
+            code=1,
+            defaults={"name": "Уголь каменный", "position": 1},
+        )
+        group_high, _ = CargoGroup.objects.update_or_create(
+            code=3,
+            defaults={"name": "Нефтяные грузы", "position": 3},
+        )
+
+        railroad, _ = RailRoad.objects.get_or_create(code="01", defaults={"name": "Road"})
+        region, _ = Region.objects.get_or_create(
+            short_name="R",
+            full_name="Region",
+            type="область",
+        )
+        origin, _ = Station.objects.get_or_create(
+            esr_code=200001,
+            defaults={
+                "short_name": "A",
+                "full_name": "Station A",
+                "region": region,
+                "railroad": railroad,
+            },
+        )
+        destination, _ = Station.objects.get_or_create(
+            esr_code=200002,
+            defaults={
+                "short_name": "B",
+                "full_name": "Station B",
+                "region": region,
+                "railroad": railroad,
+            },
+        )
+        wagon_kind, _ = WagonKind.objects.get_or_create(code="WK", defaults={"name": "Wagon"})
+        shipment_type, _ = ShipmentType.objects.get_or_create(code="ST", defaults={"name": "Shipment"})
+        message_type, _ = MessageType.objects.get_or_create(code="MT", defaults={"name": "Message"})
+
+        for idx, group in enumerate((group_high, group_low), start=1):
+            cargo, _ = Cargo.objects.get_or_create(
+                code=3000 + idx,
+                defaults={"name": f"Cargo {idx}", "cargo_group": group},
+            )
+            Route.objects.create(
+                route_set=self.route_set,
+                cargo=cargo,
+                origin_station=origin,
+                destination_station=destination,
+                wagon_kind=wagon_kind,
+                shipment_type=shipment_type,
+                message_type=message_type,
+                route_code=f"OPT-{idx}",
+            )
+
+    def test_cargo_group_options_sorted_by_position(self) -> None:
+        url = self.reverse(
+            "scenarios:tariff_rule_options",
+            kwargs={"scenario_id": self.scenario.id},
+        )
+        response = self.client.get(url, {"parameter": "cargo_group"})
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["success"])
+        texts = [item["text"] for item in payload["items"]]
+        self.assertEqual(texts, ["Уголь каменный", "Нефтяные грузы"])

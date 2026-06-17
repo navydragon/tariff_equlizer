@@ -542,6 +542,73 @@ class ScenarioEffectsServiceTests(TariffLoadServiceTestMixin, TestCase):
         self.assertIn("ИТОГО", labels)
         self.assertTrue(any("Уголь" in label for label in labels))
 
+    def test_filter_options_cargo_groups_sorted_by_position(self) -> None:
+        group_a, _ = CargoGroup.objects.update_or_create(
+            code=3,
+            defaults={"name": "Нефтяные грузы", "position": 3},
+        )
+        group_b, _ = CargoGroup.objects.update_or_create(
+            code=1,
+            defaults={"name": "Уголь каменный", "position": 1},
+        )
+        self.route.cargo.cargo_group = group_b
+        self.route.cargo.save(update_fields=["cargo_group"])
+
+        route2 = self._create_route(
+            rzd=Decimal("500.00"),
+            cargo_code=1002,
+            route_code="R-002",
+        )
+        route2.cargo.cargo_group = group_a
+        route2.cargo.save(update_fields=["cargo_group"])
+        route2.freight_charge_rub = Decimal("500000000.00")
+        route2.save(update_fields=["freight_charge_rub"])
+
+        options = self.effects_service._collect_filter_options_from_db(self.scenario)
+        cargo_groups = [name for name in options["cargo_groups"] if name != "—"]
+        self.assertEqual(
+            cargo_groups,
+            ["Уголь каменный", "Нефтяные грузы"],
+        )
+
+    def test_group_by_cargo_group_table_sorted_by_position(self) -> None:
+        self._setup_btd("1.1000")
+        group_a, _ = CargoGroup.objects.update_or_create(
+            code=3,
+            defaults={"name": "Нефтяные грузы", "position": 3},
+        )
+        group_b, _ = CargoGroup.objects.update_or_create(
+            code=1,
+            defaults={"name": "Уголь каменный", "position": 1},
+        )
+        self.route.cargo.cargo_group = group_b
+        self.route.cargo.save(update_fields=["cargo_group"])
+
+        route2 = self._create_route(
+            rzd=Decimal("500.00"),
+            cargo_code=1002,
+            route_code="R-002",
+        )
+        route2.cargo.cargo_group = group_a
+        route2.cargo.save(update_fields=["cargo_group"])
+        route2.freight_charge_rub = Decimal("5000000000.00")
+        route2.save(update_fields=["freight_charge_rub"])
+
+        response, errors = self.effects_service.calculate(
+            scenario=self.scenario,
+            user_id=self.user.id,
+            request=ScenarioEffectsRequestDTO(
+                scenario_id=self.scenario.id,
+                year=2026,
+                group_by="cargo_group",
+            ),
+        )
+
+        self.assertEqual(errors, [])
+        assert response is not None
+        labels = [row.label.strip() for row in response.table_rows if row.label.strip() != "ИТОГО"]
+        self.assertEqual(labels, ["Уголь каменный", "Нефтяные грузы"])
+
 
 class ScenarioEffectsApiTests(TariffLoadServiceTestMixin, TestCase):
     def setUp(self) -> None:
@@ -805,6 +872,33 @@ class ScenarioEffectsPandasParityTests(TariffLoadServiceTestMixin, TestCase):
         self.pandas_service = ScenarioEffectsPandasService()
         self.route.freight_charge_rub = Decimal("1000000000.00")
         self.route.save(update_fields=["freight_charge_rub"])
+
+    def test_collect_filter_options_resorts_cached_mart_meta(self) -> None:
+        from calculations.domain.services.route_mart_store import MartMeta
+
+        CargoGroup.objects.update_or_create(
+            code=1,
+            defaults={"name": "Уголь каменный", "position": 1},
+        )
+        CargoGroup.objects.update_or_create(
+            code=3,
+            defaults={"name": "Нефтяные грузы", "position": 3},
+        )
+        mart_meta = MartMeta(
+            dimension_labels={},
+            filter_options={
+                "cargo_groups": ["Нефтяные грузы", "Уголь каменный", "—"],
+                "holdings": ["Прочие"],
+            },
+        )
+        options = self.pandas_service._collect_filter_options(
+            pd.DataFrame(),
+            mart_meta,
+        )
+        self.assertEqual(
+            options["cargo_groups"],
+            ["Уголь каменный", "Нефтяные грузы", "—"],
+        )
 
     def _setup_btd(self, coef_2026: str = "1.1000") -> None:
         category = BTDCategory.objects.create(

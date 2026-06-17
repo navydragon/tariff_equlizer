@@ -35,6 +35,12 @@ from calculations.domain.services.scenario_effects_formatting import (
     pct as _pct,
 )
 from calculations.domain.services.tariff_load import TariffLoadService
+from core.domain.cargo.ordering import (
+    cargo_group_sort_key,
+    normalize_filter_options,
+    sort_cargo_group_names,
+    sort_group_labels,
+)
 from core.models import Route
 from scenarios.models import Scenario
 
@@ -190,6 +196,7 @@ class ScenarioEffectsService:
         table_rows = self._format_table_rows(
             buckets,
             grand,
+            group_by=request.group_by,
             group_by_inner=request.group_by_inner,
         )
         chart = self._build_chart(buckets, group_by_inner=request.group_by_inner)
@@ -411,16 +418,17 @@ class ScenarioEffectsService:
             .distinct()
         }
 
-        return {
-            "cargo_groups": sorted(cargo_groups),
+        return normalize_filter_options({
+            "cargo_groups": sort_cargo_group_names(cargo_groups),
             "holdings": sorted(holdings),
-        }
+        })
 
     def _format_table_rows(
         self,
         buckets: dict[tuple[str, ...], _AggBucket],
         grand: _AggBucket,
         *,
+        group_by: str,
         group_by_inner: str,
     ) -> list[EffectTableRowDTO]:
         rows: list[EffectTableRowDTO] = []
@@ -428,18 +436,21 @@ class ScenarioEffectsService:
         rows.append(_bucket_to_row("ИТОГО", grand, is_subtotal=True))
 
         if group_by_inner == "none":
-            keys = sorted(
-                (key for key in buckets if len(key) == 1),
-                key=lambda k: buckets[k].total,
-                reverse=True,
-            )
+            keys = list(key for key in buckets if len(key) == 1)
+            if group_by == "cargo_group":
+                keys.sort(key=lambda k: cargo_group_sort_key(k[0]))
+            else:
+                keys.sort(key=lambda k: buckets[k].total, reverse=True)
             for key in keys:
                 rows.append(
                     _bucket_to_row(key[0], buckets[key], is_subtotal=False),
                 )
             return rows
 
-        outers = sorted({key[0] for key in buckets if len(key) == 2})
+        outers = sort_group_labels(
+            {key[0] for key in buckets if len(key) == 2},
+            dimension=group_by,
+        )
         for outer in outers:
             subtotal_key = (outer, "ИТОГО")
             if subtotal_key in buckets:
@@ -447,15 +458,15 @@ class ScenarioEffectsService:
                     _bucket_to_row(outer, buckets[subtotal_key], is_subtotal=True),
                 )
 
-            inner_keys = sorted(
-                (
-                    key
-                    for key in buckets
-                    if len(key) == 2 and key[0] == outer and key[1] != "ИТОГО"
-                ),
-                key=lambda k: buckets[k].total,
-                reverse=True,
-            )
+            inner_keys = [
+                key
+                for key in buckets
+                if len(key) == 2 and key[0] == outer and key[1] != "ИТОГО"
+            ]
+            if group_by_inner == "cargo_group":
+                inner_keys.sort(key=lambda k: cargo_group_sort_key(k[1]))
+            else:
+                inner_keys.sort(key=lambda k: buckets[k].total, reverse=True)
             for key in inner_keys:
                 rows.append(
                     _bucket_to_row(

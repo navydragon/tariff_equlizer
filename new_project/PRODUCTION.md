@@ -146,11 +146,18 @@ cd /opt/tariff_equlizer/new_project
 
 Скрипт выполняет `git pull`, `migrate`, `collectstatic`, затем **останавливает сервис**, очищает все кеши (диск + Redis) и **прогревает parquet-витрины маршрутов**, после чего запускает gunicorn. Это переносит тяжёлый SQL JOIN (~50 с на больших наборах) из первого клика пользователя в окно деплоя.
 
-Пропустить очистку и прогрев кешей:
+Пропустить очистку и прогрев кешей (флаг или переменная окружения):
 
 ```bash
+./deploy/update_prod.sh --skip-cache-refresh
+# краткая форма:
+./deploy/update_prod.sh -n
+
+# через переменную окружения:
 SKIP_CACHE_REFRESH=1 ./deploy/update_prod.sh
 ```
+
+Справка по всем опциям: `./deploy/update_prod.sh --help`
 
 Ручной запуск (от пользователя сервиса `tariff`):
 

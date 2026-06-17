@@ -14,6 +14,7 @@ from django.conf import settings
 from calculations.domain.services.scenario_effects_cache import CompactRouteEffects
 from calculations.domain.services.scenario_effects_compact import _DIMENSION_COLUMNS
 from calculations.domain.services.scenario_effects_formatting import GlobalTotals
+from core.domain.cargo.ordering import normalize_filter_options
 
 NPZ_FILENAME = "arrays.npz"
 RULE_BY_YEAR_FILENAME = "rule_by_year.npy"
@@ -288,7 +289,7 @@ def try_load_scenario_compute(
         return ScenarioComputeBundle(
             compact=None,
             global_totals=_global_totals_from_json(metadata["global_totals"]),
-            filter_options=metadata.get("filter_options") or {},
+            filter_options=normalize_filter_options(metadata.get("filter_options") or {}),
             skipped_charge=int(metadata.get("skipped_charge", 0)),
             routes_without_volume=int(metadata.get("routes_without_volume", 0)),
         )
@@ -318,7 +319,7 @@ def try_load_scenario_compute(
     return ScenarioComputeBundle(
         compact=compact,
         global_totals=_global_totals_from_json(metadata["global_totals"]),
-        filter_options=metadata.get("filter_options") or {},
+        filter_options=normalize_filter_options(metadata.get("filter_options") or {}),
         skipped_charge=int(metadata.get("skipped_charge", 0)),
         routes_without_volume=int(metadata.get("routes_without_volume", 0)),
     )

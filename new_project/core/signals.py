@@ -6,6 +6,7 @@ from django.dispatch import receiver
 from django.utils import timezone
 
 from calculations.domain.services.route_mart_store import bump_route_mart_refs_version
+from core.domain.cargo.ordering import clear_cargo_group_position_cache
 from core.models import (
     Cargo,
     CargoGroup,
@@ -57,5 +58,7 @@ def _bump_refs_on_commit() -> None:
 @receiver(post_save, sender=Shipper)
 @receiver(post_delete, sender=Shipper)
 def route_mart_bump_refs_version(sender, instance, **kwargs) -> None:  # noqa: ANN001,ARG001
+    if sender is CargoGroup:
+        clear_cargo_group_position_cache()
     _bump_refs_on_commit()
 

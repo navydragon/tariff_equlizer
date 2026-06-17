@@ -7,6 +7,7 @@ from calculations.domain.constants import (
     EFFECTS_GROUP_BY_CHOICES,
     EFFECTS_GROUP_BY_INNER_CHOICES,
 )
+from core.domain.cargo.ordering import normalize_filter_options
 
 GROUP_BY_CHOICES = EFFECTS_GROUP_BY_CHOICES
 GROUP_BY_INNER_CHOICES = EFFECTS_GROUP_BY_INNER_CHOICES
@@ -160,7 +161,7 @@ class ScenarioEffectsComputeResponseDTO:
             "routes_without_charge": self.routes_without_charge,
             "routes_without_volume": self.routes_without_volume,
             "cards": [card.to_api_dict() for card in self.cards],
-            "filter_options": self.filter_options,
+            "filter_options": normalize_filter_options(self.filter_options),
         }
 
 
@@ -194,7 +195,7 @@ class ScenarioEffectsResponseDTO:
             "baseline_rub": self.baseline_rub,
             "routes_without_charge": self.routes_without_charge,
             "cards": [card.to_api_dict() for card in self.cards],
-            "filter_options": self.filter_options,
+            "filter_options": normalize_filter_options(self.filter_options),
             "table": {"rows": [row.to_api_dict() for row in self.table_rows]},
             "chart": self.chart.to_api_dict(),
         }

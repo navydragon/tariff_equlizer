@@ -14,6 +14,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from calculations.domain.services.scenario_effects_compact import _DIMENSION_COLUMNS
+from core.domain.cargo.ordering import sort_cargo_group_names
 from core.models import RouteSet, Setting
 
 META_SUFFIX = ".meta.json"
@@ -210,7 +211,7 @@ def build_filter_options_from_labels(dimension_labels: dict[str, list[str]]) -> 
     cargo_groups.add("—")
     holdings = set(dimension_labels.get("holding", [])) or {"Прочие"}
     return {
-        "cargo_groups": sorted(cargo_groups),
+        "cargo_groups": sort_cargo_group_names(cargo_groups),
         "holdings": sorted(holdings),
     }
 
