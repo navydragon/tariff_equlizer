@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from typing import NamedTuple
+
+from django.db import connection
+from django.utils import timezone
 
 
 class ClearCounts(NamedTuple):
@@ -22,35 +24,61 @@ def _delete_all(model) -> int:
     return deleted
 
 
+def _route_table_sql() -> str:
+    from core.models import Route
+
+    return connection.ops.quote_name(Route._meta.db_table)
+
+
+def _fast_clear_routes(*, route_set_id: int | None = None) -> int:
+    """Быстрое удаление маршрутов без ORM-сигналов (post_delete на каждую строку)."""
+    from core.models import Route, RouteSet
+
+    if route_set_id is None:
+        pending = Route.objects.count()
+        if pending == 0:
+            return 0
+        table = _route_table_sql()
+        with connection.cursor() as cursor:
+            if connection.vendor == "postgresql":
+                cursor.execute(f"TRUNCATE TABLE {table} RESTART IDENTITY")
+            else:
+                cursor.execute(f"DELETE FROM {table}")
+        return pending
+
+    pending = Route.objects.filter(route_set_id=route_set_id).count()
+    if pending == 0:
+        return 0
+
+    table = _route_table_sql()
+    has_other_route_sets = Route.objects.exclude(route_set_id=route_set_id).exists()
+    with connection.cursor() as cursor:
+        if has_other_route_sets:
+            cursor.execute(
+                f"DELETE FROM {table} WHERE route_set_id = %s",
+                [route_set_id],
+            )
+            deleted = cursor.rowcount
+        elif connection.vendor == "postgresql":
+            cursor.execute(f"TRUNCATE TABLE {table} RESTART IDENTITY")
+            deleted = pending
+        else:
+            cursor.execute(
+                f"DELETE FROM {table} WHERE route_set_id = %s",
+                [route_set_id],
+            )
+            deleted = cursor.rowcount
+
+    RouteSet.objects.filter(pk=route_set_id).update(updated_at=timezone.now())
+    return deleted
+
+
 def clear_routes() -> int:
-    from core.models import Route
-
-    return _delete_all(Route)
+    return _fast_clear_routes()
 
 
-def clear_routes_for_route_set(
-    route_set_id: int,
-    *,
-    batch_size: int = 2000,
-    on_progress: Callable[[int, int], None] | None = None,
-) -> int:
-    from core.models import Route
-
-    qs = Route.objects.filter(route_set_id=route_set_id)
-    if on_progress is None:
-        deleted, _ = qs.delete()
-        return deleted
-
-    batch_size = max(1, batch_size)
-    deleted_total = 0
-    while True:
-        ids = list(qs.values_list("pk", flat=True)[:batch_size])
-        if not ids:
-            break
-        deleted, _ = Route.objects.filter(pk__in=ids).delete()
-        deleted_total += deleted
-        on_progress(deleted_total, deleted)
-    return deleted_total
+def clear_routes_for_route_set(route_set_id: int) -> int:
+    return _fast_clear_routes(route_set_id=route_set_id)
 
 
 def clear_stations_and_regions() -> tuple[int, int, int]:

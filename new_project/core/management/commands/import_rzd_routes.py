@@ -222,23 +222,14 @@ class Command(BaseCommand):
                 pending_count = Route.objects.filter(route_set=route_set).count()
                 self.stdout.write(
                     f"Удаляем маршруты набора {route_set.code} "
-                    f"({pending_count:,} шт.)…".replace(",", " "),
+                    f"({pending_count:,} шт., TRUNCATE/DELETE без сигналов)…".replace(
+                        ",", " "
+                    ),
                     ending="\n",
                 )
                 self.stdout.flush()
 
-                def on_clear_progress(total: int, _batch: int) -> None:
-                    self.stdout.write(
-                        f"  … удалено {total:,}".replace(",", " "),
-                        ending="\n",
-                    )
-                    self.stdout.flush()
-
-                deleted = clear_routes_for_route_set(
-                    route_set.id,
-                    batch_size=batch_size,
-                    on_progress=on_clear_progress,
-                )
+                deleted = clear_routes_for_route_set(route_set.id)
                 self.stdout.write(
                     self.style.WARNING(
                         f"Удалено маршрутов набора {route_set.code}: {deleted:,}".replace(
