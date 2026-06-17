@@ -31,6 +31,12 @@ _MART_MASK_DIM_SOURCES: dict[str, str] = {
 }
 
 # Колонки для masks.npz: только числовые поля, не покрытые dim_*.
+MART_MASK_LABEL_COLUMNS = (
+    "cargo_code_3",
+    "cargo_code_izpod_3",
+    "cargo_group_izpod",
+)
+
 MART_RULE_MASK_SIDECAR_COLUMNS = (
     "distance_belt",
     "distance_belt_midpoint_km",
@@ -522,6 +528,81 @@ def load_masks_npz(parquet_path: Path) -> dict[str, np.ndarray]:
         }
 
 
+def _normalize_mask_label_values(values: list[str] | np.ndarray) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for raw in values:
+        text = str(raw).strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        normalized.append(text)
+    return normalized
+
+
+def _mask_column_labels_from_df(df: pd.DataFrame, column: str) -> list[str]:
+    if column not in df.columns:
+        return []
+    return _normalize_mask_label_values(df[column].astype(str).unique().tolist())
+
+
+def _merge_mask_labels_into_meta(df: pd.DataFrame, meta: MartMeta | None) -> MartMeta | None:
+    if meta is None:
+        return None
+    updated_labels = dict(meta.dimension_labels)
+    changed = False
+    for column in MART_MASK_LABEL_COLUMNS:
+        if column not in df.columns:
+            continue
+        labels = _mask_column_labels_from_df(df, column)
+        if updated_labels.get(column) != labels:
+            updated_labels[column] = labels
+            changed = True
+    if not changed:
+        return meta
+    return MartMeta(
+        dimension_labels=updated_labels,
+        skipped_charge=meta.skipped_charge,
+        routes_without_volume=meta.routes_without_volume,
+        row_count=meta.row_count,
+        filter_options=meta.filter_options,
+    )
+
+
+def distinct_mask_sidecar_labels(
+    *,
+    route_set_id: int,
+    column: str,
+) -> list[str] | None:
+    """Уникальные значения mask-sidecar колонки из meta/masks.npz витрины."""
+    if column not in MART_MASK_LABEL_COLUMNS:
+        return None
+
+    parquet_path = resolve_mart_parquet_path(route_set_id=route_set_id)
+    if not parquet_path.is_file():
+        return None
+
+    meta = load_mart_meta(parquet_path)
+    if meta is not None:
+        cached = meta.dimension_labels.get(column)
+        if cached:
+            labels = _normalize_mask_label_values(cached)
+            if labels:
+                return labels
+
+    path = masks_npz_path(parquet_path)
+    if not path.is_file():
+        return None
+    try:
+        with np.load(path, allow_pickle=False) as data:
+            if column not in data.files:
+                return None
+            labels = _normalize_mask_label_values(np.unique(data[column]))
+    except OSError:
+        return None
+    return labels or None
+
+
 def _sidecars_complete(parquet_path: Path) -> bool:
     return (
         charge_npy_path(parquet_path).is_file()
@@ -584,6 +665,9 @@ def ensure_compute_sidecars(parquet_path: Path) -> bool:
             except OSError:
                 pass
         save_masks_npz(df, parquet_path)
+        meta = _merge_mask_labels_into_meta(df, meta) or meta
+        if meta is not None:
+            save_mart_meta(parquet_path=parquet_path, meta=meta)
     return _sidecars_complete(parquet_path)
 
 
@@ -751,15 +835,17 @@ def save_route_mart(
 
     dimension_labels = encode_mart_dimensions(df)
     filter_options = build_filter_options_from_labels(dimension_labels)
+    meta = MartMeta(
+        dimension_labels=dimension_labels,
+        skipped_charge=skipped_charge,
+        routes_without_volume=routes_without_volume,
+        row_count=len(df),
+        filter_options=filter_options,
+    )
+    meta = _merge_mask_labels_into_meta(df, meta) or meta
     save_mart_meta(
         parquet_path=path,
-        meta=MartMeta(
-            dimension_labels=dimension_labels,
-            skipped_charge=skipped_charge,
-            routes_without_volume=routes_without_volume,
-            row_count=len(df),
-            filter_options=filter_options,
-        ),
+        meta=meta,
     )
     save_route_mart_parquet(df, path)
     save_charge_npy(df, path)

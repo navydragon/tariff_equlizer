@@ -2761,11 +2761,13 @@ class RouteCargoIzpodTariffConditionsTests(TariffLoadServiceTestMixin, TestCase)
         self.route_a.cargo_code_3 = "123"
         self.route_a.cargo_code_izpod_3 = "456"
         self.route_a.cargo_group_izpod = "Группа A"
+        self.route_a.freight_charge_rub = Decimal("1000000.00")
         self.route_a.save(
             update_fields=[
                 "cargo_code_3",
                 "cargo_code_izpod_3",
                 "cargo_group_izpod",
+                "freight_charge_rub",
             ],
         )
 
@@ -2776,11 +2778,13 @@ class RouteCargoIzpodTariffConditionsTests(TariffLoadServiceTestMixin, TestCase)
         self.route_b.cargo_code_3 = "789"
         self.route_b.cargo_code_izpod_3 = "456"
         self.route_b.cargo_group_izpod = "Группа B"
+        self.route_b.freight_charge_rub = Decimal("1000000.00")
         self.route_b.save(
             update_fields=[
                 "cargo_code_3",
                 "cargo_code_izpod_3",
                 "cargo_group_izpod",
+                "freight_charge_rub",
             ],
         )
 
@@ -2902,6 +2906,41 @@ class RouteCargoIzpodTariffConditionsTests(TariffLoadServiceTestMixin, TestCase)
         self.assertTrue(payload["success"])
         values = [item["value"] for item in payload["items"]]
         self.assertEqual(values, ["Группа A", "Группа B"])
+
+    def test_cargo_group_izpod_options_prefers_route_mart_labels(self) -> None:
+        import shutil
+        from unittest.mock import patch
+
+        from calculations.domain.services.route_effects_loader import (
+            fetch_routes_dataframe_cached_timed,
+        )
+        from calculations.domain.services.route_mart_store import (
+            ensure_compute_sidecars,
+            resolve_mart_parquet_path,
+            route_mart_cache_dir,
+        )
+
+        self.client = Client()
+        self.client.force_login(self.user)
+        shutil.rmtree(route_mart_cache_dir(route_set_id=self.route_set.id), ignore_errors=True)
+        fetch_routes_dataframe_cached_timed(self.route_set.id)
+        parquet_path = resolve_mart_parquet_path(route_set_id=self.route_set.id)
+        self.assertTrue(ensure_compute_sidecars(parquet_path))
+
+        url = reverse("scenarios:tariff_rule_options", args=[self.scenario.id])
+        with patch(
+            "scenarios.domain.services.tariff_rule_options._distinct_route_values",
+        ) as db_fallback:
+            db_fallback.side_effect = AssertionError("unexpected DB DISTINCT fallback")
+            response = self.client.get(url, {"parameter": "cargo_group_izpod"})
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["success"])
+        values = [item["value"] for item in payload["items"]]
+        self.assertIn("Группа A", values)
+        self.assertIn("Группа B", values)
+        db_fallback.assert_not_called()
 
     def test_masks_npz_includes_cargo_izpod_sidecars(self) -> None:
         from calculations.domain.services.route_effects_loader import (

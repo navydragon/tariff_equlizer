@@ -13,7 +13,7 @@ from django.views.decorators.http import require_http_methods
 
 from core.domain.services.app_settings import AppSettingsService
 from core.domain.cargo.formatting import format_etsng_code
-from core.models import CargoGroup, Route
+from core.models import Route
 from scenarios.models import Scenario
 from scenarios.domain.constants import PRICE_CHANGE_MODES, PRICE_CHANGE_PARAMETERS
 from scenarios.domain.services import (
@@ -32,6 +32,10 @@ from scenarios.domain.dto import (
 )
 from scenarios.domain.utils.tariff_rule_display import enrich_rule_dict_for_api
 from scenarios.domain.utils.tariff_conditions import apply_tariff_conditions
+from scenarios.domain.services.tariff_rule_options import (
+    cargo_group_izpod_option_items,
+    mask_sidecar_option_items,
+)
 
 
 def _tariff_rule_api_dict(rule, *, route_set_id: int) -> dict:
@@ -476,37 +480,17 @@ def tariff_rule_options_api(request, scenario_id):
             for r in rows
         ]
     elif parameter == "cargo_code_3":
-        rows = (
-            qs.exclude(cargo_code_3="")
-            .values_list("cargo_code_3", flat=True)
-            .distinct()
-            .order_by("cargo_code_3")
+        items = mask_sidecar_option_items(
+            route_set_id=scenario.route_set_id,
+            column="cargo_code_3",
         )
-        items = [{"value": v, "text": v} for v in rows]
     elif parameter == "cargo_code_izpod_3":
-        rows = (
-            qs.exclude(cargo_code_izpod_3="")
-            .values_list("cargo_code_izpod_3", flat=True)
-            .distinct()
-            .order_by("cargo_code_izpod_3")
+        items = mask_sidecar_option_items(
+            route_set_id=scenario.route_set_id,
+            column="cargo_code_izpod_3",
         )
-        items = [{"value": v, "text": v} for v in rows]
     elif parameter == "cargo_group_izpod":
-        distinct_names = set(
-            qs.exclude(cargo_group_izpod="")
-            .values_list("cargo_group_izpod", flat=True)
-            .distinct()
-        )
-        matched_groups = list(
-            CargoGroup.objects.filter(name__in=distinct_names).order_by(
-                "position",
-                "code",
-            )
-        )
-        matched_names = {group.name for group in matched_groups}
-        items = [{"value": group.name, "text": group.name} for group in matched_groups]
-        for name in sorted(distinct_names - matched_names):
-            items.append({"value": name, "text": name})
+        items = cargo_group_izpod_option_items(route_set_id=scenario.route_set_id)
     elif parameter == "origin_railroad":
         rows = (
             qs.values("origin_station__railroad__code", "origin_station__railroad__name")
