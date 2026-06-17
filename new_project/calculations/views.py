@@ -245,6 +245,37 @@ def scenario_effects_revision_api(request):
 
 
 @login_required
+@require_http_methods(["GET"])
+def scenario_warm_status_api(request):
+    scenario_id_raw = request.GET.get("scenario_id")
+    try:
+        scenario_id = int(scenario_id_raw)
+    except (TypeError, ValueError):
+        return JsonResponse(
+            {"success": False, "errors": ["Некорректный scenario_id"]},
+            status=400,
+        )
+
+    scenario, error_response = _get_user_scenario(request, scenario_id)
+    if error_response:
+        return error_response
+
+    from calculations.domain.services.scenario_warm_status import get_warm_status
+
+    status = get_warm_status(scenario_id=scenario.id)
+    if status is None:
+        return JsonResponse(
+            {
+                "success": True,
+                "phase": None,
+                "kpi_ready": False,
+                "compact_ready": False,
+            }
+        )
+    return JsonResponse({"success": True, **status})
+
+
+@login_required
 @require_http_methods(["POST"])
 def scenario_effects_compact_status_api(request):
     data, error_response = _parse_json_body(request)

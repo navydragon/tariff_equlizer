@@ -346,7 +346,18 @@ def tariff_rule_create_api(request, scenario_id):
     rule, errors = service.create_rule(dto, request.user)
     if errors:
         return JsonResponse({"success": False, "errors": errors}, status=400)
-    return JsonResponse({"success": True, "rule": asdict(rule)}, status=201)
+    from calculations.domain.services.scenario_warm_status import build_rebuild_meta
+
+    rebuild = build_rebuild_meta(
+        scenario_id=scenario_id,
+        rule_id=rule.id if rule is not None else None,
+        mask_changed=True,
+        warm_scheduled=rule is not None,
+    )
+    return JsonResponse(
+        {"success": True, "rule": asdict(rule), "rebuild": rebuild},
+        status=201,
+    )
 
 
 @login_required
@@ -387,17 +398,40 @@ def tariff_rule_update_api(request, rule_id):
     rule, errors = service.update_rule(rule_id, dto, request.user)
     if errors:
         return JsonResponse({"success": False, "errors": errors}, status=400)
-    return JsonResponse({"success": True, "rule": asdict(rule)})
+    from calculations.domain.services.scenario_warm_status import build_rebuild_meta
+
+    warm_scheduled = any(
+        data.get(field) is not None
+        for field in ("conditions", "year_values", "base_percent")
+    )
+    rebuild = build_rebuild_meta(
+        scenario_id=rule.scenario_id if rule is not None else 0,
+        rule_id=rule.id if rule is not None else None,
+        mask_changed=data.get("conditions") is not None,
+        warm_scheduled=warm_scheduled and rule is not None,
+    )
+    return JsonResponse({"success": True, "rule": asdict(rule), "rebuild": rebuild})
 
 
 @login_required
 @require_http_methods(["POST"])
 def tariff_rule_delete_api(request, rule_id):
     service = TariffRuleService()
+    existing, read_errors = service.get_rule(rule_id, request.user)
+    if read_errors:
+        return JsonResponse({"success": False, "errors": read_errors}, status=400)
     ok, errors = service.delete_rule(rule_id, request.user)
     if errors:
         return JsonResponse({"success": False, "errors": errors}, status=400)
-    return JsonResponse({"success": True, "deleted": ok})
+    from calculations.domain.services.scenario_warm_status import build_rebuild_meta
+
+    rebuild = build_rebuild_meta(
+        scenario_id=existing.scenario_id if existing is not None else 0,
+        rule_id=None,
+        mask_changed=False,
+        warm_scheduled=ok and existing is not None,
+    )
+    return JsonResponse({"success": True, "deleted": ok, "rebuild": rebuild})
 
 
 @login_required

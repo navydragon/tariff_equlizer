@@ -37,6 +37,7 @@
       data-tariff-rules-delete-url-template-value="{% url 'scenarios:tariff_rule_delete' 0 %}"
       data-tariff-rules-options-url-template-value="{% url 'scenarios:tariff_rule_options' scenario.id %}"
       data-tariff-rules-stats-url-value="{% url 'scenarios:tariff_rule_stats' scenario.id %}"
+      data-tariff-rules-warm-status-url-value="{% url 'calculations:scenario_warm_status_api' %}"
       data-tariff-rules-start-year-value="{{ scenario.start_year }}"
       data-tariff-rules-end-year-value="{{ scenario.end_year }}"
     >
@@ -47,6 +48,8 @@
         </button>
         <div class="ms-auto text-muted" data-tariff-rules-target="summary"></div>
       </div>
+
+      <div class="d-none" data-tariff-rules-target="rebuildStatus" role="status"></div>
 
       <div class="table-responsive">
         <table class="table table-vcenter">

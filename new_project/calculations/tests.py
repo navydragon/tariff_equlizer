@@ -702,6 +702,15 @@ class ScenarioEffectsApiTests(TariffLoadServiceTestMixin, TestCase):
         self.assertIn("table", payload)
         self.assertIn("chart", payload)
 
+    def test_warm_status_api_success(self) -> None:
+        url = reverse("calculations:scenario_warm_status_api")
+        response = self.client.get(url, {"scenario_id": self.scenario.id})
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["success"])
+        self.assertIn("kpi_ready", payload)
+        self.assertIn("compact_ready", payload)
+
     def test_api_requires_login(self) -> None:
         client = Client()
         url = reverse("calculations:scenario_effects_api")
@@ -1411,7 +1420,11 @@ class ScenarioEffectsPandasParityTests(TariffLoadServiceTestMixin, TestCase):
         )
 
         fetch_routes_dataframe_cached_timed(scenario.route_set_id)
-        self.assertTrue(prewarm_rule_mask(rule=rule))
+        result = prewarm_rule_mask(rule=rule)
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertTrue(result.ok)
+        self.assertGreaterEqual(result.matched_routes, 0)
 
         _, _, meta = self.pandas_service.compute_pandas(
             scenario=scenario,
@@ -1551,6 +1564,109 @@ class ScenarioRuleWarmTests(TariffLoadServiceTestMixin, TestCase):
         assert bundle is not None
         self.assertIsNone(bundle.compact)
         self.assertGreater(bundle.global_totals.baseline_total, 0)
+
+    def test_prewarm_rule_mask_returns_matched_routes(self) -> None:
+        from calculations.domain.services.rule_mask_prewarm import prewarm_rule_mask
+
+        self._setup_btd()
+        self._build_mart()
+        scenario = Scenario.objects.select_related("route_set").get(pk=self.scenario.pk)
+        rule = TariffRule.objects.create(
+            scenario=scenario,
+            name="Matched routes rule",
+            base_percent=Decimal("100"),
+            position=1,
+        )
+        TariffRuleCondition.objects.create(
+            tariff_rule=rule,
+            parameter="wagon_kind",
+            operator="include",
+            values=[str(self.route.wagon_kind_id)],
+            position=1,
+        )
+
+        result = prewarm_rule_mask(rule=rule)
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertTrue(result.ok)
+        self.assertGreaterEqual(result.matched_routes, 1)
+
+    def test_warm_status_after_rule_create(self) -> None:
+        from calculations.domain.services.scenario_warm_status import get_warm_status
+        from scenarios.domain.dto import CreateTariffRuleDTO
+
+        self._setup_btd()
+        self._build_mart()
+        scenario = Scenario.objects.select_related("route_set").get(pk=self.scenario.pk)
+        dto = CreateTariffRuleDTO(
+            scenario_id=scenario.id,
+            name="Warm status rule",
+            base_percent="100",
+            position=1,
+            conditions=[
+                {
+                    "parameter": "wagon_kind",
+                    "operator": "include",
+                    "values": [str(self.route.wagon_kind_id)],
+                },
+            ],
+            year_values={"2026": "1.0500"},
+        )
+        with self.captureOnCommitCallbacks(execute=True):
+            created, errors = self.tariff_rule_service.create_rule(dto, self.user)
+        self.assertEqual(errors, [])
+        assert created is not None
+
+        status = get_warm_status(scenario_id=scenario.id)
+        self.assertIsNotNone(status)
+        assert status is not None
+        self.assertTrue(status["kpi_ready"])
+        self.assertEqual(status["rule_id"], created.id)
+        self.assertTrue(status["mask_changed"])
+        self.assertGreaterEqual(status["matched_routes"], 1)
+
+    def test_warm_status_skips_mask_phase_for_coef_only_update(self) -> None:
+        from unittest.mock import patch
+
+        from calculations.domain.services.scenario_warm_status import get_warm_status
+        from scenarios.domain.dto import CreateTariffRuleDTO, UpdateTariffRuleDTO
+
+        self._setup_btd()
+        self._build_mart()
+        scenario = Scenario.objects.select_related("route_set").get(pk=self.scenario.pk)
+        create_dto = CreateTariffRuleDTO(
+            scenario_id=scenario.id,
+            name="Coef warm status rule",
+            base_percent="100",
+            position=1,
+            conditions=[],
+            year_values={"2026": "1.0500"},
+        )
+        with patch(
+            "calculations.domain.services.scenario_effects_warm.schedule_deferred_full_compute",
+        ):
+            with self.captureOnCommitCallbacks(execute=True):
+                created, errors = self.tariff_rule_service.create_rule(create_dto, self.user)
+        self.assertEqual(errors, [])
+        assert created is not None
+
+        with patch(
+            "calculations.domain.services.scenario_effects_warm.schedule_deferred_full_compute",
+        ):
+            with self.captureOnCommitCallbacks(execute=True):
+                updated, errors = self.tariff_rule_service.update_rule(
+                    created.id,
+                    UpdateTariffRuleDTO(year_values={"2026": "1.0800"}),
+                    self.user,
+                )
+        self.assertEqual(errors, [])
+        assert updated is not None
+
+        status = get_warm_status(scenario_id=scenario.id)
+        self.assertIsNotNone(status)
+        assert status is not None
+        self.assertTrue(status["kpi_ready"])
+        self.assertFalse(status["mask_changed"])
 
     def test_compute_pandas_hits_kpi_only_snapshot(self) -> None:
         from scenarios.domain.dto import CreateTariffRuleDTO

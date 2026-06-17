@@ -35,6 +35,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
       computePandasUrl: String,
       aggregateUrl: String,
       revisionUrl: String,
+      warmStatusUrl: String,
       compactStatusUrl: String,
       revenuesUrl: String,
       volumesUrl: String,
@@ -455,8 +456,58 @@ import { clearToasts, showToast } from "../lib/toast.js";
         this.state.selectedScenarioId &&
         Number(scenarioId) === Number(this.state.selectedScenarioId)
       ) {
-        this._checkRevision(true);
+        this._handleTariffRulesChanged();
       }
+    }
+
+    async _handleTariffRulesChanged() {
+      if (this.state.computing) {
+        return;
+      }
+      this._setKpiLoading(true);
+      await this._waitForWarmKpi(this.state.selectedScenarioId);
+      await this._checkRevision(true);
+    }
+
+    async _waitForWarmKpi(scenarioId, startedAt = Date.now()) {
+      if (!this.hasWarmStatusUrlValue || !scenarioId) {
+        return;
+      }
+      const timeoutMs = 120000;
+      if (Date.now() - startedAt > timeoutMs) {
+        return;
+      }
+
+      const url = `${this.warmStatusUrlValue}?scenario_id=${encodeURIComponent(
+        String(scenarioId),
+      )}`;
+      try {
+        const { data } = await fetchJson(url);
+        if (!data || !data.success) {
+          await this._sleep(300);
+          return this._waitForWarmKpi(scenarioId, startedAt);
+        }
+        if (!data.phase) {
+          return;
+        }
+        if (data.phase === "error") {
+          console.error("[decision-effects] scenario warm failed", data.error);
+          return;
+        }
+        if (data.kpi_ready || data.phase === "done" || data.compact_ready) {
+          return;
+        }
+        await this._sleep(300);
+        return this._waitForWarmKpi(scenarioId, startedAt);
+      } catch (error) {
+        console.error("[decision-effects] warm status poll failed", error);
+        await this._sleep(500);
+        return this._waitForWarmKpi(scenarioId, startedAt);
+      }
+    }
+
+    _sleep(ms) {
+      return new Promise((resolve) => setTimeout(resolve, ms));
     }
 
     async _checkRevision(forceRecompute = false) {

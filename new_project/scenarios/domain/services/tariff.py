@@ -159,7 +159,6 @@ class TariffRuleService:
             dto.conditions is not None
             or dto.year_values is not None
             or dto.base_percent is not None
-            or dto.name is not None
         )
         if refreshed is not None and affects_compute:
             _schedule_scenario_warm(

@@ -142,11 +142,24 @@ def _run_deferred_full_compute(job: DeferredFullComputeJob) -> None:
             data_version=job.data_version,
         )
         update_payload_compact(cache_key=job.cache_key, compact=compact)
+        from calculations.domain.services.scenario_warm_status import update_warm_status
+
+        update_warm_status(
+            scenario_id=job.scenario_id,
+            data_version=job.data_version,
+            phase="done",
+        )
     except Exception:
         logger.exception(
             "Deferred full compute failed for scenario_id=%s cache_key=%s",
             job.scenario_id,
             job.cache_key,
+        )
+        from calculations.domain.services.scenario_warm_status import mark_warm_error
+
+        mark_warm_error(
+            scenario_id=job.scenario_id,
+            error="Ошибка фоновой сборки детализации",
         )
 
 
