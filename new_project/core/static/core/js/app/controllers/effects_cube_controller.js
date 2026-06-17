@@ -89,7 +89,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
 
       clearTimeout(this.state.cubeTimer);
       this.state.cubeTimer = setTimeout(() => {
-        this._aggregateCube();
+        this._aggregateCube({ showTableLoading: true });
       }, this.debounceMsValue || 350);
     }
 
@@ -295,6 +295,16 @@ import { clearToasts, showToast } from "../lib/toast.js";
       }
     }
 
+    _cubeLoadingMessage() {
+      const groupBy = this.groupBySelectTarget?.value || "cargo_group";
+      if (groupBy === "tariff_decision") {
+        return this.state.compactPending
+          ? "Подготовка разбивки по тарифным решениям…"
+          : "Загрузка тарифных решений…";
+      }
+      return "Загрузка таблицы…";
+    }
+
     async _aggregateCube({ showTableLoading = false, attempt = 0 } = {}) {
       if (
         !this.cubeUrlValue ||
@@ -304,8 +314,8 @@ import { clearToasts, showToast } from "../lib/toast.js";
         return;
       }
 
-      if (showTableLoading && attempt === 0) {
-        this._setTableLoading(true, "Загрузка таблицы…");
+      if (showTableLoading || attempt > 0) {
+        this._setTableLoading(true, this._cubeLoadingMessage());
       }
 
       const maxAttempts = this.state.compactPending ? 45 : 8;
@@ -444,7 +454,12 @@ import { clearToasts, showToast } from "../lib/toast.js";
         isLoading,
       );
       if (isLoading) {
-        this.tableWrapTarget.innerHTML = `<div class="text-muted py-4 text-center">${escapeHtml(message)}</div>`;
+        this.tableWrapTarget.innerHTML = `
+          <div class="text-muted py-4 text-center effects-cube-table-loading">
+            <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+            <div class="mt-2">${escapeHtml(message)}</div>
+          </div>
+        `;
       }
     }
 

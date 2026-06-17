@@ -13,7 +13,7 @@ from django.views.decorators.http import require_http_methods
 
 from core.domain.services.app_settings import AppSettingsService
 from core.domain.cargo.formatting import format_etsng_code
-from core.models import Route
+from core.models import CargoGroup, Route
 from scenarios.models import Scenario
 from scenarios.domain.constants import PRICE_CHANGE_MODES, PRICE_CHANGE_PARAMETERS
 from scenarios.domain.services import (
@@ -492,13 +492,21 @@ def tariff_rule_options_api(request, scenario_id):
         )
         items = [{"value": v, "text": v} for v in rows]
     elif parameter == "cargo_group_izpod":
-        rows = (
+        distinct_names = set(
             qs.exclude(cargo_group_izpod="")
             .values_list("cargo_group_izpod", flat=True)
             .distinct()
-            .order_by("cargo_group_izpod")
         )
-        items = [{"value": v, "text": v} for v in rows]
+        matched_groups = list(
+            CargoGroup.objects.filter(name__in=distinct_names).order_by(
+                "position",
+                "code",
+            )
+        )
+        matched_names = {group.name for group in matched_groups}
+        items = [{"value": group.name, "text": group.name} for group in matched_groups]
+        for name in sorted(distinct_names - matched_names):
+            items.append({"value": name, "text": name})
     elif parameter == "origin_railroad":
         rows = (
             qs.values("origin_station__railroad__code", "origin_station__railroad__name")

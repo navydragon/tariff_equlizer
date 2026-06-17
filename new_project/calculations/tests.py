@@ -2887,6 +2887,22 @@ class RouteCargoIzpodTariffConditionsTests(TariffLoadServiceTestMixin, TestCase)
                 self.assertIn(expected, values)
                 self.assertNotIn("", values)
 
+    def test_tariff_rule_options_api_cargo_group_izpod_ordered_by_position(self) -> None:
+        from core.models import CargoGroup
+
+        self.client = Client()
+        self.client.force_login(self.user)
+        CargoGroup.objects.create(code=91, name="Группа B", position=2)
+        CargoGroup.objects.create(code=90, name="Группа A", position=1)
+
+        url = reverse("scenarios:tariff_rule_options", args=[self.scenario.id])
+        response = self.client.get(url, {"parameter": "cargo_group_izpod"})
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["success"])
+        values = [item["value"] for item in payload["items"]]
+        self.assertEqual(values, ["Группа A", "Группа B"])
+
     def test_masks_npz_includes_cargo_izpod_sidecars(self) -> None:
         from calculations.domain.services.route_effects_loader import (
             fetch_routes_dataframe_cached_timed,
