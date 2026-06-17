@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 import shutil
+import stat
 import time
 from pathlib import Path
 
@@ -16,9 +18,17 @@ from calculations.domain.services.scenario_compute_store import scenario_compute
 from core.models import Route, RouteSet
 
 
+def _rmtree_onerror(func, path: str, exc_info) -> None:
+    if not os.access(path, os.W_OK):
+        os.chmod(path, stat.S_IWUSR | stat.S_IRUSR | stat.S_IXUSR)
+        func(path)
+        return
+    raise exc_info[1]
+
+
 def clear_disk_cache_dir(root: Path) -> None:
     if root.is_dir():
-        shutil.rmtree(root)
+        shutil.rmtree(root, onerror=_rmtree_onerror)
     root.mkdir(parents=True, exist_ok=True)
 
 
@@ -62,7 +72,20 @@ class Command(BaseCommand):
             raise CommandError("Нельзя одновременно указывать --clear-only и --warm-only.")
 
         if not options["warm_only"]:
-            self._clear_caches()
+            try:
+                self._clear_caches()
+            except PermissionError as exc:
+                service_user = os.environ.get("TARIFF_SERVICE_USER", "tariff")
+                raise CommandError(
+                    "Не удалось очистить дисковые кеши: нет прав на файлы, "
+                    f"созданные пользователем сервиса ({service_user}). "
+                    "Запустите команду от этого пользователя, например:\n"
+                    f"  sudo -u {service_user} bash -c '"
+                    "cd /opt/tariff_equlizer/new_project && "
+                    "source .venv/bin/activate && "
+                    "export DJANGO_SETTINGS_MODULE=config.settings_prod && "
+                    "python manage.py refresh_deploy_caches'"
+                ) from exc
 
         if not options["clear_only"]:
             self._warm_route_marts(route_set_id=options["route_set_id"])
