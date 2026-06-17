@@ -9,4 +9,4 @@ RZD_TABLE = "ИХ_ГП"
 
 
 def get_rzd_db_path() -> Path:
-    return Path(settings.BASE_DIR).parent / "data" / RZD_DB_FILENAME
+    return Path(settings.BASE_DIR).parent / "databases" / RZD_DB_FILENAME

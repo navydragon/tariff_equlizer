@@ -7,7 +7,7 @@ import re
 import sqlite3
 from pathlib import Path
 
-DB_PATH = Path(__file__).parent / "01_2026-05-19.db"
+DB_PATH = Path(__file__).resolve().parent.parent / "databases" / "01_2026-05-19.db"
 OUT_DIR = Path(__file__).parent / "refs-01"
 TABLE = "ИХ_ГП"
 

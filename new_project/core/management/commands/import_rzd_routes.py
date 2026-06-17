@@ -116,7 +116,7 @@ def _parse_decimal(value: Any) -> Optional[Decimal]:
 
 class Command(BaseCommand):
     help = (
-        "Импортирует маршруты из data/01_2026-05-19.db (ИХ_ГП) "
+        "Импортирует маршруты из databases/01_2026-05-19.db (ИХ_ГП) "
         f'в набор «{DEFAULT_ROUTE_SET_NAME}».'
     )
 
@@ -125,7 +125,7 @@ class Command(BaseCommand):
             "--db",
             type=str,
             default="",
-            help="Путь к SQLite (по умолчанию data/01_2026-05-19.db)",
+            help="Путь к SQLite (по умолчанию databases/01_2026-05-19.db)",
         )
         parser.add_argument(
             "--route-set-code",
