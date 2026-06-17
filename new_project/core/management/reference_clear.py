@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import NamedTuple
 
 
@@ -27,11 +28,29 @@ def clear_routes() -> int:
     return _delete_all(Route)
 
 
-def clear_routes_for_route_set(route_set_id: int) -> int:
+def clear_routes_for_route_set(
+    route_set_id: int,
+    *,
+    batch_size: int = 2000,
+    on_progress: Callable[[int, int], None] | None = None,
+) -> int:
     from core.models import Route
 
-    deleted, _ = Route.objects.filter(route_set_id=route_set_id).delete()
-    return deleted
+    qs = Route.objects.filter(route_set_id=route_set_id)
+    if on_progress is None:
+        deleted, _ = qs.delete()
+        return deleted
+
+    batch_size = max(1, batch_size)
+    deleted_total = 0
+    while True:
+        ids = list(qs.values_list("pk", flat=True)[:batch_size])
+        if not ids:
+            break
+        deleted, _ = Route.objects.filter(pk__in=ids).delete()
+        deleted_total += deleted
+        on_progress(deleted_total, deleted)
+    return deleted_total
 
 
 def clear_stations_and_regions() -> tuple[int, int, int]:
