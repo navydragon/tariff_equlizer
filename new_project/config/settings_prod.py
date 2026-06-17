@@ -37,6 +37,16 @@ CSRF_TRUSTED_ORIGINS = _env_csv("DJANGO_CSRF_TRUSTED_ORIGINS")  # noqa: F405
 TIME_ZONE = os.environ.get("DJANGO_TIME_ZONE", "Europe/Moscow")
 LANGUAGE_CODE = os.environ.get("DJANGO_LANGUAGE_CODE", "ru")
 
+# Hashed static filenames for cache busting (nginx can cache /static/ aggressively).
+STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "config.staticfiles_storage.ManifestStaticFilesStorageWithJsModules",
+    },
+}
+
 # HTTPS behind reverse proxy (nginx).
 if _env_bool("DJANGO_SECURE_SSL", default=True):  # noqa: F405
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
