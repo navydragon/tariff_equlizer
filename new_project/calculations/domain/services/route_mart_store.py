@@ -33,6 +33,7 @@ _MART_MASK_DIM_SOURCES: dict[str, str] = {
 MART_RULE_MASK_SIDECAR_COLUMNS = (
     "distance_belt",
     "distance_belt_midpoint_km",
+    "special_container_type",
     "shipper_id",
     "shipment_type_id",
     "message_type_id",
@@ -359,6 +360,8 @@ def _mask_sidecar_array(series: pd.Series, column: str) -> np.ndarray:
         )
     if column == "distance_belt":
         return series.fillna("").astype(str).to_numpy(dtype="U32", copy=False)
+    if column == "special_container_type":
+        return series.fillna("").astype(str).to_numpy(dtype="U128", copy=False)
     raise ValueError(f"Unexpected masks sidecar column: {column}")
 
 

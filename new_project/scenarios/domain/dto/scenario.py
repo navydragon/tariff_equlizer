@@ -21,9 +21,15 @@ class ScenarioDTO:
     author_name: str
     price_change_settings: dict[str, str] = field(default_factory=dict)
     export_price_mode: str = "fixed"
+    include_base_tariff_decisions: bool = True
 
     @classmethod
-    def from_model(cls, scenario, *, price_change_settings: dict[str, str] | None = None):
+    def from_model(
+        cls,
+        scenario,
+        *,
+        price_change_settings: dict[str, str] | None = None,
+    ):
         return cls(
             id=scenario.id,
             name=scenario.name,
@@ -44,6 +50,9 @@ class ScenarioDTO:
             author_name=str(scenario.author),
             price_change_settings=price_change_settings or {},
             export_price_mode=scenario.export_price_mode,
+            include_base_tariff_decisions=bool(
+                scenario.include_base_tariff_decisions,
+            ),
         )
 
 
@@ -82,6 +91,7 @@ class UpdateScenarioDTO:
     exchange_rate_set_id: Optional[int] = None
     price_change_settings: Optional[dict[str, str]] = None
     export_price_mode: Optional[str] = None
+    include_base_tariff_decisions: Optional[bool] = None
 
     def validate(self) -> list[str]:
         errors: list[str] = []
@@ -90,9 +100,13 @@ class UpdateScenarioDTO:
         if self.start_year is not None and self.end_year is not None:
             if self.start_year >= self.end_year:
                 errors.append("Год начала должен быть меньше года окончания")
-        if self.start_year is not None and (self.start_year < 2000 or self.start_year > 2100):
+        if self.start_year is not None and (
+            self.start_year < 2000 or self.start_year > 2100
+        ):
             errors.append("Год начала должен быть в пределах 2000-2100")
-        if self.end_year is not None and (self.end_year < 2000 or self.end_year > 2100):
+        if self.end_year is not None and (
+            self.end_year < 2000 or self.end_year > 2100
+        ):
             errors.append("Год окончания должен быть в пределах 2000-2100")
         if self.route_set_id is not None and self.route_set_id <= 0:
             errors.append("Набор маршрутов указан некорректно")
@@ -104,6 +118,11 @@ class UpdateScenarioDTO:
             valid = {choice.value for choice in Scenario.ExportPriceMode}
             if self.export_price_mode not in valid:
                 errors.append("Некорректный режим экспортной цены")
+        if self.include_base_tariff_decisions is not None and not isinstance(
+            self.include_base_tariff_decisions,
+            bool,
+        ):
+            errors.append("Некорректное значение флага учета базовых тарифных решений")
         return errors
 
 
@@ -124,6 +143,7 @@ class ScenarioListDTO:
     inflation_set_name: str
     author_id: int
     author_name: str
+    include_base_tariff_decisions: bool = True
 
     @classmethod
     def from_model(cls, scenario):
@@ -145,5 +165,8 @@ class ScenarioListDTO:
             ),
             author_id=scenario.author.id,
             author_name=str(scenario.author),
+            include_base_tariff_decisions=bool(
+                scenario.include_base_tariff_decisions,
+            ),
         )
 

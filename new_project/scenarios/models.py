@@ -47,6 +47,10 @@ class Scenario(models.Model):
         choices=ExportPriceMode.choices,
         default=ExportPriceMode.FIXED,
     )
+    include_base_tariff_decisions = models.BooleanField(
+        "Учитывать базовые тарифные решения",
+        default=True,
+    )
 
     class Meta:
         verbose_name = "Сценарий"

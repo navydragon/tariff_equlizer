@@ -89,6 +89,8 @@ class TariffLoadService:
 
     def _load_base_coefficients(self, scenario: Scenario) -> dict[int, Decimal]:
         years = list(range(scenario.start_year, scenario.end_year + 1))
+        if not getattr(scenario, "include_base_tariff_decisions", True):
+            return {year: Decimal("1") for year in years}
         categories = list(self.category_repository.list_by_scenario(scenario.id))
         values = list(self.value_repository.list_by_scenario(scenario.id))
         value_map: dict[tuple[int, int], str] = {

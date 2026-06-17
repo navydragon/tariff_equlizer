@@ -65,6 +65,7 @@ class ScenarioRepository:
             exchange_rate_set=source.exchange_rate_set,
             inflation_set=source.inflation_set,
             export_price_mode=source.export_price_mode,
+            include_base_tariff_decisions=source.include_base_tariff_decisions,
             author=new_author,
         )
         PriceChangeSettingRepository().copy_from_scenario(source_id, new_scenario)

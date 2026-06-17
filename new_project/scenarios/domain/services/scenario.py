@@ -133,6 +133,8 @@ class ScenarioService:
             update_data["start_year"] = dto.start_year
         if dto.end_year is not None:
             update_data["end_year"] = dto.end_year
+        if dto.include_base_tariff_decisions is not None:
+            update_data["include_base_tariff_decisions"] = dto.include_base_tariff_decisions
 
         route_set, errors = self._get_route_set(dto.route_set_id)
         if errors:

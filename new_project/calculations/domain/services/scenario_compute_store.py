@@ -112,9 +112,25 @@ def _load_rule_by_year(cache_dir: Path, data) -> np.ndarray | None:
 
 def _write_metadata(cache_dir: Path, metadata: dict) -> None:
     meta_path = cache_dir / METADATA_FILENAME
-    tmp_meta = cache_dir / (METADATA_FILENAME + ".tmp")
-    tmp_meta.write_text(json.dumps(metadata, ensure_ascii=False), encoding="utf-8")
-    _atomic_replace(tmp_meta, meta_path)
+    # На Windows в тестах/параллельных warm-потоках возможно удаление cache_dir
+    # между записью tmp и replace (purge/cleanup). Поэтому делаем запись+replace
+    # с повторной генерацией tmp-файла при ретраях.
+    last_error: OSError | None = None
+    for attempt in range(12):
+        try:
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            tmp_meta = cache_dir / (METADATA_FILENAME + f".tmp.{attempt}")
+            tmp_meta.write_text(
+                json.dumps(metadata, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            _atomic_replace(tmp_meta, meta_path, max_attempts=1)
+            return
+        except OSError as exc:
+            last_error = exc
+            time.sleep(0.05 * (attempt + 1))
+    if last_error is not None:
+        raise last_error
 
 
 def _remove_compact_sidecars(

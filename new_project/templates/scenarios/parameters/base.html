@@ -16,39 +16,62 @@
     display: block;
   }
 </style>
-<div class="card" id="btdCategoriesCard" data-scenario-id="{{ scenario.id }}">
-  <div class="card-header d-flex justify-content-between align-items-center">
-    <h3 class="card-title mb-0">Базовые тарифные решения</h3>
-    <button type="button" class="btn btn-primary btn-sm" id="btdAddCategoryBtn">
-      <i class="ti ti-plus"></i>
-      Добавить категорию
-    </button>
+<div
+  id="btdToggleCard"
+  data-scenario-id="{{ scenario.id }}"
+  data-update-url="{% url 'scenarios:api_update' scenario.id %}"
+>
+  <div class="mb-3">
+    <label class="form-check form-switch">
+      <input
+        class="form-check-input"
+        type="checkbox"
+        id="btdIncludeToggle"
+        {% if scenario.include_base_tariff_decisions %}checked{% endif %}
+      />
+      <span class="form-check-label">Учитывать базовые тарифные решения</span>
+    </label>
+    <small class="form-hint">
+      Если выключить — базовые тарифные решения не будут учитываться в расчетах.
+    </small>
   </div>
-  <div class="card-body">
-    <div id="btdCategoriesErrors"></div>
 
-    {# Матрица значений категорий по годам сценария #}
-    <div class="mt-4" id="btdValuesCard" data-scenario-id="{{ scenario.id }}">
-      <h4 class="mb-3">Значения базовых тарифных решений по годам</h4>
-      <div id="btdValuesErrors"></div>
-
-      <div class="table-responsive" id="btdValuesTableWrapper" style="overflow-x: auto; overflow-y: visible;">
-        <table class="table table-vcenter" id="btdValuesTable">
-          <thead>
-            <tr id="btdValuesHeaderRow">
-              <th class="w-1" style="width: 1px;"></th>
-              <th style="min-width: 220px;">Наименование</th>
-              {# Годы будут добавлены через JS #}
-            </tr>
-          </thead>
-          <tbody id="btdValuesTableBody">
-            {# Строки категорий и ячейки значений будут загружаться через JS #}
-          </tbody>
-        </table>
+  <div id="btdUiContainer">
+    <div class="card" id="btdCategoriesCard" data-scenario-id="{{ scenario.id }}">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <h3 class="card-title mb-0">Базовые тарифные решения</h3>
+        <button type="button" class="btn btn-primary btn-sm" id="btdAddCategoryBtn">
+          <i class="ti ti-plus"></i>
+          Добавить категорию
+        </button>
       </div>
-      <small class="form-hint">
-        Нажмите по ячейке, чтобы отредактировать значение. Годы берутся из диапазона сценария.
-      </small>
+      <div class="card-body">
+        <div id="btdCategoriesErrors"></div>
+
+        {# Матрица значений категорий по годам сценария #}
+        <div class="mt-4" id="btdValuesCard" data-scenario-id="{{ scenario.id }}">
+          <h4 class="mb-3">Значения базовых тарифных решений по годам</h4>
+          <div id="btdValuesErrors"></div>
+
+          <div class="table-responsive" id="btdValuesTableWrapper" style="overflow-x: auto; overflow-y: visible;">
+            <table class="table table-vcenter" id="btdValuesTable">
+              <thead>
+                <tr id="btdValuesHeaderRow">
+                  <th class="w-1" style="width: 1px;"></th>
+                  <th style="min-width: 220px;">Наименование</th>
+                  {# Годы будут добавлены через JS #}
+                </tr>
+              </thead>
+              <tbody id="btdValuesTableBody">
+                {# Строки категорий и ячейки значений будут загружаться через JS #}
+              </tbody>
+            </table>
+          </div>
+          <small class="form-hint">
+            Нажмите по ячейке, чтобы отредактировать значение. Годы берутся из диапазона сценария.
+          </small>
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -130,6 +153,124 @@
 </div>
 
 <script>
+(function() {
+  const toggleCard = document.getElementById('btdToggleCard');
+  if (!toggleCard) return;
+
+  const scenarioId = toggleCard.dataset.scenarioId;
+  const updateUrl = toggleCard.dataset.updateUrl;
+  const toggle = document.getElementById('btdIncludeToggle');
+  const uiContainer = document.getElementById('btdUiContainer');
+
+  function getCookie(name) {
+    let cookieValue = null;
+    if (document.cookie && document.cookie !== '') {
+      const cookies = document.cookie.split(';');
+      for (let i = 0; i < cookies.length; i++) {
+        const cookie = cookies[i].trim();
+        if (cookie.substring(0, name.length + 1) === (name + '=')) {
+          cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+          break;
+        }
+      }
+    }
+    return cookieValue;
+  }
+
+  function showToast(type, message) {
+    let toastElement;
+    if (type === 'success') {
+      toastElement = document.getElementById('toastSuccess');
+      const timeElement = document.getElementById('toastSuccessTime');
+      if (timeElement) {
+        const now = new Date();
+        const dateStr = now.toLocaleDateString('ru-RU', {
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric'
+        });
+        const timeStr = now.toLocaleTimeString('ru-RU', {
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit'
+        });
+        timeElement.textContent = dateStr + ' ' + timeStr;
+      }
+    } else {
+      toastElement = document.getElementById('toastError');
+      const toastBody = document.getElementById('toastErrorBody');
+      if (toastBody) {
+        toastBody.innerHTML = message;
+      }
+    }
+
+    if (toastElement && typeof bootstrap !== 'undefined') {
+      const toast = new bootstrap.Toast(toastElement, {
+        autohide: true,
+        delay: 5000
+      });
+      toast.show();
+    }
+  }
+
+  function setUiVisible(visible) {
+    if (!uiContainer) return;
+    uiContainer.style.display = visible ? '' : 'none';
+  }
+
+  function initialState() {
+    const checked = !!(toggle && toggle.checked);
+    setUiVisible(checked);
+  }
+
+  async function persistToggle(checked) {
+    if (!updateUrl) throw new Error('updateUrl is missing');
+
+    const response = await fetch(updateUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': getCookie('csrftoken'),
+      },
+      body: JSON.stringify({
+        include_base_tariff_decisions: !!checked,
+      }),
+    });
+    return await response.json();
+  }
+
+  initialState();
+
+  if (toggle) {
+    toggle.addEventListener('change', async function() {
+      const checked = !!toggle.checked;
+      toggle.disabled = true;
+      try {
+        const data = await persistToggle(checked);
+        if (!data || !data.success) {
+          const messages = (data && (data.errors || data.error)) || 'Ошибка сохранения';
+          showToast('error', Array.isArray(messages) ? messages.join('<br>') : messages);
+          toggle.checked = !checked;
+          return;
+        }
+
+        setUiVisible(checked);
+        showToast('success', checked ? 'Базовые тарифные решения включены' : 'Базовые тарифные решения выключены');
+
+        if (checked) {
+          window.dispatchEvent(new CustomEvent('btd-toggle-enabled', { detail: { scenarioId: parseInt(scenarioId, 10) } }));
+        }
+      } catch (e) {
+        console.error('Ошибка сохранения флага BTD:', e);
+        showToast('error', 'Ошибка сохранения');
+        toggle.checked = !checked;
+      } finally {
+        toggle.disabled = false;
+      }
+    });
+  }
+})();
+
 (function() {
   const card = document.getElementById('btdCategoriesCard');
   if (!card) return;
@@ -787,9 +928,20 @@
   });
 
   // Загружаем матрицу при открытии страницы
-  loadMatrix();
+  const toggle = document.getElementById('btdIncludeToggle');
+  const enabled = !toggle || !!toggle.checked;
+  if (enabled) {
+    loadMatrix();
+  }
 
   // Обновляем матрицу при смене порядка категорий
   window.addEventListener('btd-categories-updated', loadMatrix);
+
+  // При включении тумблера подгружаем матрицу (если UI был скрыт)
+  window.addEventListener('btd-toggle-enabled', function() {
+    const toggleNow = document.getElementById('btdIncludeToggle');
+    if (!toggleNow || !toggleNow.checked) return;
+    loadMatrix();
+  });
 })();
 </script>

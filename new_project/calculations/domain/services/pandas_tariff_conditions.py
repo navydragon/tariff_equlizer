@@ -16,6 +16,7 @@ PARAMETER_COLUMN_MAP = {
     "shipper": "shipper_id",
     "shipper_holding": "shipper_holding",
     "distance_belt": "distance_belt",
+    "special_container_type": "special_container_type",
 }
 
 _DIM_PARAMETERS = frozenset(
@@ -120,9 +121,17 @@ def _resolve_dim_compare_codes(
     if parameter == "cargo_group":
         from core.models import CargoGroup
 
+        codes: list[int] = []
+        for value in vals:
+            try:
+                codes.append(int(str(value).strip()))
+            except (TypeError, ValueError):
+                continue
+        if not codes:
+            return []
         names = list(
             CargoGroup.objects.filter(
-                code__in=[str(value) for value in vals],
+                code__in=codes,
             ).values_list("name", flat=True),
         )
         return _label_codes(names, labels)

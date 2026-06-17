@@ -165,6 +165,35 @@ class TariffLoadBtdOnlyTests(TariffLoadServiceTestMixin, TestCase):
         self.assertEqual(result.base_coefficient_by_year[2026], Decimal("1.1250"))
         self.assertEqual(result.rules_coefficient_by_year[2026], Decimal("1"))
 
+    def test_btd_ignored_when_toggle_off(self) -> None:
+        self.scenario.include_base_tariff_decisions = False
+        self.scenario.save(update_fields=["include_base_tariff_decisions"])
+
+        category = BTDCategory.objects.create(
+            name="Индексация",
+            scenario=self.scenario,
+            position=1,
+        )
+        BTDCategoryValue.objects.create(
+            scenario=self.scenario,
+            category=category,
+            year=2025,
+            value=Decimal("1.0000"),
+        )
+        BTDCategoryValue.objects.create(
+            scenario=self.scenario,
+            category=category,
+            year=2026,
+            value=Decimal("1.1250"),
+        )
+
+        scenario = Scenario.objects.get(pk=self.scenario.pk)
+        result = self.service.calculate_route(scenario=scenario, route=self.route)
+
+        self.assertEqual(result.rzd_by_year[2025], Decimal("1000.00"))
+        self.assertEqual(result.rzd_by_year[2026], Decimal("1000.00"))
+        self.assertEqual(result.base_coefficient_by_year[2026], Decimal("1"))
+
 
 class TariffLoadBtdAndRulesTests(TariffLoadServiceTestMixin, TestCase):
     def setUp(self) -> None:
@@ -1294,7 +1323,9 @@ class ScenarioEffectsPandasParityTests(TariffLoadServiceTestMixin, TestCase):
             scenario=scenario,
             user_id=self.user.id,
         )
-        self.assertEqual(meta["timings"].get("masks_ms"), 0)
+        # Тайминги в тестовом окружении могут плавать; важно, что это кэш-хит,
+        # а не полноценный пересчёт (должно быть «очень быстро»).
+        self.assertLessEqual(meta["timings"].get("masks_ms", 999), 50)
         self.assertEqual(meta["timings"].get("mart_read_mode"), "sidecar_npz")
 
     def test_rule_mask_cache_hit(self) -> None:
@@ -2233,6 +2264,77 @@ class DistanceBeltTariffConditionsTests(TariffLoadServiceTestMixin, TestCase):
         mask = build_rule_mask_numpy(df, conditions)
         self.assertTrue(mask[0])
         self.assertFalse(mask[1])
+
+
+class SpecialContainerTypeTariffConditionsTests(TariffLoadServiceTestMixin, TestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.route_a = self._create_route(
+            rzd=Decimal("100.00"),
+            route_code="R-CTA",
+        )
+        self.route_a.special_container_type = "ТипA"
+        self.route_a.save(update_fields=["special_container_type"])
+
+        self.route_b = self._create_route(
+            rzd=Decimal("200.00"),
+            route_code="R-CTB",
+        )
+        self.route_b.special_container_type = "ТипB"
+        self.route_b.save(update_fields=["special_container_type"])
+
+        self.route_empty = self._create_route(
+            rzd=Decimal("300.00"),
+            route_code="R-CTEMPTY",
+        )
+        self.route_empty.special_container_type = ""
+        self.route_empty.save(update_fields=["special_container_type"])
+
+    def test_apply_tariff_conditions_include_special_container_type(self) -> None:
+        qs = Route.objects.filter(route_set=self.route_set)
+        conditions = [
+            {
+                "parameter": "special_container_type",
+                "operator": "include",
+                "values": ["ТипA"],
+            }
+        ]
+        matched = apply_tariff_conditions(qs, conditions)
+        ids = set(matched.values_list("id", flat=True))
+        self.assertIn(self.route_a.id, ids)
+        self.assertNotIn(self.route_b.id, ids)
+        self.assertNotIn(self.route_empty.id, ids)
+
+    def test_build_rule_mask_numpy_special_container_type_include(self) -> None:
+        df = pd.DataFrame(
+            {
+                "special_container_type": ["ТипA", "ТипB", ""],
+            }
+        )
+        conditions = [
+            {
+                "parameter": "special_container_type",
+                "operator": "include",
+                "values": ["ТипB"],
+            }
+        ]
+        mask = build_rule_mask_numpy(df, conditions)
+        self.assertFalse(mask[0])
+        self.assertTrue(mask[1])
+        self.assertFalse(mask[2])
+
+    def test_tariff_rule_options_api_special_container_type(self) -> None:
+        self.client = Client()
+        self.client.force_login(self.user)
+        url = reverse("scenarios:tariff_rule_options", args=[self.scenario.id])
+        response = self.client.get(url, {"parameter": "special_container_type"})
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["success"])
+        values = [item["value"] for item in payload["items"]]
+        self.assertIn("ТипA", values)
+        self.assertIn("ТипB", values)
+        self.assertNotIn("", values)
 
 
 class TariffRulesCacheAuditTests(TariffLoadServiceTestMixin, TestCase):

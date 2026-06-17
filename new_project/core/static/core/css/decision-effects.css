@@ -9,26 +9,22 @@
 
 .decision-effects-kpi-grid {
   --decision-effects-kpi-accent: #063971;
+  --decision-effects-base-color: #003256;
+  --decision-effects-rules-color: #4b8bc7;
   --decision-effects-kpi-shadow:
     0 7px 14px 0 rgba(65, 69, 88, 0.1),
     0 3px 6px 0 rgba(0, 0, 0, 0.07);
   width: 100%;
-  margin-top: 2.5rem;
+  margin-top: 1.5rem;
   display: grid;
-  gap: 2.5rem;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-@media (max-width: 1199.98px) {
-  .decision-effects-kpi-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
+  gap: 1.25rem;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
 }
 
 @media (max-width: 767.98px) {
   .decision-effects-kpi-grid {
     grid-template-columns: 1fr;
-    gap: 2rem;
+    gap: 1rem;
   }
 }
 
@@ -37,25 +33,25 @@
   box-sizing: border-box;
   width: 100%;
   margin: 0;
-  padding: 1.5rem 1.25rem 1.25rem;
-  display: flex;
+  padding: 1rem 1rem 0.9rem;
+  display: block;
   background-color: #fff;
   border-radius: 16px;
   box-shadow: var(--decision-effects-kpi-shadow);
+  border: 1px solid rgba(15, 23, 42, 0.06);
 }
 
 .decision-effects-kpi-card__year {
-  position: absolute;
-  top: -1rem;
-  left: 1.25rem;
-  margin: 0;
-  padding: 0.25rem 1rem;
-  border-radius: 1rem;
-  background-color: var(--decision-effects-kpi-accent);
-  color: #fff;
-  font-size: 1rem;
+  display: inline-flex;
+  align-items: center;
+  margin: 0 0 0.75rem;
+  padding: 0.15rem 0.65rem;
+  border-radius: 999px;
+  background: rgba(6, 57, 113, 0.1);
+  color: #063971;
+  font-size: 0.875rem;
   font-weight: 700;
-  line-height: 1.25;
+  line-height: 1.2;
   white-space: nowrap;
 }
 
@@ -63,8 +59,9 @@
   width: 100%;
   margin: 0;
   display: flex;
-  align-items: center;
-  gap: 1.5rem;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.85rem;
 }
 
 .decision-effects-kpi-card__info {
@@ -81,12 +78,22 @@
   align-items: flex-end;
 }
 
+.decision-effects-kpi-card__count .decision-effects-kpi-card__total-caption-pct {
+  margin: 0 0 0 auto;
+  padding-left: 0.75rem;
+  font-size: 0.95rem;
+  line-height: 1.25;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
 .decision-effects-kpi-card__total-value {
   margin: 0;
   color: #000;
-  font-size: 2.5rem;
-  line-height: 2.75rem;
+  font-size: clamp(1.7rem, 2.2vw, 2.2rem);
+  line-height: 1.1;
   font-weight: 700;
+  letter-spacing: -0.02em;
 }
 
 .decision-effects-kpi-card__total-unit {
@@ -99,8 +106,8 @@
 
 .decision-effects-kpi-card__total-caption {
   margin: 0.25rem 0 0;
-  font-size: 1rem;
-  line-height: 1.25rem;
+  font-size: 0.95rem;
+  line-height: 1.25;
   font-weight: 400;
   color: #2d3748;
 }
@@ -109,19 +116,41 @@
   color: #6b7280;
 }
 
+.decision-effects-kpi-card__total-caption-pct.is-positive {
+  color: #059669;
+  font-weight: 600;
+}
+
 .decision-effects-kpi-card__split {
   margin: 0;
   width: 100%;
   min-width: 0;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.6rem;
 }
 
 .decision-effects-kpi-card__split-item {
-  margin: 0 0 0.75rem;
+  margin: 0;
   width: 100%;
   display: flex;
   flex-direction: column;
+  padding: 0.5rem 0.6rem;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.03);
+  border-top: 4px solid transparent;
+}
+
+.decision-effects-kpi-card__split-item.is-base {
+  border-top-color: var(--decision-effects-base-color);
+}
+
+.decision-effects-kpi-card__split-item.is-rules {
+  border-top-color: var(--decision-effects-rules-color);
+}
+
+.decision-effects-kpi-card__split-item:only-child {
+  grid-column: 1 / -1;
 }
 
 .decision-effects-kpi-card__split-item:last-child {
@@ -131,9 +160,10 @@
 .decision-effects-kpi-card__split-value {
   margin: 0;
   color: #000;
-  font-size: 1.75rem;
-  line-height: 2rem;
+  font-size: 1.2rem;
+  line-height: 1.2;
   font-weight: 700;
+  letter-spacing: -0.01em;
 }
 
 .decision-effects-kpi-card__split-unit {
@@ -154,19 +184,27 @@
 
 .decision-effects-kpi-card__split-label {
   margin: 0;
-  font-size: 1rem;
-  line-height: 1.25rem;
+  font-size: 0.9rem;
+  line-height: 1.2;
   font-weight: 400;
   color: #2d3748;
+  display: block;
 }
 
 .decision-effects-kpi-card__split-pct {
-  margin: 0;
-  font-size: 1rem;
-  line-height: 1.25rem;
+  margin: 0.25rem 0 0;
+  font-size: 0.9rem;
+  line-height: 1.2;
   font-weight: 400;
   color: #02c94f;
 }
+
+@media (max-width: 767.98px) {
+  .decision-effects-kpi-card__split {
+    grid-template-columns: 1fr;
+  }
+}
+
 
 .decision-effects-table-wrap {
   max-height: 480px;

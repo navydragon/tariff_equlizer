@@ -20,6 +20,7 @@ import { renderErrors } from "../lib/errors.js";
     { code: "shipper", label: "Грузоотправитель", type: "choice" },
     { code: "shipper_holding", label: "Холдинг грузоотправителя", type: "choice" },
     { code: "distance_belt", label: "Пояс дальности", type: "choice" },
+    { code: "special_container_type", label: "Вид спец. контейнера", type: "choice" },
   ];
 
   const OPERATORS = [
@@ -28,6 +29,10 @@ import { renderErrors } from "../lib/errors.js";
     { code: "lt", label: "<" },
     { code: "gt", label: ">" },
   ];
+
+  const PARAMETER_ALLOWED_OPERATORS = {
+    special_container_type: ["include", "exclude"],
+  };
 
   function buildUrl(template, id) {
     return String(template || "").replace("/0/", "/" + String(id) + "/");
@@ -394,7 +399,7 @@ import { renderErrors } from "../lib/errors.js";
       const values = condition ? condition.values : null;
 
       if (parameter) parameterSelect.value = parameter;
-      operatorSelect.value = operator;
+      this.applyOperatorRestrictions(row, parameter, operator);
 
       await this.renderConditionValueEditor(row, parameter, operator, values);
     }
@@ -408,7 +413,9 @@ import { renderErrors } from "../lib/errors.js";
     async onConditionParameterChange(row) {
       const parameter = row.querySelector("[data-condition-parameter]").value;
       const operator = row.querySelector("[data-condition-operator]").value;
-      await this.renderConditionValueEditor(row, parameter, operator, null);
+      const resolved = this.applyOperatorRestrictions(row, parameter, operator);
+      const nextOperator = resolved || operator;
+      await this.renderConditionValueEditor(row, parameter, nextOperator, null);
     }
 
     async onConditionOperatorChange(row) {
@@ -416,6 +423,27 @@ import { renderErrors } from "../lib/errors.js";
       const operator = row.querySelector("[data-condition-operator]").value;
       const currentValues = this.readConditionValues(row, parameter, operator);
       await this.renderConditionValueEditor(row, parameter, operator, currentValues);
+    }
+
+    applyOperatorRestrictions(row, parameter, preferredOperator) {
+      const operatorSelect = row.querySelector("[data-condition-operator]");
+      if (!operatorSelect) return null;
+
+      const allowed = PARAMETER_ALLOWED_OPERATORS[parameter] || null;
+      const current = preferredOperator || operatorSelect.value || "include";
+
+      const nextAllowed = allowed || OPERATORS.map((o) => o.code);
+      operatorSelect.innerHTML = nextAllowed
+        .map((code) => {
+          const meta = OPERATORS.find((o) => o.code === code);
+          const label = meta ? meta.label : code;
+          return `<option value="${code}">${escapeHtml(label)}</option>`;
+        })
+        .join("");
+
+      const resolved = nextAllowed.includes(current) ? current : nextAllowed[0] || "include";
+      operatorSelect.value = resolved;
+      return resolved;
     }
 
     async loadOptions(parameter) {

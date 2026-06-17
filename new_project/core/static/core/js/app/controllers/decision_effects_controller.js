@@ -797,11 +797,29 @@ import { clearToasts, showToast } from "../lib/toast.js";
         return;
       }
 
+      const selectedScenario = this.state.scenarioById.get(
+        this.state.selectedScenarioId,
+      );
+      const includeBase =
+        selectedScenario == null
+          ? true
+          : selectedScenario.include_base_tariff_decisions !== false;
+
       this.kpiCardsTarget.innerHTML = cards
         .map((card) => {
           const totalPct = this._formatPct(card.total_pct);
           const basePct = this._formatPct(card.base_pct);
           const rulesPct = this._formatPct(card.rules_pct);
+          const totalPctNum = Number(String(card.total_pct).replace(",", "."));
+          const totalPctPositive = Number.isFinite(totalPctNum) && totalPctNum > 0;
+
+          const baseBlnNum = Number(String(card.base_bln).replace(",", "."));
+          const rulesBlnNum = Number(String(card.rules_bln).replace(",", "."));
+          const showBaseSplit =
+            includeBase && Number.isFinite(baseBlnNum) && baseBlnNum > 0;
+          const showRulesSplit =
+            includeBase && Number.isFinite(rulesBlnNum) && rulesBlnNum > 0;
+          const showSplit = showBaseSplit || showRulesSplit;
           return `
             <article class="decision-effects-kpi-card">
               <div class="decision-effects-kpi-card__year">${escapeHtml(String(card.year))} год</div>
@@ -810,33 +828,39 @@ import { clearToasts, showToast } from "../lib/toast.js";
                   <div class="decision-effects-kpi-card__count">
                     <span class="decision-effects-kpi-card__total-value">${escapeHtml(card.total_bln)}</span>
                     <span class="decision-effects-kpi-card__total-unit">млрд</span>
+                    <span class="decision-effects-kpi-card__total-caption-pct ${totalPctPositive ? "is-positive" : ""}">(${totalPctPositive ? "+" : ""}${escapeHtml(totalPct)}%)</span>
                   </div>
-                  <p class="decision-effects-kpi-card__total-caption">
-                    Индексация<span class="decision-effects-kpi-card__total-caption-pct"> (${escapeHtml(totalPct)}%)</span>
-                  </p>
                 </div>
-                <div class="decision-effects-kpi-card__split">
-                  <div class="decision-effects-kpi-card__split-item">
+                ${
+                  showSplit
+                    ? `<div class="decision-effects-kpi-card__split">
+                  ${
+                    showBaseSplit
+                      ? `<div class="decision-effects-kpi-card__split-item is-base">
+                    <span class="decision-effects-kpi-card__split-label">Базовые решения</span>
                     <div class="decision-effects-kpi-card__count">
                       <span class="decision-effects-kpi-card__split-value">${escapeHtml(card.base_bln)}</span>
                       <span class="decision-effects-kpi-card__split-unit">млрд</span>
                     </div>
-                    <div class="decision-effects-kpi-card__split-meta">
-                      <span class="decision-effects-kpi-card__split-label">Базовые решения</span>
-                      <span class="decision-effects-kpi-card__split-pct">(+${escapeHtml(basePct)}%)</span>
-                    </div>
-                  </div>
-                  <div class="decision-effects-kpi-card__split-item">
+                    <span class="decision-effects-kpi-card__split-pct">(+${escapeHtml(basePct)}%)</span>
+                  </div>`
+                      : ""
+                  }
+                  ${
+                    showRulesSplit
+                      ? `<div class="decision-effects-kpi-card__split-item is-rules">
+                    <span class="decision-effects-kpi-card__split-label">Отдельные решения</span>
                     <div class="decision-effects-kpi-card__count">
                       <span class="decision-effects-kpi-card__split-value">${escapeHtml(card.rules_bln)}</span>
                       <span class="decision-effects-kpi-card__split-unit">млрд</span>
                     </div>
-                    <div class="decision-effects-kpi-card__split-meta">
-                      <span class="decision-effects-kpi-card__split-label">Отдельные решения</span>
-                      <span class="decision-effects-kpi-card__split-pct">(+${escapeHtml(rulesPct)}%)</span>
-                    </div>
-                  </div>
-                </div>
+                    <span class="decision-effects-kpi-card__split-pct">(+${escapeHtml(rulesPct)}%)</span>
+                  </div>`
+                      : ""
+                  }
+                </div>`
+                    : ""
+                }
               </div>
             </article>          `;
         })

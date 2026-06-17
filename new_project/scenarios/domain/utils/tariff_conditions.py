@@ -14,6 +14,7 @@ FIELD_MAP = {
     "shipper": "shipper_id",
     "shipper_holding": "shipper__holding",
     "distance_belt": "distance_belt",
+    "special_container_type": "special_container_type",
 }
 
 
@@ -59,7 +60,10 @@ def apply_tariff_conditions(qs, conditions: list[dict]):
     return filtered
 
 
-def route_matches_tariff_conditions(route: Route, conditions: list[dict]) -> bool:
+def route_matches_tariff_conditions(
+    route: Route,
+    conditions: list[dict],
+) -> bool:
     if not conditions:
         return True
     qs = Route.objects.filter(pk=route.pk)

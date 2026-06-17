@@ -63,6 +63,7 @@ def scenario_list_api(request):
                 "route_set_name": s.route_set_name,
                 "author_id": s.author_id,
                 "author_name": s.author_name,
+                "include_base_tariff_decisions": s.include_base_tariff_decisions,
             }
             for s in scenarios
         ]
@@ -156,6 +157,7 @@ def scenario_update_api(request, scenario_id):
         exchange_rate_set_id=data.get("exchange_rate_set_id"),
         price_change_settings=data.get("price_change_settings"),
         export_price_mode=data.get("export_price_mode"),
+        include_base_tariff_decisions=data.get("include_base_tariff_decisions"),
     )
     
     service = ScenarioService()
@@ -180,6 +182,7 @@ def scenario_update_api(request, scenario_id):
             "inflation_set_name": scenario.inflation_set_name,
             "price_change_settings": scenario.price_change_settings,
             "export_price_mode": scenario.export_price_mode,
+            "include_base_tariff_decisions": scenario.include_base_tariff_decisions,
             "author_id": scenario.author_id,
             "author_name": scenario.author_name,
         }
@@ -490,6 +493,14 @@ def tariff_rule_options_api(request, scenario_id):
             .values_list("distance_belt", flat=True)
             .distinct()
             .order_by("distance_belt")
+        )
+        items = [{"value": v, "text": v} for v in rows]
+    elif parameter == "special_container_type":
+        rows = (
+            qs.exclude(special_container_type="")
+            .values_list("special_container_type", flat=True)
+            .distinct()
+            .order_by("special_container_type")
         )
         items = [{"value": v, "text": v} for v in rows]
     else:
