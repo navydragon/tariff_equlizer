@@ -2431,6 +2431,210 @@ class SpecialContainerTypeTariffConditionsTests(TariffLoadServiceTestMixin, Test
         self.assertNotIn("", values)
 
 
+class ShipmentCategoryTariffConditionsTests(TariffLoadServiceTestMixin, TestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.route_loaded = self._create_route(
+            rzd=Decimal("100.00"),
+            route_code="R-SC-LOADED",
+        )
+        self.route_loaded.shipment_category = "груженые"
+        self.route_loaded.save(update_fields=["shipment_category"])
+
+        self.route_empty_wagon = self._create_route(
+            rzd=Decimal("200.00"),
+            route_code="R-SC-EMPTY",
+        )
+        self.route_empty_wagon.shipment_category = "порожние"
+        self.route_empty_wagon.save(update_fields=["shipment_category"])
+
+        self.route_blank = self._create_route(
+            rzd=Decimal("300.00"),
+            route_code="R-SC-BLANK",
+        )
+        self.route_blank.shipment_category = ""
+        self.route_blank.save(update_fields=["shipment_category"])
+
+    def test_apply_tariff_conditions_include_shipment_category(self) -> None:
+        qs = Route.objects.filter(route_set=self.route_set)
+        conditions = [
+            {
+                "parameter": "shipment_category",
+                "operator": "include",
+                "values": ["груженые"],
+            }
+        ]
+        matched = apply_tariff_conditions(qs, conditions)
+        ids = set(matched.values_list("id", flat=True))
+        self.assertIn(self.route_loaded.id, ids)
+        self.assertNotIn(self.route_empty_wagon.id, ids)
+        self.assertNotIn(self.route_blank.id, ids)
+
+    def test_apply_tariff_conditions_include_shipment_category_empty_normalized(
+        self,
+    ) -> None:
+        qs = Route.objects.filter(route_set=self.route_set)
+        conditions = [
+            {
+                "parameter": "shipment_category",
+                "operator": "include",
+                "values": ["—"],
+            }
+        ]
+        matched = apply_tariff_conditions(qs, conditions)
+        ids = set(matched.values_list("id", flat=True))
+        self.assertIn(self.route_blank.id, ids)
+        self.assertNotIn(self.route_loaded.id, ids)
+
+    def test_build_rule_mask_numpy_shipment_category_via_dim_and_mart_meta(self) -> None:
+        from calculations.domain.services.route_mart_store import MartMeta
+
+        mart_meta = MartMeta(
+            dimension_labels={
+                "shipment_category": ["груженые", "порожние", "—"],
+            },
+        )
+        df = pd.DataFrame(
+            {
+                "dim_shipment_category": [0, 1, 2],
+            },
+        )
+        conditions = [
+            {
+                "parameter": "shipment_category",
+                "operator": "include",
+                "values": ["порожние"],
+            }
+        ]
+        mask = build_rule_mask_numpy(df, conditions, mart_meta=mart_meta)
+        self.assertFalse(mask[0])
+        self.assertTrue(mask[1])
+        self.assertFalse(mask[2])
+
+    def test_tariff_rule_options_api_shipment_category(self) -> None:
+        self.client = Client()
+        self.client.force_login(self.user)
+        url = reverse("scenarios:tariff_rule_options", args=[self.scenario.id])
+        response = self.client.get(url, {"parameter": "shipment_category"})
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["success"])
+        values = [item["value"] for item in payload["items"]]
+        self.assertIn("груженые", values)
+        self.assertIn("порожние", values)
+        self.assertNotIn("", values)
+
+    def test_data_version_changes_when_shipment_category_condition_added(self) -> None:
+        from calculations.domain.services.scenario_effects_cache import (
+            compute_scenario_data_version,
+        )
+        from scenarios.domain.dto import CreateTariffRuleDTO, UpdateTariffRuleDTO
+        from scenarios.domain.services import TariffRuleService
+
+        dto = CreateTariffRuleDTO(
+            scenario_id=self.scenario.id,
+            name="Before shipment filter",
+            base_percent="100",
+            position=1,
+            conditions=[],
+            year_values={"2026": "1.0500"},
+        )
+        rule, errors = TariffRuleService().create_rule(dto, self.user)
+        self.assertFalse(errors)
+        assert rule is not None
+
+        scenario = Scenario.objects.select_related("route_set").get(pk=self.scenario.pk)
+        context = self.service.build_scenario_context(scenario)
+        before = compute_scenario_data_version(
+            scenario=scenario,
+            base_coef_by_year=context.base_coef_by_year,
+            rules=context.rules,
+        )
+
+        updated, errors = TariffRuleService().update_rule(
+            rule.id,
+            UpdateTariffRuleDTO(
+                conditions=[
+                    {
+                        "position": 0,
+                        "parameter": "shipment_category",
+                        "operator": "include",
+                        "values": ["груженые"],
+                    }
+                ],
+            ),
+            self.user,
+        )
+        self.assertFalse(errors)
+        self.assertIsNotNone(updated)
+
+        scenario = Scenario.objects.select_related("route_set").get(pk=self.scenario.pk)
+        context = self.service.build_scenario_context(scenario)
+        after = compute_scenario_data_version(
+            scenario=scenario,
+            base_coef_by_year=context.base_coef_by_year,
+            rules=context.rules,
+        )
+        self.assertNotEqual(before, after)
+
+    def test_rule_mask_cache_hit_shipment_category(self) -> None:
+        from calculations.domain.services.route_effects_loader import (
+            fetch_routes_dataframe_cached_timed,
+        )
+        from calculations.domain.services.route_mask_cache import (
+            build_or_load_rule_mask,
+            try_load_rule_mask,
+        )
+
+        scenario = Scenario.objects.select_related("route_set").get(pk=self.scenario.pk)
+        rule = TariffRule.objects.create(
+            scenario=scenario,
+            name="Shipment category mask rule",
+            base_percent=Decimal("100"),
+            position=1,
+        )
+        TariffRuleCondition.objects.create(
+            tariff_rule=rule,
+            position=0,
+            parameter="shipment_category",
+            operator="include",
+            values=["груженые"],
+        )
+        TariffRuleYearValue.objects.create(
+            tariff_rule=rule,
+            year=2026,
+            coefficient=Decimal("1.0500"),
+        )
+
+        df, mart_meta, _timings = fetch_routes_dataframe_cached_timed(
+            scenario.route_set_id,
+        )
+        conditions = [
+            {
+                "position": 0,
+                "parameter": "shipment_category",
+                "operator": "include",
+                "values": ["груженые"],
+            }
+        ]
+
+        build_or_load_rule_mask(
+            route_set_id=scenario.route_set_id,
+            rule_id=rule.id,
+            conditions=conditions,
+            df=df,
+            mart_meta=mart_meta,
+        )
+        cached = try_load_rule_mask(
+            route_set_id=scenario.route_set_id,
+            rule_id=rule.id,
+            conditions=conditions,
+            n_routes=len(df),
+        )
+        self.assertIsNotNone(cached)
+        self.assertEqual(cached.shape, (len(df),))
+
+
 class TariffRulesCacheAuditTests(TariffLoadServiceTestMixin, TestCase):
     def setUp(self) -> None:
         super().setUp()

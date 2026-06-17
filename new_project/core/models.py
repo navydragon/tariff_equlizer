@@ -483,6 +483,24 @@ class Route(models.Model):
         blank=True,
         default="",
     )
+    cargo_group_izpod = models.CharField(
+        "Группа груза (изпод)",
+        max_length=255,
+        blank=True,
+        default="",
+    )
+    cargo_code_3 = models.CharField(
+        "Код груза 3 знака",
+        max_length=3,
+        blank=True,
+        default="",
+    )
+    cargo_code_izpod_3 = models.CharField(
+        "Код груза из-под (3 знака)",
+        max_length=3,
+        blank=True,
+        default="",
+    )
 
     distance_loaded_km = models.PositiveIntegerField(
         "Расстояние гружёный рейс, км",

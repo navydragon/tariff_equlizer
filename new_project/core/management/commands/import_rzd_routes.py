@@ -37,6 +37,7 @@ COL_SHIPMENT_CATEGORY = "Тип парка"  # в выгрузке: гружен
 COL_PARK_TYPE = "Вид спец контейнера"  # в выгрузке: универсальный, …
 COL_DISTANCE_BELT = "Пояс дальности по 10_01"
 COL_CARGO_GROUP_CMTP = "Группа груза (ЦМТП)"
+COL_CARGO_GROUP_IZPOD = "Группа груза(изпод)"
 COL_CARGO_CODE_IZPOD = "Код груза(изпод)"
 COL_OKPO = "ОКПО_компании_отпр"
 COL_INN = "ИНН_компании"
@@ -62,6 +63,7 @@ SELECT_SQL = f"""
         [{COL_PARK_TYPE}],
         [{COL_DISTANCE_BELT}],
         [{COL_CARGO_GROUP_CMTP}],
+        [{COL_CARGO_GROUP_IZPOD}],
         [{COL_CARGO_CODE_IZPOD}],
         [{COL_OKPO}],
         [{COL_INN}],
@@ -100,6 +102,12 @@ def _normalize_inn(value: Any) -> str:
 def _is_missing_ref(value: str) -> bool:
     v = (value or "").strip()
     return not v or v in ("-", "0")
+
+
+def _first_three_chars(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()[:3]
 
 
 def _parse_decimal(value: Any) -> Optional[Decimal]:
@@ -622,6 +630,9 @@ class Command(BaseCommand):
 
         izpod_raw = row[COL_CARGO_CODE_IZPOD]
         cargo_code_izpod = "" if izpod_raw is None else str(izpod_raw).strip()
+        cargo_group_izpod = (row[COL_CARGO_GROUP_IZPOD] or "").strip()
+        cargo_code_3 = _first_three_chars(row[COL_CARGO_CODE])
+        cargo_code_izpod_3 = _first_three_chars(izpod_raw)
 
         from core.domain.distance_belt import parse_distance_belt_midpoint
 
@@ -646,6 +657,9 @@ class Command(BaseCommand):
             # «Вид спец контейнера» = универсальный/… → park_type и special_container_type.
             cargo_group_cmtp=(row[COL_CARGO_GROUP_CMTP] or "").strip(),
             cargo_code_izpod=cargo_code_izpod,
+            cargo_group_izpod=cargo_group_izpod,
+            cargo_code_3=cargo_code_3,
+            cargo_code_izpod_3=cargo_code_izpod_3,
             transport_volume_tons=volume,
             freight_turnover_tkm=turnover,
             freight_charge_rub=charge,

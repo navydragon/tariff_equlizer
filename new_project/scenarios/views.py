@@ -495,6 +495,14 @@ def tariff_rule_options_api(request, scenario_id):
             .order_by("distance_belt")
         )
         items = [{"value": v, "text": v} for v in rows]
+    elif parameter == "shipment_category":
+        rows = (
+            qs.exclude(shipment_category="")
+            .values_list("shipment_category", flat=True)
+            .distinct()
+            .order_by("shipment_category")
+        )
+        items = [{"value": v, "text": v} for v in rows]
     elif parameter == "special_container_type":
         rows = (
             qs.exclude(special_container_type="")

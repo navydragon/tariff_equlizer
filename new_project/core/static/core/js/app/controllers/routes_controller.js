@@ -1033,6 +1033,14 @@ import {
         it.freight_turnover_tkm ?? "";
       document.getElementById("routeFreightChargeRub").value =
         it.freight_charge_rub ?? "";
+      document.getElementById("routeCargoCodeIzpod").value =
+        it.cargo_code_izpod || "";
+      document.getElementById("routeCargoGroupIzpod").value =
+        it.cargo_group_izpod || "";
+      document.getElementById("routeCargoCode3").value =
+        it.cargo_code_3 || "";
+      document.getElementById("routeCargoCodeIzpod3").value =
+        it.cargo_code_izpod_3 || "";
 
       // Заполняем summary из данных маршрута
       this.summaryState.origin = it.origin_esr_code
@@ -1159,6 +1167,18 @@ import {
         .value.trim();
       payload.freight_charge_rub = document
         .getElementById("routeFreightChargeRub")
+        .value.trim();
+      payload.cargo_code_izpod = document
+        .getElementById("routeCargoCodeIzpod")
+        .value.trim();
+      payload.cargo_group_izpod = document
+        .getElementById("routeCargoGroupIzpod")
+        .value.trim();
+      payload.cargo_code_3 = document
+        .getElementById("routeCargoCode3")
+        .value.trim();
+      payload.cargo_code_izpod_3 = document
+        .getElementById("routeCargoCodeIzpod3")
         .value.trim();
 
       return payload;

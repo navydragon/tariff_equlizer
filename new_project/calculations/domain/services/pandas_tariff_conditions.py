@@ -16,6 +16,7 @@ PARAMETER_COLUMN_MAP = {
     "shipper": "shipper_id",
     "shipper_holding": "shipper_holding",
     "distance_belt": "distance_belt",
+    "shipment_category": "shipment_category",
     "special_container_type": "special_container_type",
 }
 

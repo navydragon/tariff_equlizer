@@ -16,6 +16,7 @@ import { renderErrors } from "../lib/errors.js";
     { code: "destination_railroad", label: "Дорога назначения", type: "choice" },
     { code: "wagon_kind", label: "Род вагона", type: "choice" },
     { code: "shipment_type", label: "Тип отправки", type: "choice" },
+    { code: "shipment_category", label: "Тип парка", type: "choice" },
     { code: "message_type", label: "Вид сообщения", type: "choice" },
     { code: "shipper", label: "Грузоотправитель", type: "choice" },
     { code: "shipper_holding", label: "Холдинг грузоотправителя", type: "choice" },
@@ -31,6 +32,7 @@ import { renderErrors } from "../lib/errors.js";
   ];
 
   const PARAMETER_ALLOWED_OPERATORS = {
+    shipment_category: ["include", "exclude"],
     special_container_type: ["include", "exclude"],
   };
 

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from django.db.models import F, Value
+from django.db.models.functions import Coalesce, NullIf, Trim
+
 from core.models import Route
 
 
@@ -14,8 +17,11 @@ FIELD_MAP = {
     "shipper": "shipper_id",
     "shipper_holding": "shipper__holding",
     "distance_belt": "distance_belt",
+    "shipment_category": "shipment_category",
     "special_container_type": "special_container_type",
 }
+
+_NORMALIZED_STRING_PARAMETERS = frozenset({"shipment_category"})
 
 
 def _as_list(value):
@@ -24,6 +30,21 @@ def _as_list(value):
     if isinstance(value, list):
         return value
     return [value]
+
+
+def _annotate_normalized_string_field(qs, parameter: str):
+    if parameter not in _NORMALIZED_STRING_PARAMETERS:
+        return qs, parameter
+    annotation_name = f"_{parameter}_norm"
+    annotated = qs.annotate(
+        **{
+            annotation_name: Coalesce(
+                NullIf(Trim(F(parameter)), Value("")),
+                Value("—"),
+            ),
+        },
+    )
+    return annotated, annotation_name
 
 
 def apply_tariff_conditions(qs, conditions: list[dict]):
@@ -52,10 +73,17 @@ def apply_tariff_conditions(qs, conditions: list[dict]):
         if not vals:
             continue
 
+        compare_field = field
+        if parameter in _NORMALIZED_STRING_PARAMETERS:
+            filtered, compare_field = _annotate_normalized_string_field(
+                filtered,
+                parameter,
+            )
+
         if operator == "include":
-            filtered = filtered.filter(**{f"{field}__in": vals})
+            filtered = filtered.filter(**{f"{compare_field}__in": vals})
         elif operator == "exclude":
-            filtered = filtered.exclude(**{f"{field}__in": vals})
+            filtered = filtered.exclude(**{f"{compare_field}__in": vals})
 
     return filtered
 

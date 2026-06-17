@@ -101,6 +101,9 @@ class RouteDTO:
     special_container_type: str
     cargo_group_cmtp: str
     cargo_code_izpod: str
+    cargo_group_izpod: str
+    cargo_code_3: str
+    cargo_code_izpod_3: str
     cargo_code: Optional[int]
     cargo_name: str
     cargo_group_code: Optional[int]
@@ -162,6 +165,9 @@ class RouteDTO:
             special_container_type=route.special_container_type,
             cargo_group_cmtp=route.cargo_group_cmtp,
             cargo_code_izpod=route.cargo_code_izpod,
+            cargo_group_izpod=route.cargo_group_izpod,
+            cargo_code_3=route.cargo_code_3,
+            cargo_code_izpod_3=route.cargo_code_izpod_3,
             cargo_code=route.cargo.code if route.cargo_id else None,
             cargo_name=route.cargo.name if route.cargo_id else "",
             cargo_group_code=route.cargo.cargo_group.code
@@ -285,6 +291,9 @@ class RouteDTO:
             "special_container_type": self.special_container_type,
             "cargo_group_cmtp": self.cargo_group_cmtp,
             "cargo_code_izpod": self.cargo_code_izpod,
+            "cargo_group_izpod": self.cargo_group_izpod,
+            "cargo_code_3": self.cargo_code_3,
+            "cargo_code_izpod_3": self.cargo_code_izpod_3,
             "cargo_code": self.cargo_code,
             "cargo_name": self.cargo_name,
             "cargo_group_code": self.cargo_group_code,
@@ -466,6 +475,9 @@ class RouteWriteDTO:
             "special_container_type",
             "cargo_group_cmtp",
             "cargo_code_izpod",
+            "cargo_group_izpod",
+            "cargo_code_3",
+            "cargo_code_izpod_3",
         ):
             payload[name] = (data.get(name) or "").strip()
 
