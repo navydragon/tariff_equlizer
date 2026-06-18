@@ -10,6 +10,8 @@ from core.domain.route.dto import (
     RouteDTO,
     RouteListFiltersDTO,
     RouteListResultDTO,
+    RoutePickerOptionsRequestDTO,
+    RoutePickerOptionsResultDTO,
     RouteSetDTO,
     RouteSetListResultDTO,
     RouteWriteDTO,
@@ -207,6 +209,29 @@ class RouteService:
             ),
             [],
         )
+
+    def list_picker_options(
+        self,
+        request: RoutePickerOptionsRequestDTO,
+    ) -> tuple[Optional[RoutePickerOptionsResultDTO], list[str]]:
+        errors = request.validate()
+        if errors:
+            return None, errors
+
+        limit = min(max(request.limit, 1), 100)
+        normalized = RoutePickerOptionsRequestDTO(
+            route_set_id=request.route_set_id,
+            dimension=request.dimension,
+            cargo_group_name=(request.cargo_group_name or "").strip() or None,
+            cargo_code=(request.cargo_code or "").strip() or None,
+            message_type_name=(request.message_type_name or "").strip() or None,
+            holding=(request.holding or "").strip() or None,
+            economics_filled=request.economics_filled,
+            search=(request.search or "").strip() or None,
+            limit=limit,
+        )
+        items = self.repository.list_picker_options(normalized)
+        return RoutePickerOptionsResultDTO(items=items), []
 
     def get_route(self, pk: int) -> tuple[Optional[RouteDTO], list[str]]:
         route = self.repository.get_by_id(pk)

@@ -24,6 +24,7 @@ from core.domain.railroad.services import RailRoadService
 from core.domain.route.dto import (
     CreateRouteSetDTO,
     RouteListFiltersDTO,
+    RoutePickerOptionsRequestDTO,
     UpdateRouteSetDTO,
 )
 from core.domain.route.repositories import RouteRepository
@@ -1912,7 +1913,12 @@ def route_list_api(request):
     include_total = include_total_raw in ("1", "true", "yes")
     economics_filled_raw = (request.GET.get("economics_filled") or "").strip().lower()
     economics_filled = economics_filled_raw in ("1", "true", "yes")
+    is_model_only_raw = (request.GET.get("is_model_only") or "").strip().lower()
+    is_model_only = is_model_only_raw in ("1", "true", "yes")
     holding = (request.GET.get("holding") or "").strip() or None
+    cargo_group_name = (request.GET.get("cargo_group_name") or "").strip() or None
+    cargo_code = (request.GET.get("cargo_code") or "").strip() or None
+    message_type_name = (request.GET.get("message_type_name") or "").strip() or None
     filters = RouteListFiltersDTO(
         route_set_id=route_set_id,
         page=page,
@@ -1922,12 +1928,58 @@ def route_list_api(request):
         destination_esr=request.GET.get("destination_esr") or None,
         include_total=include_total,
         economics_filled=economics_filled,
+        is_model_only=is_model_only,
+        cargo_group_name=cargo_group_name,
+        cargo_code=cargo_code,
+        message_type_name=message_type_name,
         holding=holding,
     )
 
     service = RouteService()
     t0 = time.perf_counter()
     result, errors = service.list_routes(filters)
+    elapsed_ms = int((time.perf_counter() - t0) * 1000)
+    if errors:
+        return JsonResponse({"success": False, "errors": errors}, status=400)
+
+    return JsonResponse(
+        {"success": True, **result.to_api_dict(), "elapsed_ms": elapsed_ms},
+    )
+
+
+@login_required
+@require_http_methods(["GET"])
+def route_picker_options_api(request):
+    try:
+        route_set_id = int(request.GET.get("route_set_id", "0"))
+    except (TypeError, ValueError):
+        route_set_id = 0
+
+    try:
+        limit = int(request.GET.get("limit", "50"))
+    except (TypeError, ValueError):
+        limit = 50
+
+    economics_filled_raw = (request.GET.get("economics_filled") or "1").strip().lower()
+    economics_filled = economics_filled_raw in ("1", "true", "yes")
+    search = (request.GET.get("search") or "").strip() or None
+    dimension = (request.GET.get("dimension") or "").strip()
+
+    options_request = RoutePickerOptionsRequestDTO(
+        route_set_id=route_set_id,
+        dimension=dimension,
+        cargo_group_name=(request.GET.get("cargo_group_name") or "").strip() or None,
+        cargo_code=(request.GET.get("cargo_code") or "").strip() or None,
+        message_type_name=(request.GET.get("message_type_name") or "").strip() or None,
+        holding=(request.GET.get("holding") or "").strip() or None,
+        economics_filled=economics_filled,
+        search=search,
+        limit=limit,
+    )
+
+    service = RouteService()
+    t0 = time.perf_counter()
+    result, errors = service.list_picker_options(options_request)
     elapsed_ms = int((time.perf_counter() - t0) * 1000)
     if errors:
         return JsonResponse({"success": False, "errors": errors}, status=400)

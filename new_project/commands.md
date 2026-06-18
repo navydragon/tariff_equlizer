@@ -197,6 +197,24 @@ python manage.py import_rzd_routes --clear
 python manage.py import_total_ipem --file total_ipem.csv --route-set-code DEFAULT_ROUTE_SET
 ```
 
+### `import_ipem_coal_2026_routes`
+
+Импорт **model-маршрутов** из `Уголь_эластика_2026.xlsx` в `RouteSet` (по умолчанию `RZD_2026`) и связка operational-маршрутов РЖД через `model_route_id`.
+
+| Параметр | По умолчанию | Описание |
+|----------|--------------|----------|
+| `--file` | `../data/ipem/Уголь_эластика_2026.xlsx` | XLSX IPEM |
+| `--route-set-code` | `RZD_2026` | Набор маршрутов |
+| `--dry-run` | — | Только проверка резолва |
+
+```bash
+python manage.py import_ipem_coal_2026_routes \
+  --file ../data/ipem/Уголь_эластика_2026.xlsx \
+  --route-set-code RZD_2026
+
+python manage.py refresh_deploy_caches
+```
+
 ### `export_ipem_rzd_economics_2025`
 
 Экспорт строк `total_ipem.csv`, совпадающих с маршрутами РЖД по **ЕСР отпр. + ЕСР назн. + груз** (fuzzy по имени груза), с полями экономики в CSV.

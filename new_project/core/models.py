@@ -382,6 +382,18 @@ class RouteSet(models.Model):
         return f"{self.code} — {self.name}"
 
 
+class RouteQuerySet(models.QuerySet):
+    def operational(self) -> "RouteQuerySet":
+        return self.filter(is_model=False)
+
+    def model_routes(self) -> "RouteQuerySet":
+        return self.filter(is_model=True)
+
+
+class RouteManager(models.Manager.from_queryset(RouteQuerySet)):
+    pass
+
+
 class Route(models.Model):
     route_set = models.ForeignKey(
         RouteSet,
@@ -632,6 +644,21 @@ class Route(models.Model):
         null=True,
         blank=True,
     )
+    is_model = models.BooleanField(
+        "Модельный маршрут IPEM",
+        default=False,
+        db_index=True,
+    )
+    model_route = models.ForeignKey(
+        "self",
+        verbose_name="Модельный маршрут",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="linked_operational_routes",
+    )
+
+    objects = RouteManager()
 
     class Meta:
         verbose_name = "Маршрут"
@@ -663,12 +690,30 @@ class Route(models.Model):
                 name="route_set_economics_idx",
                 condition=Q(market_price_per_ton__isnull=False),
             ),
+            models.Index(fields=["route_set", "is_model"], name="route_set_is_model_idx"),
+            models.Index(fields=["model_route"], name="route_model_route_idx"),
+            models.Index(
+                fields=[
+                    "route_set",
+                    "origin_station",
+                    "destination_station",
+                    "cargo",
+                    "wagon_kind",
+                    "shipment_type",
+                ],
+                name="route_operational_link_idx",
+                condition=Q(is_model=False),
+            ),
         ]
         constraints = [
             models.UniqueConstraint(
                 fields=["route_set", "route_code"],
                 name="uniq_route_set_route_code",
-            )
+            ),
+            models.CheckConstraint(
+                condition=Q(is_model=False) | Q(model_route__isnull=True),
+                name="route_model_no_parent",
+            ),
         ]
 
     def save(self, *args, **kwargs):

@@ -288,6 +288,11 @@ urlpatterns = [
         name="route_holding_options_api",
     ),
     path(
+        "references/api/routes/picker-options/",
+        views.route_picker_options_api,
+        name="route_picker_options_api",
+    ),
+    path(
         "references/api/routes/<int:pk>/",
         views.route_detail_api,
         name="route_detail_api",

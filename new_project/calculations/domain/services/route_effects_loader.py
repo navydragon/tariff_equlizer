@@ -61,6 +61,7 @@ def fetch_route_set_stats(route_set_id: int) -> tuple[int, int]:
             ) AS without_volume
         FROM {_table(Route)}
         WHERE route_set_id = %s
+          AND is_model = false
     """
     stats = _read_sql(sql, [route_set_id])
     total = int(stats["total"].iloc[0])
@@ -193,6 +194,7 @@ def fetch_routes_dataframe_timed(
         LEFT JOIN {shipment_type_table} st ON r.shipment_type_id = st.id
         LEFT JOIN {message_type_table} mt ON r.message_type_id = mt.id
         WHERE r.route_set_id = %s
+          AND r.is_model = false
           AND r.freight_charge_rub IS NOT NULL
           AND r.freight_charge_rub > 0
     """

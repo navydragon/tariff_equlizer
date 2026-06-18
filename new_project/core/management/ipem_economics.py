@@ -7,8 +7,8 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
-from core.domain.cargo.formatting import parse_etsng_code
-from core.models import Cargo, Route, RouteSet
+from core.domain.cargo.formatting import format_etsng_code, parse_etsng_code
+from core.models import Cargo, MessageType, Route, RouteSet, ShipmentType, Shipper, Station, WagonKind
 
 try:
     from rapidfuzz import fuzz, process as rf_process
@@ -69,6 +69,57 @@ EXPORT_CSV_COLUMNS: tuple[str, ...] = (
     "rzd_match_count",
 )
 
+IPEM_COAL_2026_SHEET = "Уголь_эластика"
+IPEM_COAL_2026_HEADER_ROW = 2
+
+IPEM_COAL_2026_OVERLAP_COLUMNS: tuple[str, ...] = (
+    "ipem_row",
+    "сцеп_цены",
+    "код_груза",
+    "наим_груза",
+    "станц_отпр",
+    "станц_назн",
+    "дор_отпр",
+    "дор_наз",
+    "род_вагона",
+    "вид_перевозки",
+    "origin_esr",
+    "dest_esr",
+    "cargo_code",
+    "wagon_kind_name",
+    "message_type_name",
+    "resolve_status",
+    "rzd_match_count",
+    "rzd_match_count_broad",
+)
+
+IPEM_COAL_2026_COLUMN_BY_ROUTE_FIELD: dict[str, str] = {
+    "rzd_cost_loaded_per_ton": (
+        "Расходы по оплате услуг ОАО 'РЖД', руб. за тонну гружёный рейс"
+    ),
+    "rzd_cost_empty_per_ton": (
+        "Расходы по оплате услуг ОАО 'РЖД', руб. за тонну порожний рейс"
+    ),
+    "rzd_cost_total_per_ton": (
+        "Расходы по оплате услуг ОАО 'РЖД', руб. за тонну общая стоимость"
+    ),
+    "operators_cost_per_ton": "Расходы по оплате услуг операторов, руб. за тонну",
+    "transshipment_cost_per_ton": "Расходы на перевалку, руб. за тонну",
+    "excise_or_duty_per_ton": "Акциз/пошлина",
+    "transport_total_cost_per_ton": "Общие транспортные расходы, руб. за тонну ",
+    "production_cost_per_ton": "Себестоимость добычи/производства, руб. т.",
+    "total_cost_per_ton": "Общие расходы, руб. за тонну",
+    "market_price_per_ton": "Стоимость 1 тонны на рынке, руб./т.",
+}
+
+MODEL_ROUTE_LINK_KEY_FIELDS: tuple[str, ...] = (
+    "origin_station_id",
+    "destination_station_id",
+    "cargo_id",
+    "wagon_kind_id",
+    "shipment_type_id",
+)
+
 
 @dataclass
 class CargoIndexItem:
@@ -97,6 +148,61 @@ class IpemMatchBuildResult:
     skipped_no_rzd: int = 0
     total_ipem_rows: int = 0
     duplicate_triple_warnings: list[str] = field(default_factory=list)
+
+
+@dataclass
+class IpemRzdOverlapRow:
+    ipem_row: int
+    price_chain: str
+    cargo_code_raw: str
+    cargo_name: str
+    origin_station_name: str
+    dest_station_name: str
+    origin_railroad: str
+    dest_railroad: str
+    wagon_kind_raw: str
+    message_type_raw: str
+    origin_esr: Optional[int]
+    dest_esr: Optional[int]
+    cargo_code: str
+    wagon_kind_name: str
+    message_type_name: str
+    resolve_status: str
+    rzd_match_count: int
+    rzd_match_count_broad: int
+
+
+@dataclass
+class IpemCoal2026ResolvedRow:
+    ipem_row: int
+    route_code: str
+    origin: Station
+    destination: Station
+    cargo: Cargo
+    wagon_kind: WagonKind
+    shipment_type: ShipmentType
+    message_type: Optional[MessageType]
+    shipper: Optional[Shipper]
+    economics: dict[str, Optional[Decimal]]
+    transport_volume_tons: Optional[Decimal]
+    freight_turnover_tkm: Optional[Decimal]
+    freight_charge_rub: Optional[Decimal]
+    distance_belt_midpoint_km: Optional[int]
+    load_tons_per_wagon: Optional[Decimal]
+    delivery_time_loaded_days: Optional[int]
+    delivery_time_empty_days: Optional[int]
+    delivery_time_ops_days: Optional[int]
+    rate_per_wagon_per_day: Optional[Decimal]
+
+
+@dataclass
+class IpemCoal2026ImportResult:
+    total_rows: int = 0
+    created_model_routes: int = 0
+    linked_operational_routes: int = 0
+    skipped_rows: int = 0
+    skip_reasons: list[str] = field(default_factory=list)
+    duplicate_link_key_warnings: list[str] = field(default_factory=list)
 
 
 def normalize_name(value: str) -> str:
@@ -184,14 +290,557 @@ def count_rzd_routes(
     *,
     origin_esr: int,
     dest_esr: int,
-    cargo_id: int,
+    cargo_id: str | int,
+    wagon_kind_id: Optional[int] = None,
+    message_type_id: Optional[int] = None,
 ) -> int:
-    return Route.objects.filter(
+    qs = Route.objects.operational().filter(
         route_set=route_set,
         origin_station__esr_code=origin_esr,
         destination_station__esr_code=dest_esr,
-        cargo_id=cargo_id,
-    ).count()
+        cargo_id=format_etsng_code(cargo_id),
+    )
+    if wagon_kind_id is not None:
+        qs = qs.filter(wagon_kind_id=wagon_kind_id)
+    if message_type_id is not None:
+        qs = qs.filter(message_type_id=message_type_id)
+    return qs.count()
+
+
+def _ipem_cell_str(value: Any) -> str:
+    if value is None:
+        return ""
+    try:
+        import pandas as pd
+
+        if pd.isna(value):
+            return ""
+    except ImportError:
+        pass
+    if isinstance(value, float) and value != value:
+        return ""
+    return str(value).strip()
+
+
+def resolve_station_by_ipem_name(
+    station_name: str,
+    railroad_code: str = "",
+) -> tuple[Optional[Station], Optional[str]]:
+    name = (station_name or "").strip()
+    if not name:
+        return None, "no_station"
+
+    railroad_code = (railroad_code or "").strip()
+    qs = Station.objects.filter(short_name__iexact=name)
+    if railroad_code:
+        qs_rr = qs.filter(railroad__code=railroad_code)
+        rr_count = qs_rr.count()
+        if rr_count == 1:
+            return qs_rr.first(), None
+        if rr_count > 1:
+            return None, "ambiguous_station"
+
+    count = qs.count()
+    if count == 1:
+        return qs.first(), None
+    if count == 0:
+        return None, "no_station"
+    return None, "ambiguous_station"
+
+
+def resolve_cargo_by_etsng(raw_code: Any) -> Optional[Cargo]:
+    code = format_etsng_code(raw_code)
+    if not code:
+        return None
+    for candidate in _cargo_code_lookup_candidates(raw_code, code):
+        cargo = Cargo.objects.filter(code=candidate).first()
+        if cargo is not None and format_etsng_code(cargo.code) == code:
+            return cargo
+    return None
+
+
+def _cargo_code_lookup_candidates(raw_code: Any, formatted_code: str) -> list[str]:
+    candidates: list[str] = []
+    for value in (formatted_code, parse_etsng_code(raw_code), formatted_code.lstrip("0")):
+        if not value or value in candidates:
+            continue
+        candidates.append(value)
+    return candidates
+
+
+def resolve_wagon_kind(
+    raw_name: str,
+    wagons: Optional[list[WagonKind]] = None,
+) -> tuple[Optional[WagonKind], Optional[str]]:
+    name_norm = normalize_name(raw_name)
+    if not name_norm:
+        return None, "no_wagon"
+
+    if wagons is None:
+        wagons = list(WagonKind.objects.all())
+
+    exact_matches = [w for w in wagons if normalize_name(w.name) == name_norm]
+    if len(exact_matches) == 1:
+        return exact_matches[0], None
+    if len(exact_matches) > 1:
+        return None, "ambiguous_wagon"
+
+    prefix_matches = [
+        w
+        for w in wagons
+        if normalize_name(w.name).startswith(name_norm)
+        or name_norm.startswith(normalize_name(w.name).rstrip("ы"))
+    ]
+    if len(prefix_matches) == 1:
+        return prefix_matches[0], None
+    if len(prefix_matches) > 1:
+        return None, "ambiguous_wagon"
+    return None, "no_wagon"
+
+
+def resolve_message_type(
+    raw_name: str,
+    message_by_name: Optional[dict[str, MessageType]] = None,
+) -> tuple[Optional[MessageType], Optional[str]]:
+    name_norm = normalize_name(raw_name)
+    if not name_norm:
+        return None, "no_message"
+
+    if message_by_name is None:
+        message_by_name = {
+            normalize_name(m.name): m for m in MessageType.objects.all()
+        }
+
+    message = message_by_name.get(name_norm)
+    if message is None:
+        return None, "no_message"
+    return message, None
+
+
+def load_ipem_coal_2026_xlsx(path: Path) -> list[dict[str, str]]:
+    import pandas as pd
+
+    df = pd.read_excel(
+        path,
+        sheet_name=IPEM_COAL_2026_SHEET,
+        header=IPEM_COAL_2026_HEADER_ROW,
+    )
+    rows: list[dict[str, str]] = []
+    for _, series in df.iterrows():
+        row = {str(col): _ipem_cell_str(series[col]) for col in df.columns}
+        if not any(row.values()):
+            continue
+        rows.append(row)
+    return rows
+
+
+def build_ipem_coal_2026_overlap(
+    xlsx_path: Path,
+    route_set: RouteSet,
+) -> list[IpemRzdOverlapRow]:
+    ipem_rows = load_ipem_coal_2026_xlsx(xlsx_path)
+    wagons = list(WagonKind.objects.all())
+    message_by_name = {
+        normalize_name(m.name): m for m in MessageType.objects.all()
+    }
+
+    overlap_rows: list[IpemRzdOverlapRow] = []
+    for ipem_row_idx, row in enumerate(ipem_rows, start=1):
+        origin_station_name = row.get("Станц отпр РФ", "")
+        dest_station_name = row.get("Станц назн РФ", "")
+        origin_railroad = row.get("Дор отпр", "")
+        dest_railroad = row.get("Дор наз", "")
+
+        issues: list[str] = []
+        origin, origin_issue = resolve_station_by_ipem_name(
+            origin_station_name, origin_railroad
+        )
+        if origin_issue:
+            issues.append("no_origin" if origin_issue == "no_station" else "ambiguous_origin")
+
+        dest, dest_issue = resolve_station_by_ipem_name(
+            dest_station_name, dest_railroad
+        )
+        if dest_issue:
+            issues.append("no_dest" if dest_issue == "no_station" else "ambiguous_dest")
+
+        cargo = resolve_cargo_by_etsng(row.get("Код груза"))
+        if cargo is None:
+            issues.append("no_cargo")
+
+        wagon, wagon_issue = resolve_wagon_kind(row.get("Род вагона", ""), wagons)
+        if wagon_issue:
+            issues.append(wagon_issue)
+
+        message, message_issue = resolve_message_type(
+            row.get("Вид перевозки", ""), message_by_name
+        )
+        if message_issue:
+            issues.append(message_issue)
+
+        resolve_status = "ok" if not issues else ";".join(issues)
+
+        rzd_match_count_broad = 0
+        rzd_match_count = 0
+        if origin is not None and dest is not None and cargo is not None:
+            rzd_match_count_broad = count_rzd_routes(
+                route_set,
+                origin_esr=origin.esr_code,
+                dest_esr=dest.esr_code,
+                cargo_id=cargo.pk,
+            )
+            if wagon is not None and message is not None:
+                rzd_match_count = count_rzd_routes(
+                    route_set,
+                    origin_esr=origin.esr_code,
+                    dest_esr=dest.esr_code,
+                    cargo_id=cargo.pk,
+                    wagon_kind_id=wagon.pk,
+                    message_type_id=message.pk,
+                )
+
+        overlap_rows.append(
+            IpemRzdOverlapRow(
+                ipem_row=ipem_row_idx,
+                price_chain=row.get("сцеп цены", ""),
+                cargo_code_raw=row.get("Код груза", ""),
+                cargo_name=row.get("Наим груза", ""),
+                origin_station_name=origin_station_name,
+                dest_station_name=dest_station_name,
+                origin_railroad=origin_railroad,
+                dest_railroad=dest_railroad,
+                wagon_kind_raw=row.get("Род вагона", ""),
+                message_type_raw=row.get("Вид перевозки", ""),
+                origin_esr=origin.esr_code if origin else None,
+                dest_esr=dest.esr_code if dest else None,
+                cargo_code=format_etsng_code(cargo.code) if cargo else "",
+                wagon_kind_name=wagon.name if wagon else "",
+                message_type_name=message.name if message else "",
+                resolve_status=resolve_status,
+                rzd_match_count=rzd_match_count,
+                rzd_match_count_broad=rzd_match_count_broad,
+            )
+        )
+
+    return overlap_rows
+
+
+def overlap_row_to_csv_dict(row: IpemRzdOverlapRow) -> dict[str, str]:
+    return {
+        "ipem_row": str(row.ipem_row),
+        "сцеп_цены": row.price_chain,
+        "код_груза": row.cargo_code_raw,
+        "наим_груза": row.cargo_name,
+        "станц_отпр": row.origin_station_name,
+        "станц_назн": row.dest_station_name,
+        "дор_отпр": row.origin_railroad,
+        "дор_наз": row.dest_railroad,
+        "род_вагона": row.wagon_kind_raw,
+        "вид_перевозки": row.message_type_raw,
+        "origin_esr": "" if row.origin_esr is None else str(row.origin_esr),
+        "dest_esr": "" if row.dest_esr is None else str(row.dest_esr),
+        "cargo_code": row.cargo_code,
+        "wagon_kind_name": row.wagon_kind_name,
+        "message_type_name": row.message_type_name,
+        "resolve_status": row.resolve_status,
+        "rzd_match_count": str(row.rzd_match_count),
+        "rzd_match_count_broad": str(row.rzd_match_count_broad),
+    }
+
+
+def write_overlap_csv(path: Path, rows: Iterable[IpemRzdOverlapRow]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8-sig", newline="") as f:
+        writer = csv.DictWriter(
+            f,
+            fieldnames=IPEM_COAL_2026_OVERLAP_COLUMNS,
+            delimiter=";",
+        )
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(overlap_row_to_csv_dict(row))
+
+
+def parse_int_cell(raw: str) -> Optional[int]:
+    value = (raw or "").strip().replace(" ", "")
+    if not value:
+        return None
+    try:
+        return int(float(value.replace(",", ".")))
+    except ValueError:
+        return None
+
+
+def parse_ipem_coal_2026_economics_row(row: dict[str, str]) -> dict[str, Optional[Decimal]]:
+    economics: dict[str, Optional[Decimal]] = {}
+    for route_field, ipem_column in IPEM_COAL_2026_COLUMN_BY_ROUTE_FIELD.items():
+        raw = row.get(ipem_column)
+        if raw is None:
+            raw = row.get(ipem_column.strip())
+        if raw is None and route_field == "transport_total_cost_per_ton":
+            raw = row.get("Общие транспортные расходы, руб. за тонну")
+        economics[route_field] = parse_decimal_cell(raw or "")
+    return economics
+
+
+def resolve_shipment_type(
+    raw_name: str,
+    shipment_by_name: Optional[dict[str, ShipmentType]] = None,
+) -> tuple[Optional[ShipmentType], Optional[str]]:
+    name_norm = normalize_name(raw_name)
+    if not name_norm:
+        return None, "no_shipment_type"
+
+    if shipment_by_name is None:
+        shipment_by_name = {
+            normalize_name(s.name): s for s in ShipmentType.objects.all()
+        }
+
+    shipment = shipment_by_name.get(name_norm)
+    if shipment is None:
+        return None, "no_shipment_type"
+    return shipment, None
+
+
+def resolve_shipper_from_ipem_row(row: dict[str, str]) -> Optional[Shipper]:
+    shipper_name = (row.get("Компания отправителя") or "").strip()
+    if not shipper_name:
+        return None
+
+    holding = (row.get("Холдинг отправителя") or "").strip()
+    okpo_raw = (row.get("ОКПО компании") or "").replace(" ", "")
+    okpo = int(okpo_raw) if okpo_raw.isdigit() else 0
+
+    shipper, created = Shipper.objects.get_or_create(
+        okpo=okpo,
+        inn="",
+        name=shipper_name,
+        defaults={"holding": holding},
+    )
+    if not created and holding and not shipper.holding:
+        shipper.holding = holding
+        shipper.save(update_fields=["holding"])
+    return shipper
+
+
+def model_route_link_key(route: Route) -> tuple[Any, ...]:
+    return (
+        route.origin_station_id,
+        route.destination_station_id,
+        route.cargo_id,
+        route.wagon_kind_id,
+        route.shipment_type_id,
+    )
+
+
+def resolve_ipem_coal_2026_row(
+    row: dict[str, str],
+    *,
+    ipem_row: int,
+    wagons: list[WagonKind],
+    shipment_by_name: dict[str, ShipmentType],
+    message_by_name: dict[str, MessageType],
+) -> tuple[Optional[IpemCoal2026ResolvedRow], list[str]]:
+    reasons: list[str] = []
+    origin, origin_issue = resolve_station_by_ipem_name(
+        row.get("Станц отпр РФ", ""),
+        row.get("Дор отпр", ""),
+    )
+    if origin_issue:
+        reasons.append(origin_issue)
+
+    destination, dest_issue = resolve_station_by_ipem_name(
+        row.get("Станц назн РФ", ""),
+        row.get("Дор наз", ""),
+    )
+    if dest_issue:
+        reasons.append(dest_issue)
+
+    cargo = resolve_cargo_by_etsng(row.get("Код груза"))
+    if cargo is None:
+        reasons.append("no_cargo")
+
+    wagon, wagon_issue = resolve_wagon_kind(row.get("Род вагона", ""), wagons)
+    if wagon_issue:
+        reasons.append(wagon_issue)
+
+    shipment_type, shipment_issue = resolve_shipment_type(
+        row.get("Категория отправки", ""),
+        shipment_by_name,
+    )
+    if shipment_issue:
+        reasons.append(shipment_issue)
+
+    message_type, message_issue = resolve_message_type(
+        row.get("Вид перевозки", ""),
+        message_by_name,
+    )
+    if message_issue:
+        reasons.append(message_issue)
+
+    if reasons or not all([origin, destination, cargo, wagon, shipment_type]):
+        return None, reasons
+
+    economics = parse_ipem_coal_2026_economics_row(row)
+    shipper = resolve_shipper_from_ipem_row(row)
+
+    return (
+        IpemCoal2026ResolvedRow(
+            ipem_row=ipem_row,
+            route_code=f"IPEM2026-{ipem_row:03d}",
+            origin=origin,
+            destination=destination,
+            cargo=cargo,
+            wagon_kind=wagon,
+            shipment_type=shipment_type,
+            message_type=message_type,
+            shipper=shipper,
+            economics=economics,
+            transport_volume_tons=parse_decimal_cell(
+                row.get("Объем перевозок (тн)", "")
+            ),
+            freight_turnover_tkm=parse_decimal_cell(row.get("Грузооборот, ткм", "")),
+            freight_charge_rub=parse_decimal_cell(row.get("Провозная плата, руб", "")),
+            distance_belt_midpoint_km=parse_int_cell(
+                row.get("Средняя дальность(км)", "")
+            ),
+            load_tons_per_wagon=parse_decimal_cell(row.get("Загрузка вагона", "")),
+            delivery_time_loaded_days=parse_int_cell(row.get("Груженый рейс, дней", "")),
+            delivery_time_empty_days=parse_int_cell(row.get("Порожний рейс, дней", "")),
+            delivery_time_ops_days=parse_int_cell(
+                row.get("Погрузка-разгрузка, дней", "")
+            ),
+            rate_per_wagon_per_day=parse_decimal_cell(
+                row.get("Ставка на вагон, руб. за вагон в сутки", "")
+            ),
+        ),
+        [],
+    )
+
+
+def build_model_route_from_resolved_row(
+    route_set: RouteSet,
+    resolved: IpemCoal2026ResolvedRow,
+) -> Route:
+    route = Route(
+        route_set=route_set,
+        is_model=True,
+        model_route=None,
+        route_code=resolved.route_code,
+        cargo=resolved.cargo,
+        origin_station=resolved.origin,
+        destination_station=resolved.destination,
+        wagon_kind=resolved.wagon_kind,
+        shipment_type=resolved.shipment_type,
+        message_type=resolved.message_type,
+        shipper=resolved.shipper,
+        transport_volume_tons=resolved.transport_volume_tons,
+        freight_turnover_tkm=resolved.freight_turnover_tkm,
+        freight_charge_rub=resolved.freight_charge_rub,
+        distance_belt_midpoint_km=resolved.distance_belt_midpoint_km,
+        load_tons_per_wagon=resolved.load_tons_per_wagon,
+        delivery_time_loaded_days=resolved.delivery_time_loaded_days,
+        delivery_time_empty_days=resolved.delivery_time_empty_days,
+        delivery_time_ops_days=resolved.delivery_time_ops_days,
+        rate_per_wagon_per_day=resolved.rate_per_wagon_per_day,
+    )
+    for field_name, value in resolved.economics.items():
+        setattr(route, field_name, value)
+    return route
+
+
+def clear_ipem_model_routes(route_set: RouteSet) -> None:
+    Route.objects.filter(route_set=route_set, is_model=False).update(model_route=None)
+    Route.objects.filter(route_set=route_set, is_model=True).delete()
+
+
+def link_operational_routes_to_models(
+    route_set: RouteSet,
+    model_routes: Iterable[Route],
+) -> int:
+    linked_total = 0
+    for model_route in model_routes:
+        linked_total += Route.objects.operational().filter(
+            route_set=route_set,
+            origin_station_id=model_route.origin_station_id,
+            destination_station_id=model_route.destination_station_id,
+            cargo_id=model_route.cargo_id,
+            wagon_kind_id=model_route.wagon_kind_id,
+            shipment_type_id=model_route.shipment_type_id,
+        ).update(model_route_id=model_route.pk)
+    return linked_total
+
+
+def import_ipem_coal_2026_model_routes(
+    xlsx_path: Path,
+    route_set: RouteSet,
+    *,
+    dry_run: bool = False,
+) -> IpemCoal2026ImportResult:
+    result = IpemCoal2026ImportResult()
+    ipem_rows = load_ipem_coal_2026_xlsx(xlsx_path)
+    result.total_rows = len(ipem_rows)
+
+    wagons = list(WagonKind.objects.all())
+    shipment_by_name = {
+        normalize_name(s.name): s for s in ShipmentType.objects.all()
+    }
+    message_by_name = {
+        normalize_name(m.name): m for m in MessageType.objects.all()
+    }
+
+    resolved_rows: list[IpemCoal2026ResolvedRow] = []
+    seen_link_keys: dict[tuple[Any, ...], str] = {}
+
+    for ipem_row_idx, row in enumerate(ipem_rows, start=1):
+        resolved, reasons = resolve_ipem_coal_2026_row(
+            row,
+            ipem_row=ipem_row_idx,
+            wagons=wagons,
+            shipment_by_name=shipment_by_name,
+            message_by_name=message_by_name,
+        )
+        if resolved is None:
+            result.skipped_rows += 1
+            result.skip_reasons.append(
+                f"Строка {ipem_row_idx}: {'; '.join(reasons)}"
+            )
+            continue
+
+        link_key = (
+            resolved.origin.pk,
+            resolved.destination.pk,
+            resolved.cargo.pk,
+            resolved.wagon_kind.pk,
+            resolved.shipment_type.pk,
+        )
+        if link_key in seen_link_keys:
+            result.duplicate_link_key_warnings.append(
+                f"Ключ связи {link_key}: повтор в IPEM (строка {ipem_row_idx}, "
+                f"ранее строка {seen_link_keys[link_key]}); при линковке победит последняя"
+            )
+        seen_link_keys[link_key] = str(ipem_row_idx)
+        resolved_rows.append(resolved)
+
+    if dry_run:
+        result.created_model_routes = len(resolved_rows)
+        return result
+
+    clear_ipem_model_routes(route_set)
+
+    model_routes: list[Route] = []
+    for resolved in resolved_rows:
+        model_routes.append(
+            build_model_route_from_resolved_row(route_set, resolved)
+        )
+
+    created = Route.objects.bulk_create(model_routes, batch_size=500)
+    result.created_model_routes = len(created)
+    result.linked_operational_routes = link_operational_routes_to_models(
+        route_set,
+        created,
+    )
+    return result
 
 
 def build_ipem_match_records(

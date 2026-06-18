@@ -259,7 +259,7 @@ class ScenarioEffectsService:
         scenario: Scenario,
         context,
     ) -> tuple[list[RouteEffectFact], int, int, _GlobalTotals]:
-        all_routes_qs: QuerySet[Route] = Route.objects.filter(
+        all_routes_qs: QuerySet[Route] = Route.objects.operational().filter(
             route_set_id=scenario.route_set_id,
         )
         routes_qs = all_routes_qs.filter(
@@ -397,7 +397,7 @@ class ScenarioEffectsService:
 
     @staticmethod
     def _collect_filter_options_from_db(scenario: Scenario) -> dict[str, list[str]]:
-        qs = Route.objects.filter(
+        qs = Route.objects.operational().filter(
             route_set_id=scenario.route_set_id,
             freight_charge_rub__gt=0,
         )

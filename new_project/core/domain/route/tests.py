@@ -195,6 +195,7 @@ class RouteListEconomicsFilterApiTests(TestCase):
             shipment_type=self.shipment_type,
             message_type=self.message_type,
             route_code="ECO-WITH-PRICE",
+            is_model=True,
             market_price_per_ton=Decimal("1500.00"),
         )
         self.route_without_price = Route.objects.create(
@@ -208,7 +209,7 @@ class RouteListEconomicsFilterApiTests(TestCase):
             route_code="ECO-NO-PRICE",
         )
 
-    def test_list_with_economics_filled_returns_only_routes_with_market_price(self) -> None:
+    def test_list_with_economics_filled_returns_only_model_routes(self) -> None:
         response = self.client.get(
             reverse("route_list_api"),
             {
@@ -239,6 +240,35 @@ class RouteListEconomicsFilterApiTests(TestCase):
             ids,
             {self.route_with_price.id, self.route_without_price.id},
         )
+
+    def test_list_with_is_model_only_returns_only_model_routes(self) -> None:
+        response = self.client.get(
+            reverse("route_list_api"),
+            {
+                "route_set_id": self.route_set.id,
+                "is_model_only": "1",
+                "page_size": "100",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data["success"])
+        ids = {item["id"] for item in data["items"]}
+        self.assertEqual(ids, {self.route_with_price.id})
+        self.assertTrue(data["items"][0]["is_model"])
+
+    def test_list_includes_is_model_flag(self) -> None:
+        response = self.client.get(
+            reverse("route_list_api"),
+            {
+                "route_set_id": self.route_set.id,
+                "page_size": "100",
+            },
+        )
+        data = response.json()
+        by_id = {item["id"]: item for item in data["items"]}
+        self.assertTrue(by_id[self.route_with_price.id]["is_model"])
+        self.assertFalse(by_id[self.route_without_price.id]["is_model"])
 
 
 class RouteListHoldingFilterApiTests(TestCase):
@@ -302,6 +332,7 @@ class RouteListHoldingFilterApiTests(TestCase):
             message_type=self.message_type,
             shipper=self.shipper_alpha,
             route_code="HOLD-ALPHA",
+            is_model=True,
             market_price_per_ton=Decimal("1200.00"),
         )
         self.route_beta = Route.objects.create(
@@ -314,6 +345,7 @@ class RouteListHoldingFilterApiTests(TestCase):
             message_type=self.message_type,
             shipper=self.shipper_beta,
             route_code="HOLD-BETA",
+            is_model=True,
             market_price_per_ton=Decimal("1300.00"),
         )
 
@@ -383,7 +415,7 @@ class RouteListHoldingFilterApiTests(TestCase):
             ["Alpha Holding"],
         )
 
-    def test_route_holding_options_api_excludes_routes_without_market_price(self) -> None:
+    def test_route_holding_options_api_excludes_operational_routes(self) -> None:
         Route.objects.create(
             route_set=self.route_set,
             cargo=self.cargo,
@@ -399,6 +431,7 @@ class RouteListHoldingFilterApiTests(TestCase):
                 holding="Gamma Holding",
             ),
             route_code="HOLD-GAMMA",
+            market_price_per_ton=Decimal("1400.00"),
         )
         response = self.client.get(
             reverse("route_holding_options_api"),
@@ -417,6 +450,269 @@ class RouteListHoldingFilterApiTests(TestCase):
                 reverse("route_holding_options_api"),
                 {
                     "route_set_id": self.route_set.id,
+                    "economics_filled": "1",
+                },
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["success"])
+        route_queries = [
+            q for q in ctx.captured_queries if '"core_route"' in q["sql"]
+        ]
+        self.assertEqual(len(route_queries), 1)
+
+
+class RoutePickerCascadeApiTests(TestCase):
+    def setUp(self) -> None:
+        self.client = Client()
+        self.user = User.objects.create_user(login="route_picker_user", password="pass")
+        self.client.force_login(self.user)
+
+        self.route_set = RouteSet.objects.create(name="Picker cascade set", code="PICK_CAS")
+        self.cargo_group_a = CargoGroup.objects.create(name="Group A", code=21, position=1)
+        self.cargo_group_b = CargoGroup.objects.create(name="Group B", code=22, position=2)
+        self.cargo_a = Cargo.objects.create(
+            code="016101",
+            name="Coal A",
+            cargo_group=self.cargo_group_a,
+        )
+        self.cargo_b = Cargo.objects.create(
+            code="016102",
+            name="Coal B",
+            cargo_group=self.cargo_group_b,
+        )
+        railroad = RailRoad.objects.create(code="91", name="Road P")
+        region = Region.objects.create(
+            short_name="P",
+            full_name="Picker region",
+            type="область",
+        )
+        self.origin = Station.objects.create(
+            esr_code=910001,
+            short_name="PA",
+            full_name="Station PA",
+            region=region,
+            railroad=railroad,
+        )
+        self.destination = Station.objects.create(
+            esr_code=910002,
+            short_name="PB",
+            full_name="Station PB",
+            region=region,
+            railroad=railroad,
+        )
+        self.wagon_kind = WagonKind.objects.create(code="WK_P", name="Wagon P")
+        self.shipment_type = ShipmentType.objects.create(code="ST_P", name="Shipment P")
+        self.message_internal = MessageType.objects.create(
+            code="MT_INT",
+            name="Внутр. перевозки",
+        )
+        self.message_export = MessageType.objects.create(
+            code="MT_EXP",
+            name="Экспорт",
+        )
+        self.shipper_alpha = Shipper.objects.create(
+            okpo=2001,
+            inn="7702000001",
+            name="Shipper Alpha P",
+            holding="Alpha Holding",
+        )
+        self.shipper_beta = Shipper.objects.create(
+            okpo=2002,
+            inn="7702000002",
+            name="Shipper Beta P",
+            holding="Beta Holding",
+        )
+        self.route_alpha_internal = Route.objects.create(
+            route_set=self.route_set,
+            cargo=self.cargo_a,
+            origin_station=self.origin,
+            destination_station=self.destination,
+            wagon_kind=self.wagon_kind,
+            shipment_type=self.shipment_type,
+            message_type=self.message_internal,
+            shipper=self.shipper_alpha,
+            route_code="PICK-ALPHA-INT",
+            is_model=True,
+            market_price_per_ton=Decimal("1200.00"),
+        )
+        self.route_alpha_export = Route.objects.create(
+            route_set=self.route_set,
+            cargo=self.cargo_a,
+            origin_station=self.origin,
+            destination_station=self.destination,
+            wagon_kind=self.wagon_kind,
+            shipment_type=self.shipment_type,
+            message_type=self.message_export,
+            shipper=self.shipper_beta,
+            route_code="PICK-BETA-EXP",
+            is_model=True,
+            market_price_per_ton=Decimal("1250.00"),
+        )
+        self.route_beta_internal = Route.objects.create(
+            route_set=self.route_set,
+            cargo=self.cargo_b,
+            origin_station=self.origin,
+            destination_station=self.destination,
+            wagon_kind=self.wagon_kind,
+            shipment_type=self.shipment_type,
+            message_type=self.message_internal,
+            shipper=self.shipper_alpha,
+            route_code="PICK-BETA-INT",
+            is_model=True,
+            market_price_per_ton=Decimal("1300.00"),
+        )
+        Route.objects.create(
+            route_set=self.route_set,
+            cargo=self.cargo_b,
+            origin_station=self.origin,
+            destination_station=self.destination,
+            wagon_kind=self.wagon_kind,
+            shipment_type=self.shipment_type,
+            message_type=self.message_internal,
+            shipper=self.shipper_beta,
+            route_code="PICK-NONMODEL",
+            is_model=False,
+            market_price_per_ton=Decimal("1400.00"),
+        )
+
+    def test_picker_options_cargo_group(self) -> None:
+        response = self.client.get(
+            reverse("route_picker_options_api"),
+            {
+                "route_set_id": self.route_set.id,
+                "dimension": "cargo_group",
+                "economics_filled": "1",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data["success"])
+        values = {item["value"] for item in data["items"]}
+        self.assertEqual(values, {"Group A", "Group B"})
+
+    def test_picker_options_cargo_filtered_by_group(self) -> None:
+        response = self.client.get(
+            reverse("route_picker_options_api"),
+            {
+                "route_set_id": self.route_set.id,
+                "dimension": "cargo",
+                "cargo_group_name": "Group A",
+                "economics_filled": "1",
+            },
+        )
+        data = response.json()
+        self.assertTrue(data["success"])
+        self.assertEqual([item["value"] for item in data["items"]], [self.cargo_a.code])
+
+    def test_picker_options_transport_type_cargo_first_chain(self) -> None:
+        response = self.client.get(
+            reverse("route_picker_options_api"),
+            {
+                "route_set_id": self.route_set.id,
+                "dimension": "transport_type",
+                "cargo_group_name": "Group A",
+                "cargo_code": self.cargo_a.code,
+                "economics_filled": "1",
+            },
+        )
+        data = response.json()
+        self.assertTrue(data["success"])
+        values = {item["value"] for item in data["items"]}
+        self.assertEqual(values, {"Внутр. перевозки", "Экспорт"})
+
+    def test_picker_options_holding_cargo_first_chain(self) -> None:
+        response = self.client.get(
+            reverse("route_picker_options_api"),
+            {
+                "route_set_id": self.route_set.id,
+                "dimension": "holding",
+                "cargo_group_name": "Group A",
+                "cargo_code": self.cargo_a.code,
+                "message_type_name": "Внутр. перевозки",
+                "economics_filled": "1",
+            },
+        )
+        data = response.json()
+        self.assertTrue(data["success"])
+        self.assertEqual(
+            [item["value"] for item in data["items"]],
+            ["Alpha Holding"],
+        )
+
+    def test_picker_options_holding_first_chain(self) -> None:
+        transport_response = self.client.get(
+            reverse("route_picker_options_api"),
+            {
+                "route_set_id": self.route_set.id,
+                "dimension": "transport_type",
+                "holding": "Alpha Holding",
+                "economics_filled": "1",
+            },
+        )
+        transport_data = transport_response.json()
+        self.assertTrue(transport_data["success"])
+        self.assertEqual(
+            {item["value"] for item in transport_data["items"]},
+            {"Внутр. перевозки"},
+        )
+
+        cargo_response = self.client.get(
+            reverse("route_picker_options_api"),
+            {
+                "route_set_id": self.route_set.id,
+                "dimension": "cargo",
+                "holding": "Alpha Holding",
+                "message_type_name": "Внутр. перевозки",
+                "economics_filled": "1",
+            },
+        )
+        cargo_data = cargo_response.json()
+        self.assertTrue(cargo_data["success"])
+        self.assertEqual(
+            {item["value"] for item in cargo_data["items"]},
+            {self.cargo_a.code, self.cargo_b.code},
+        )
+
+    def test_list_with_combined_cascade_filters(self) -> None:
+        response = self.client.get(
+            reverse("route_list_api"),
+            {
+                "route_set_id": self.route_set.id,
+                "economics_filled": "1",
+                "cargo_group_name": "Group A",
+                "cargo_code": self.cargo_a.code,
+                "message_type_name": "Экспорт",
+                "holding": "Beta Holding",
+                "page_size": "100",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data["success"])
+        ids = {item["id"] for item in data["items"]}
+        self.assertEqual(ids, {self.route_alpha_export.id})
+
+    def test_picker_options_excludes_non_model_routes(self) -> None:
+        response = self.client.get(
+            reverse("route_picker_options_api"),
+            {
+                "route_set_id": self.route_set.id,
+                "dimension": "holding",
+                "economics_filled": "1",
+            },
+        )
+        data = response.json()
+        values = {item["value"] for item in data["items"]}
+        self.assertNotIn("Gamma Holding", values)
+        self.assertEqual(values, {"Alpha Holding", "Beta Holding"})
+
+    def test_route_picker_options_api_query_count(self) -> None:
+        with CaptureQueriesContext(connection) as ctx:
+            response = self.client.get(
+                reverse("route_picker_options_api"),
+                {
+                    "route_set_id": self.route_set.id,
+                    "dimension": "cargo_group",
                     "economics_filled": "1",
                 },
             )

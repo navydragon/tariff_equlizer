@@ -29,6 +29,7 @@ import {
       "routesEmpty",
       "routesPageSize",
       "routesSearchQuery",
+      "routesModelOnly",
       "routeSetErrors",
       "routeErrors",
     ];
@@ -91,6 +92,22 @@ import {
       this.loadRoutes(1);
     }
 
+    onModelOnlyChange() {
+      if (!this.state.routeSetId) return;
+      const search = this.hasRoutesSearchQueryTarget
+        ? this.routesSearchQueryTarget.value.trim()
+        : "";
+      this.loadRoutes(1, {
+        includeTotal: Boolean(search) || this.isModelOnlyChecked(),
+      });
+    }
+
+    isModelOnlyChecked() {
+      return (
+        this.hasRoutesModelOnlyTarget && this.routesModelOnlyTarget.checked
+      );
+    }
+
     onSearchInput() {
       if (this.searchDebounceTimer) {
         clearTimeout(this.searchDebounceTimer);
@@ -109,7 +126,9 @@ import {
       const search = this.hasRoutesSearchQueryTarget
         ? this.routesSearchQueryTarget.value.trim()
         : "";
-      this.loadRoutes(1, { includeTotal: Boolean(search) });
+      this.loadRoutes(1, {
+        includeTotal: Boolean(search) || this.isModelOnlyChecked(),
+      });
     }
 
     resetFilters() {
@@ -118,6 +137,9 @@ import {
       }
       if (this.hasRoutesPageSizeTarget) {
         this.routesPageSizeTarget.value = String(this.pageSizeDefaultValue || 20);
+      }
+      if (this.hasRoutesModelOnlyTarget) {
+        this.routesModelOnlyTarget.checked = false;
       }
       this.state.routesLoaded = false;
       this.showRoutesIdleState();
@@ -609,6 +631,10 @@ import {
         if (search) params.set("search", search);
       }
 
+      if (this.isModelOnlyChecked()) {
+        params.set("is_model_only", "1");
+      }
+
       if (this.state.includeTotal) {
         params.set("include_total", "1");
       }
@@ -746,9 +772,10 @@ import {
         item.market_price_per_ton != null
           ? escapeHtml(String(item.market_price_per_ton))
           : "—";
+      const rowClass = item.is_model ? ' class="route-row--model"' : "";
 
       return `
-        <tr data-id="${item.id}">
+        <tr data-id="${item.id}"${rowClass}>
           <td>
             <div class="btn-group" role="group" aria-label="Действия">
               <button
@@ -775,7 +802,14 @@ import {
           <td>${origin}</td>
           <td>${dest}</td>
           <td>${escapeHtml(item.message_type_name || "")}</td>
-          <td>${escapeHtml(item.route_code || "")}</td>
+          <td>
+            ${escapeHtml(item.route_code || "")}
+            ${
+              item.is_model
+                ? '<span class="badge bg-azure-lt text-azure ms-1">модельный</span>'
+                : ""
+            }
+          </td>
           <td>${escapeHtml(item.wagon_kind_name || "")}</td>
           <td>${escapeHtml(item.shipment_type_name || "")}</td>
           <td>${transport}</td>

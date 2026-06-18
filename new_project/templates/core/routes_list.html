@@ -110,7 +110,19 @@
               <option value="100">100</option>
             </select>
           </div>
-          <div class="col-12 col-md-5 mb-2 d-flex align-items-end justify-content-end">
+          <div class="col-6 col-md-2 mb-2 d-flex align-items-end">
+            <label class="form-check mb-2">
+              <input
+                type="checkbox"
+                id="routesModelOnly"
+                class="form-check-input"
+                data-routes-target="routesModelOnly"
+                data-action="change->routes#onModelOnlyChange"
+              />
+              <span class="form-check-label">Только модельные</span>
+            </label>
+          </div>
+          <div class="col-12 col-md-3 mb-2 d-flex align-items-end justify-content-md-end">
             <button
               id="routesApplyFiltersButton"
               class="btn btn-outline-primary me-2"
@@ -716,3 +728,13 @@
 </div>
 {% endblock %}
 
+{% block extra_css %}
+<style>
+  .route-row--model > td {
+    background-color: var(--tblr-azure-lt, rgba(66, 153, 225, 0.08));
+  }
+  .route-row--model:hover > td {
+    background-color: var(--tblr-azure-lt, rgba(66, 153, 225, 0.14));
+  }
+</style>
+{% endblock %}

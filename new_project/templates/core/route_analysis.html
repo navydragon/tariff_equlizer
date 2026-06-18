@@ -13,7 +13,7 @@
   data-controller="route-analysis-route-picker"
   data-route-analysis-route-picker-scenarios-url-value="{% url 'scenarios:api_list' %}"
   data-route-analysis-route-picker-routes-url-value="{% url 'route_list_api' %}"
-  data-route-analysis-route-picker-holdings-url-value="{% url 'route_holding_options_api' %}"
+  data-route-analysis-route-picker-picker-options-url-value="{% url 'route_picker_options_api' %}"
   data-route-analysis-route-picker-route-analysis-url-value="{% url 'route_analysis_api' %}"
   data-route-analysis-route-picker-active-scenario-id-value="{{ request.user.active_scenario_id|default:'' }}"
 >
@@ -188,7 +188,6 @@
       </div>
     </div>
   </div>
-</div>
   </div>
   <div
     class="modal modal-blur fade"
@@ -220,7 +219,7 @@
                 id="routeAnalysisFiltersToggle"
                 class="btn btn-link px-0 text-decoration-none"
                 type="button"
-                aria-expanded="false"
+                aria-expanded="true"
                 aria-controls="routeAnalysisFiltersCollapse"
               >
                 <i class="ti ti-filter me-1"></i>
@@ -228,18 +227,110 @@
               </button>
               <div
                 id="routeAnalysisFiltersCollapse"
-                class="collapse"
+                class="collapse show"
                 data-route-analysis-route-picker-target="filtersCollapse"
               >
                 <div class="border rounded p-3 bg-light">
-                  <label class="form-label" for="routeAnalysisHoldingFilter">Холдинг</label>
-                  <select
-                    id="routeAnalysisHoldingFilter"
-                    data-route-analysis-route-picker-target="holdingFilterSelect"
-                    placeholder="Начните вводить название холдинга…"
+                  <div class="mb-3">
+                    <div class="form-label mb-2">Способ выбора</div>
+                    <div class="btn-group btn-group-sm w-100" role="group" aria-label="Способ выбора маршрута">
+                      <input
+                        type="radio"
+                        class="btn-check"
+                        name="routeAnalysisPickerMode"
+                        id="routeAnalysisPickerModeCargo"
+                        value="cargo_first"
+                        checked
+                        data-route-analysis-route-picker-target="pickerModeCargo"
+                        data-action="change->route-analysis-route-picker#onPickerModeChange"
+                      />
+                      <label class="btn btn-outline-primary" for="routeAnalysisPickerModeCargo">
+                        От груза
+                      </label>
+                      <input
+                        type="radio"
+                        class="btn-check"
+                        name="routeAnalysisPickerMode"
+                        id="routeAnalysisPickerModeHolding"
+                        value="holding_first"
+                        data-route-analysis-route-picker-target="pickerModeHolding"
+                        data-action="change->route-analysis-route-picker#onPickerModeChange"
+                      />
+                      <label class="btn btn-outline-primary" for="routeAnalysisPickerModeHolding">
+                        От холдинга
+                      </label>
+                    </div>
+                  </div>
+
+                  <div data-route-analysis-route-picker-target="cargoFirstFilters">
+                    <div class="mb-3">
+                      <label class="form-label" for="routeAnalysisCargoGroupFilter">Группа груза</label>
+                      <select
+                        id="routeAnalysisCargoGroupFilter"
+                        data-route-analysis-route-picker-target="cargoGroupFilterSelect"
+                        placeholder="Выберите группу груза…"
+                      ></select>
+                    </div>
+                    <div class="mb-3">
+                      <label class="form-label" for="routeAnalysisCargoFilter">Вид груза</label>
+                      <select
+                        id="routeAnalysisCargoFilter"
+                        data-route-analysis-route-picker-target="cargoFilterSelect"
+                        placeholder="Выберите вид груза…"
+                        disabled
+                      ></select>
+                    </div>
+                    <div class="mb-3">
+                      <label class="form-label" for="routeAnalysisTransportTypeFilter">Вид перевозки</label>
+                      <select
+                        id="routeAnalysisTransportTypeFilter"
+                        data-route-analysis-route-picker-target="transportTypeFilterSelect"
+                        placeholder="Выберите вид перевозки…"
+                        disabled
+                      ></select>
+                    </div>
+                    <div class="mb-0">
+                      <label class="form-label" for="routeAnalysisHoldingFilterCargo">Холдинг</label>
+                      <select
+                        id="routeAnalysisHoldingFilterCargo"
+                        data-route-analysis-route-picker-target="holdingFilterCargoSelect"
+                        placeholder="Выберите холдинг…"
+                        disabled
+                      ></select>
+                    </div>
+                  </div>
+
+                  <div
+                    data-route-analysis-route-picker-target="holdingFirstFilters"
+                    style="display: none;"
                   >
-                    <option value="">Все холдинги</option>
-                  </select>
+                    <div class="mb-3">
+                      <label class="form-label" for="routeAnalysisHoldingFilterHolding">Холдинг</label>
+                      <select
+                        id="routeAnalysisHoldingFilterHolding"
+                        data-route-analysis-route-picker-target="holdingFilterHoldingSelect"
+                        placeholder="Выберите холдинг…"
+                      ></select>
+                    </div>
+                    <div class="mb-3">
+                      <label class="form-label" for="routeAnalysisTransportTypeFilterHolding">Вид перевозки</label>
+                      <select
+                        id="routeAnalysisTransportTypeFilterHolding"
+                        data-route-analysis-route-picker-target="transportTypeFilterHoldingSelect"
+                        placeholder="Выберите вид перевозки…"
+                        disabled
+                      ></select>
+                    </div>
+                    <div class="mb-0">
+                      <label class="form-label" for="routeAnalysisCargoFilterHolding">Вид груза</label>
+                      <select
+                        id="routeAnalysisCargoFilterHolding"
+                        data-route-analysis-route-picker-target="cargoFilterHoldingSelect"
+                        placeholder="Выберите вид груза…"
+                        disabled
+                      ></select>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -254,7 +345,7 @@
                 data-action="input->route-analysis-route-picker#onSearchInput"
               />
               <div class="form-text">
-                Показаны маршруты с заполненной рыночной ценой в наборе выбранного сценария.
+                Дополнительно сужает список маршрутов с заполненной рыночной ценой.
               </div>
             </div>
           </div>
@@ -286,7 +377,7 @@
             style="display: none;"
             data-route-analysis-route-picker-target="empty"
           >
-            Нет маршрутов с рыночной ценой по текущему поиску.
+            Нет маршрутов с рыночной ценой по текущим фильтрам.
           </div>
         </div>
         <div class="modal-footer">

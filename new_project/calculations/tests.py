@@ -387,6 +387,29 @@ class ScenarioEffectsServiceTests(TariffLoadServiceTestMixin, TestCase):
             value=Decimal(coef_2026),
         )
 
+    def test_model_routes_excluded_from_effects_loader(self) -> None:
+        from calculations.domain.services.route_effects_loader import (
+            fetch_route_set_stats,
+            fetch_routes_dataframe_timed,
+        )
+
+        model_route = self._create_route(
+            rzd=Decimal("500.00"),
+            cargo_code=1002,
+            route_code="MODEL-001",
+        )
+        model_route.is_model = True
+        model_route.freight_charge_rub = Decimal("999999999.00")
+        model_route.save(update_fields=["is_model", "freight_charge_rub"])
+
+        df, _timings = fetch_routes_dataframe_timed(self.route_set.id)
+        route_ids = set(df["id"].astype(int).tolist())
+        self.assertIn(self.route.id, route_ids)
+        self.assertNotIn(model_route.id, route_ids)
+
+        skipped_charge, _without_volume = fetch_route_set_stats(self.route_set.id)
+        self.assertEqual(skipped_charge, 0)
+
     def test_freight_charge_base_effect(self) -> None:
         self._setup_btd("1.1000")
 

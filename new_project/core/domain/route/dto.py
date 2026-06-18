@@ -127,6 +127,7 @@ class RouteDTO:
     shipment_type_name: str
     message_type_id: Optional[int]
     message_type_name: str
+    is_model: bool
     shipper_id: Optional[int]
     shipper_name: str
     shipper_holding: str
@@ -219,6 +220,7 @@ class RouteDTO:
             shipment_type_name=route.shipment_type.name if route.shipment_type_id else "",
             message_type_id=route.message_type_id,
             message_type_name=route.message_type.name if route.message_type_id else "",
+            is_model=route.is_model,
             shipper_id=route.shipper_id,
             shipper_name=(
                 ""
@@ -318,6 +320,7 @@ class RouteDTO:
             "shipment_type_name": self.shipment_type_name,
             "message_type_id": self.message_type_id,
             "message_type_name": self.message_type_name,
+            "is_model": self.is_model,
             "shipper_id": self.shipper_id,
             "shipper_name": self.shipper_name,
             "shipper_holding": self.shipper_holding,
@@ -346,6 +349,9 @@ class RouteDTO:
         }
 
 
+ROUTE_PICKER_DIMENSIONS = frozenset({"cargo_group", "cargo", "transport_type", "holding"})
+
+
 @dataclass
 class RouteListFiltersDTO:
     route_set_id: int
@@ -356,7 +362,51 @@ class RouteListFiltersDTO:
     destination_esr: Optional[str] = None
     include_total: bool = False
     economics_filled: bool = False
+    is_model_only: bool = False
+    cargo_group_name: Optional[str] = None
+    cargo_code: Optional[str] = None
+    message_type_name: Optional[str] = None
     holding: Optional[str] = None
+
+
+@dataclass
+class RoutePickerOptionsRequestDTO:
+    route_set_id: int
+    dimension: str
+    cargo_group_name: Optional[str] = None
+    cargo_code: Optional[str] = None
+    message_type_name: Optional[str] = None
+    holding: Optional[str] = None
+    economics_filled: bool = True
+    search: Optional[str] = None
+    limit: int = 50
+
+    def validate(self) -> list[str]:
+        errors: list[str] = []
+        if not self.route_set_id:
+            errors.append("Не указан набор маршрутов")
+        if self.dimension not in ROUTE_PICKER_DIMENSIONS:
+            errors.append("Недопустимое измерение фильтра")
+        if self.limit < 1:
+            errors.append("limit должен быть положительным")
+        return errors
+
+
+@dataclass
+class RoutePickerOptionDTO:
+    value: str
+    text: str
+
+    def to_api_dict(self) -> dict[str, str]:
+        return {"value": self.value, "text": self.text}
+
+
+@dataclass
+class RoutePickerOptionsResultDTO:
+    items: list[RoutePickerOptionDTO]
+
+    def to_api_dict(self) -> dict[str, Any]:
+        return {"items": [item.to_api_dict() for item in self.items]}
 
 
 @dataclass

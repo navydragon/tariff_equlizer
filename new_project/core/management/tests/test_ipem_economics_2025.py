@@ -10,10 +10,16 @@ from django.test import TestCase
 from core.management.ipem_economics import (
     IPEM_COLUMN_BY_ROUTE_FIELD,
     apply_economics_to_rzd_routes,
+    build_ipem_coal_2026_overlap,
     build_ipem_match_records,
+    count_rzd_routes,
     load_records_from_export_csv,
+    resolve_cargo_by_etsng,
+    resolve_message_type,
+    resolve_wagon_kind,
     write_export_csv,
 )
+from core.domain.cargo.formatting import format_etsng_code
 from core.models import (
     Cargo,
     CargoGroup,
@@ -180,3 +186,108 @@ class IpemEconomics2025Tests(TestCase):
     def tearDown(self) -> None:
         if self.ipem_csv.exists():
             self.ipem_csv.unlink()
+
+
+class IpemCoal2026OverlapTests(TestCase):
+    def setUp(self) -> None:
+        self.route_set = RouteSet.objects.create(code="RZD_2026_COAL", name="RZD coal test")
+        cargo_group = CargoGroup.objects.create(name="Уголь", code=1, position=1)
+        self.cargo = Cargo.objects.create(
+            code="016111",
+            name="УГОЛЬ Г",
+            cargo_group=cargo_group,
+        )
+        railroad = RailRoad.objects.create(code="96", name="ДВС")
+        region = Region.objects.create(
+            short_name="R",
+            full_name="Region",
+            type="край",
+        )
+        self.origin = Station.objects.create(
+            esr_code=91720,
+            short_name="ЧЕГДОМЫН",
+            full_name="ЧЕГДОМЫН",
+            region=region,
+            railroad=railroad,
+        )
+        self.destination = Station.objects.create(
+            esr_code=96780,
+            short_name="ВАНИНО-ЭКСП",
+            full_name="ВАНИНО-ЭКСП",
+            region=region,
+            railroad=railroad,
+        )
+        self.wagon_kind = WagonKind.objects.create(code="WK_PV", name="Полувагоны")
+        self.shipment_type = ShipmentType.objects.create(code="ST_T", name="повагонная")
+        self.message_type = MessageType.objects.create(code="MT_EXP", name="Экспорт")
+
+        for idx in (1, 2, 3):
+            Route.objects.create(
+                route_set=self.route_set,
+                cargo=self.cargo,
+                origin_station=self.origin,
+                destination_station=self.destination,
+                wagon_kind=self.wagon_kind,
+                shipment_type=self.shipment_type,
+                message_type=self.message_type,
+                route_code=f"COAL-TEST-{idx}",
+            )
+
+    def test_resolve_cargo_by_etsng_pads_code(self) -> None:
+        cargo = resolve_cargo_by_etsng("16111")
+        self.assertIsNotNone(cargo)
+        self.assertEqual(format_etsng_code(cargo.code), "016111")
+
+    def test_resolve_wagon_kind_maps_poluvagon(self) -> None:
+        wagon, issue = resolve_wagon_kind("полувагон", [self.wagon_kind])
+        self.assertIsNone(issue)
+        self.assertEqual(wagon, self.wagon_kind)
+
+    def test_resolve_message_type_exact(self) -> None:
+        message, issue = resolve_message_type(
+            "Экспорт",
+            {self.message_type.name.casefold(): self.message_type},
+        )
+        self.assertIsNone(issue)
+        self.assertEqual(message, self.message_type)
+
+    def test_count_rzd_routes_with_wagon_and_message_filters(self) -> None:
+        broad = count_rzd_routes(
+            self.route_set,
+            origin_esr=self.origin.esr_code,
+            dest_esr=self.destination.esr_code,
+            cargo_id=self.cargo.pk,
+        )
+        strict = count_rzd_routes(
+            self.route_set,
+            origin_esr=self.origin.esr_code,
+            dest_esr=self.destination.esr_code,
+            cargo_id=self.cargo.pk,
+            wagon_kind_id=self.wagon_kind.pk,
+            message_type_id=self.message_type.pk,
+        )
+        self.assertEqual(broad, 3)
+        self.assertEqual(strict, 3)
+
+    def test_build_ipem_coal_2026_overlap_from_xlsx(self) -> None:
+        xlsx_path = (
+            Path(__file__).resolve().parents[4]
+            / "data"
+            / "ipem"
+            / "Уголь_эластика_2026.xlsx"
+        )
+        if not xlsx_path.exists():
+            self.skipTest(f"Файл IPEM не найден: {xlsx_path}")
+
+        rows = build_ipem_coal_2026_overlap(xlsx_path, self.route_set)
+        self.assertGreater(len(rows), 0)
+
+        chegdomyn_row = next(
+            (r for r in rows if r.origin_station_name == "ЧЕГДОМЫН"),
+            None,
+        )
+        self.assertIsNotNone(chegdomyn_row)
+        self.assertEqual(chegdomyn_row.resolve_status, "ok", chegdomyn_row)
+        self.assertEqual(chegdomyn_row.cargo_code, "016111")
+        self.assertEqual(chegdomyn_row.rzd_match_count, 3)
+        self.assertEqual(chegdomyn_row.rzd_match_count_broad, 3)
