@@ -24,6 +24,8 @@ class ScenarioDTO:
     price_change_settings: dict[str, str] = field(default_factory=dict)
     export_price_mode: str = "fixed"
     include_base_tariff_decisions: bool = True
+    consider_enterprise_load: bool = True
+    retention_coefficient_mode: str = "relative_to_base"
 
     @classmethod
     def from_model(
@@ -59,6 +61,8 @@ class ScenarioDTO:
             include_base_tariff_decisions=bool(
                 scenario.include_base_tariff_decisions,
             ),
+            consider_enterprise_load=bool(scenario.consider_enterprise_load),
+            retention_coefficient_mode=scenario.retention_coefficient_mode,
         )
 
 
@@ -98,6 +102,8 @@ class UpdateScenarioDTO:
     price_change_settings: Optional[dict[str, str]] = None
     export_price_mode: Optional[str] = None
     include_base_tariff_decisions: Optional[bool] = None
+    consider_enterprise_load: Optional[bool] = None
+    retention_coefficient_mode: Optional[str] = None
 
     def validate(self) -> list[str]:
         errors: list[str] = []
@@ -129,6 +135,21 @@ class UpdateScenarioDTO:
             bool,
         ):
             errors.append("Некорректное значение флага учета базовых тарифных решений")
+        if self.consider_enterprise_load is not None and not isinstance(
+            self.consider_enterprise_load,
+            bool,
+        ):
+            errors.append("Некорректное значение флага учета загрузки предприятия")
+        if self.retention_coefficient_mode is not None:
+            from scenarios.models import Scenario
+
+            valid_modes = {
+                choice.value for choice in Scenario.RetentionCoefficientMode
+            }
+            if self.retention_coefficient_mode not in valid_modes:
+                errors.append(
+                    "Некорректный режим прогноза коэффициента сохранения грузовой базы",
+                )
         return errors
 
 
@@ -152,6 +173,8 @@ class ScenarioListDTO:
     author_id: int
     author_name: str
     include_base_tariff_decisions: bool = True
+    consider_enterprise_load: bool = True
+    retention_coefficient_mode: str = "relative_to_base"
 
     @classmethod
     def from_model(cls, scenario):
@@ -180,5 +203,7 @@ class ScenarioListDTO:
             include_base_tariff_decisions=bool(
                 scenario.include_base_tariff_decisions,
             ),
+            consider_enterprise_load=bool(scenario.consider_enterprise_load),
+            retention_coefficient_mode=scenario.retention_coefficient_mode,
         )
 

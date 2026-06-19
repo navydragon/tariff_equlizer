@@ -7,8 +7,8 @@ from calculations.domain.services.tariff_load import TariffLoadService
 from core.models import Route
 from scenarios.domain.services.price_change import PriceChangeSettingService
 from scenarios.domain.utils.elasticity_matching import (
+    compute_retention_coefficient,
     marginality_ratio_from_percent,
-    resolve_retention_coefficient,
 )
 from scenarios.domain.utils.fx_rates import load_fx_rates_by_year, missing_fx_years
 from scenarios.domain.utils.price_inflation import (
@@ -33,6 +33,7 @@ from .dto import (
     KpiYearDTO,
     TransportStructureDTO,
 )
+from .rzd_tariff_sensitivity import build_rzd_tariff_sensitivity
 
 
 def _to_decimal_or_zero(value: Optional[Decimal]) -> Decimal:
@@ -246,6 +247,10 @@ class RouteAnalysisService:
             rzd_values=rzd_values,
             marginality_values=marginality_values,
         )
+        rzd_tariff_sensitivity = build_rzd_tariff_sensitivity(
+            route=route,
+            scenario=scenario,
+        )
 
         return RouteAnalysisResponseDTO(
             scenario_id=request_dto.scenario_id,
@@ -257,6 +262,7 @@ class RouteAnalysisService:
             transport_structure=transport_structure,
             effects=effects,
             kpi=kpi,
+            rzd_tariff_sensitivity=rzd_tariff_sensitivity,
         )
 
     @staticmethod
@@ -649,7 +655,7 @@ class RouteAnalysisService:
             rzd_rub = rzd_values[index]
             margin_rub = marginality_values[index]["rub"]
             margin_pct = marginality_values[index]["pct"]
-            retention_coefficient = resolve_retention_coefficient(
+            retention_coefficient = compute_retention_coefficient(
                 route,
                 scenario,
                 marginality_ratio_from_percent(Decimal(margin_pct)),

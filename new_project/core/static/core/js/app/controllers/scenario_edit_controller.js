@@ -132,6 +132,20 @@ import { renderErrors } from "../lib/errors.js";
       return checked ? checked.value : "fixed";
     }
 
+    collectConsiderEnterpriseLoad() {
+      const checkbox = this.element.querySelector(
+        "#editScenarioConsiderEnterpriseLoad",
+      );
+      return checkbox ? !!checkbox.checked : true;
+    }
+
+    collectRetentionCoefficientMode() {
+      const checked = this.element.querySelector(
+        'input.btn-check[name="retention_coefficient_mode"]:checked',
+      );
+      return checked ? checked.value : "relative_to_base";
+    }
+
     collectPriceChangeSettings() {
       const settings = {};
       const inputs = this.element.querySelectorAll(
@@ -171,6 +185,8 @@ import { renderErrors } from "../lib/errors.js";
         route_set_id: routeSetId || null,
         price_change_settings: this.collectPriceChangeSettings(),
         export_price_mode: this.collectExportPriceMode(),
+        consider_enterprise_load: this.collectConsiderEnterpriseLoad(),
+        retention_coefficient_mode: this.collectRetentionCoefficientMode(),
       };
 
       const url = this.updateUrlValue;

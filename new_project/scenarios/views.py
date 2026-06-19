@@ -98,6 +98,8 @@ def scenario_list_api(request):
                 "author_id": s.author_id,
                 "author_name": s.author_name,
                 "include_base_tariff_decisions": s.include_base_tariff_decisions,
+                "consider_enterprise_load": s.consider_enterprise_load,
+                "retention_coefficient_mode": s.retention_coefficient_mode,
             }
             for s in scenarios
         ]
@@ -192,6 +194,8 @@ def scenario_update_api(request, scenario_id):
         price_change_settings=data.get("price_change_settings"),
         export_price_mode=data.get("export_price_mode"),
         include_base_tariff_decisions=data.get("include_base_tariff_decisions"),
+        consider_enterprise_load=data.get("consider_enterprise_load"),
+        retention_coefficient_mode=data.get("retention_coefficient_mode"),
     )
     
     service = ScenarioService()
@@ -217,6 +221,8 @@ def scenario_update_api(request, scenario_id):
             "price_change_settings": scenario.price_change_settings,
             "export_price_mode": scenario.export_price_mode,
             "include_base_tariff_decisions": scenario.include_base_tariff_decisions,
+            "consider_enterprise_load": scenario.consider_enterprise_load,
+            "retention_coefficient_mode": scenario.retention_coefficient_mode,
             "author_id": scenario.author_id,
             "author_name": scenario.author_name,
         }
@@ -318,6 +324,7 @@ def scenario_edit_view(request, scenario_id):
         for key, label in PRICE_CHANGE_PARAMETERS
     ]
     export_price_modes = list(Scenario.ExportPriceMode.choices)
+    retention_coefficient_modes = list(Scenario.RetentionCoefficientMode.choices)
 
     return render(
         request,
@@ -328,6 +335,7 @@ def scenario_edit_view(request, scenario_id):
             "price_change_rows": price_change_rows,
             "price_change_modes": PRICE_CHANGE_MODES,
             "export_price_modes": export_price_modes,
+            "retention_coefficient_modes": retention_coefficient_modes,
         },
     )
 

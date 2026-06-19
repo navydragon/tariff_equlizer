@@ -69,8 +69,24 @@ python manage.py collectstatic --noinput
 
 ```bash
 python manage.py create_admin --login admin --email admin@example.com --password "$ADMIN_PASSWORD"
-# … import_railroads, import_rzd_routes, apply_ipem_economics_to_rzd_2025 и т.д.
+# … import_railroads, import_rzd_routes и т.д. — см. FIRST_IMPORT.md
 ```
+
+После импорта маршрутов РЖД (`import_rzd_routes --clear`) — **уголь 2026**: model-маршруты, коэффициент загрузки предприятия, эластичность и привязка к сценарию:
+
+```bash
+python manage.py import_ipem_coal_2026_routes \
+  --file ../data/ipem/Уголь_эластика_2026.xlsx \
+  --route-set-code RZD_2026 \
+  --scenario-id 1
+
+python manage.py refresh_deploy_caches
+```
+
+`--scenario-id 1` — id рабочего сценария с набором **RZD_2026** (часто «Базовый сценарий» после `create_base_scenario`).  
+Проверка без записи: добавьте `--dry-run`. Только маршруты без эластичности: `--skip-elasticity`.
+
+Legacy-пайплайн через `total_ipem.csv` — раздел 6.1–6.2 в [FIRST_IMPORT.md](FIRST_IMPORT.md).
 
 Если миграция `0027` прервалась на большой БД:
 

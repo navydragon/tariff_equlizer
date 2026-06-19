@@ -200,6 +200,7 @@ python manage.py import_total_ipem --file total_ipem.csv --route-set-code DEFAUL
 ### `import_ipem_coal_2026_routes`
 
 Импорт **model-маршрутов** из `Уголь_эластика_2026.xlsx` в `RouteSet` (по умолчанию `RZD_2026`) и связка operational-маршрутов РЖД через `model_route_id`.  
+На model-маршруты пишется **коэффициент загрузки предприятия** (колонка AT в XLSX).  
 С `--scenario-id` из того же файла загружаются правила эластичности (лист `Уголь_коэфф`) и набор привязывается к сценарию.
 
 | Параметр | По умолчанию | Описание |
@@ -292,7 +293,29 @@ python manage.py migrate
 python manage.py prepare_dev
 ```
 
-**Продакшен-подобные данные (CSV total_ipem):**
+**Продакшен-подобные данные (РЖД + уголь 2026):**
+
+```bash
+python manage.py migrate
+python manage.py create_admin --login admin --password "$ADMIN_PASSWORD"
+python manage.py import_railroads
+python manage.py import_regions
+python manage.py import_stations
+python manage.py import_cargo_groups
+python manage.py import_cargos
+python manage.py import_shippers
+python manage.py init_route_refs
+python manage.py create_base_scenario
+python manage.py load_base_btd
+python manage.py import_rzd_routes --clear
+python manage.py import_ipem_coal_2026_routes \
+  --file ../data/ipem/Уголь_эластика_2026.xlsx \
+  --route-set-code RZD_2026 \
+  --scenario-id 1
+python manage.py refresh_deploy_caches
+```
+
+**Продакшен-подобные данные (CSV total_ipem, legacy):**
 
 ```bash
 python manage.py migrate

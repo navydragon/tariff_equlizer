@@ -49,7 +49,8 @@ ADMIN_PASSWORD=ваш_пароль
 | `data/refs-01/cargos.csv` | Грузы ETSNG |
 | `data/refs-01/shippers.csv` | Грузоотправители |
 | `../data/01_2026-05-19.db` | SQLite РЖД (таблица `ИХ_ГП`) — **вне** `new_project`, в `data/` корня репозитория |
-| `total_ipem.csv` | Маршруты и экономика IPEM (~550 строк) |
+| `../data/ipem/Уголь_эластика_2026.xlsx` | Model-маршруты угля, коэффициент загрузки предприятия, эластичность |
+| `total_ipem.csv` | Маршруты и экономика IPEM (~550 строк), legacy-пайплайн |
 
 Опционально: `core/data/settings.csv` — `import_settings`.
 
@@ -136,7 +137,7 @@ python manage.py import_rzd_routes --clear
 
 Импорт из `data/ipem/Уголь_эластика_2026.xlsx`:
 
-- лист **Уголь_эластика** → **model-маршруты** (`is_model=true`) в `RouteSet RZD_2026`;
+- лист **Уголь_эластика** → **model-маршруты** (`is_model=true`) в `RouteSet RZD_2026`, в т.ч. **коэффициент загрузки предприятия**;
 - лист **Уголь_коэфф** → набор эластичности **«2026»** (правила «Уголь экспорт» / «Уголь внутренние») и привязка к сценарию.
 
 Operational-маршруты РЖД связываются через `model_route_id` по ключу: **станция + станция + груз + род вагона + тип отправки**.
@@ -285,9 +286,11 @@ GENERATE_RANDOM_ROUTES=1 ADMIN_PASSWORD="ваш_пароль" bash new_project/t
 | 3 | `import_railroads` → `import_regions` → `import_stations` → `import_cargo_groups` → `import_cargos` → `import_shippers` → `init_route_refs` |
 | 4 | `create_base_scenario` → `load_base_btd` |
 | 5 | `import_rzd_routes --clear` |
-| 6 | `export_ipem_rzd_economics_2025` → `apply_ipem_economics_to_rzd_2025 --from-export` |
+| 6 | `import_ipem_coal_2026_routes --file ../data/ipem/Уголь_эластика_2026.xlsx --route-set-code RZD_2026 --scenario-id 1` → `refresh_deploy_caches` |
 | 7 | В UI: сценарий → набор маршрутов **RZD_2026** |
 | 8 | `runserver` |
+
+> Legacy (без уголь 2026): шаг 6 — `export_ipem_rzd_economics_2025` → `apply_ipem_economics_to_rzd_2025 --from-export` (см. §6.1–6.2).
 
 ---
 

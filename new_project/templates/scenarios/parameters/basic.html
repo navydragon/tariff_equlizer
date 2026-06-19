@@ -93,6 +93,22 @@
         <a href="{% url 'route_analysis' %}">Экономика грузов</a>
         (кроме РЖД): выберите, будет ли значение меняться по инфляции сценария.
       </p>
+      <div class="mb-3">
+        <label class="form-check">
+          <input
+            type="checkbox"
+            class="form-check-input"
+            id="editScenarioConsiderEnterpriseLoad"
+            name="consider_enterprise_load"
+            {% if scenario.consider_enterprise_load %}checked{% endif %}
+          />
+          <span class="form-check-label">Учитывать загрузку предприятия</span>
+        </label>
+        <div class="form-text">
+          Ограничивает рост коэффициента сохранения грузовой базы
+          с учётом коэффициента загрузки предприятия на маршруте.
+        </div>
+      </div>
       <div class="table-responsive">
         <table class="table table-vcenter">
           <thead>
@@ -126,6 +142,35 @@
               </td>
             </tr>
             {% endfor %}
+            <tr>
+              <td>
+                Прогноз коэффициента сохранения грузовой базы
+                <div class="text-muted small">
+                  Относительно базовой маржинальности: при неизменной экономике
+                  коэффициент равен 1 (как в IPEM). По текущей маржинальности —
+                  значение сразу зависит от уровня маржи маршрута.
+                </div>
+              </td>
+              <td>
+                <div class="btn-group flex-wrap" role="group" aria-label="Прогноз коэффициента сохранения грузовой базы">
+                  {% for mode_key, mode_label in retention_coefficient_modes %}
+                  <input
+                    type="radio"
+                    class="btn-check"
+                    name="retention_coefficient_mode"
+                    id="retention_coefficient_mode__{{ mode_key }}"
+                    value="{{ mode_key }}"
+                    autocomplete="off"
+                    {% if scenario.retention_coefficient_mode == mode_key %}checked{% endif %}
+                  />
+                  <label
+                    class="btn btn-outline-primary"
+                    for="retention_coefficient_mode__{{ mode_key }}"
+                  >{{ mode_label }}</label>
+                  {% endfor %}
+                </div>
+              </td>
+            </tr>
             <tr>
               <td>
                 Экспортная цена

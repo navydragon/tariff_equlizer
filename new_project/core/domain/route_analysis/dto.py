@@ -209,6 +209,28 @@ class KpiResponseDTO:
 
 
 @dataclass(frozen=True)
+class RzdTariffSensitivityPointDTO:
+    change_pct: str
+    coefficient: str | None
+
+    def to_api_dict(self) -> dict[str, Any]:
+        return {
+            "change_pct": self.change_pct,
+            "coefficient": self.coefficient,
+        }
+
+
+@dataclass(frozen=True)
+class RzdTariffSensitivityResponseDTO:
+    points: list[RzdTariffSensitivityPointDTO]
+
+    def to_api_dict(self) -> dict[str, Any]:
+        return {
+            "points": [point.to_api_dict() for point in self.points],
+        }
+
+
+@dataclass(frozen=True)
 class RouteAnalysisResponseDTO:
     scenario_id: int
     route_id: int
@@ -224,6 +246,9 @@ class RouteAnalysisResponseDTO:
     )
     kpi: KpiResponseDTO = field(
         default_factory=lambda: KpiResponseDTO(by_year=[]),
+    )
+    rzd_tariff_sensitivity: RzdTariffSensitivityResponseDTO = field(
+        default_factory=lambda: RzdTariffSensitivityResponseDTO(points=[]),
     )
 
     def to_api_dict(self) -> dict[str, Any]:
@@ -244,6 +269,7 @@ class RouteAnalysisResponseDTO:
             "equalizer": self.equalizer.to_api_dict(),
             "effects": self.effects.to_api_dict(),
             "kpi": self.kpi.to_api_dict(),
+            "rzd_tariff_sensitivity": self.rzd_tariff_sensitivity.to_api_dict(),
         }
         if self.transport_structure is not None:
             payload["transport_structure"] = self.transport_structure.to_api_dict()

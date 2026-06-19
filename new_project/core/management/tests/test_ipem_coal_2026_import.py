@@ -190,6 +190,21 @@ class IpemCoal2026ImportTests(TestCase):
         self.assertEqual(model_route.cargo_code_3, "161")
         self.assertEqual(model_route.cargo_code_izpod_3, "162")
 
+    def test_parse_enterprise_load_coefficient_from_unnamed_column(self) -> None:
+        from core.management.ipem_economics import parse_enterprise_load_coefficient
+
+        self.assertEqual(
+            parse_enterprise_load_coefficient({"Unnamed: 45": "0.875"}),
+            Decimal("0.875"),
+        )
+        self.assertEqual(
+            parse_enterprise_load_coefficient(
+                {"Коэффициент загрузки предприятия": "0.9"},
+            ),
+            Decimal("0.9"),
+        )
+        self.assertIsNone(parse_enterprise_load_coefficient({}))
+
     def test_import_creates_model_route_from_resolved_row(self) -> None:
         resolved = IpemCoal2026ResolvedRow(
             ipem_row=1,
@@ -211,6 +226,7 @@ class IpemCoal2026ImportTests(TestCase):
             delivery_time_empty_days=5,
             delivery_time_ops_days=1,
             rate_per_wagon_per_day=Decimal("1500.00"),
+            enterprise_load_coefficient=Decimal("0.9"),
             cargo_code_3="161",
             cargo_group_izpod="Уголь каменный",
         )
@@ -221,6 +237,7 @@ class IpemCoal2026ImportTests(TestCase):
         self.assertTrue(model_route.is_model)
         self.assertIsNone(model_route.model_route_id)
         self.assertEqual(model_route.market_price_per_ton, Decimal("5000.00"))
+        self.assertEqual(model_route.enterprise_load_coefficient, Decimal("0.9"))
         self.assertEqual(model_route.cargo_code_3, "161")
         self.assertEqual(model_route.cargo_group_izpod, "Уголь каменный")
         linked = link_operational_routes_to_models(self.route_set, [model_route])

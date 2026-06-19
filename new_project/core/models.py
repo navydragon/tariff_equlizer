@@ -644,6 +644,13 @@ class Route(models.Model):
         null=True,
         blank=True,
     )
+    enterprise_load_coefficient = models.DecimalField(
+        "Коэффициент загрузки предприятия",
+        max_digits=6,
+        decimal_places=4,
+        null=True,
+        blank=True,
+    )
     is_model = models.BooleanField(
         "Модельный маршрут IPEM",
         default=False,

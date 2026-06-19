@@ -194,6 +194,7 @@ class IpemCoal2026ResolvedRow:
     delivery_time_empty_days: Optional[int]
     delivery_time_ops_days: Optional[int]
     rate_per_wagon_per_day: Optional[Decimal]
+    enterprise_load_coefficient: Optional[Decimal] = None
     cargo_code_izpod: str = ""
     cargo_group_izpod: str = ""
     cargo_code_3: str = ""
@@ -297,6 +298,15 @@ def parse_decimal_cell(raw: str) -> Optional[Decimal]:
         return Decimal(value.replace(" ", "").replace(",", "."))
     except (InvalidOperation, ValueError):
         return None
+
+
+def parse_enterprise_load_coefficient(row: dict[str, str]) -> Optional[Decimal]:
+    raw = (
+        row.get("Коэффициент загрузки предприятия")
+        or row.get("Unnamed: 45")
+        or ""
+    )
+    return parse_decimal_cell(raw)
 
 
 def parse_ipem_economics_row(row: dict[str, str]) -> dict[str, Optional[Decimal]]:
@@ -757,6 +767,7 @@ def resolve_ipem_coal_2026_row(
             rate_per_wagon_per_day=parse_decimal_cell(
                 row.get("Ставка на вагон, руб. за вагон в сутки", "")
             ),
+            enterprise_load_coefficient=parse_enterprise_load_coefficient(row),
             **cargo_izpod,
         ),
         [],
@@ -788,6 +799,7 @@ def build_model_route_from_resolved_row(
         delivery_time_empty_days=resolved.delivery_time_empty_days,
         delivery_time_ops_days=resolved.delivery_time_ops_days,
         rate_per_wagon_per_day=resolved.rate_per_wagon_per_day,
+        enterprise_load_coefficient=resolved.enterprise_load_coefficient,
         cargo_code_izpod=resolved.cargo_code_izpod,
         cargo_group_izpod=resolved.cargo_group_izpod,
         cargo_code_3=resolved.cargo_code_3,

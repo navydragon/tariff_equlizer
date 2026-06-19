@@ -314,6 +314,10 @@ class RouteAnalysisServiceTests(TestCase):
 
     def test_kpi_retention_coefficient_from_elasticity_rule(self) -> None:
         self._attach_elasticity_rule()
+        self.scenario.retention_coefficient_mode = (
+            Scenario.RetentionCoefficientMode.ABSOLUTE
+        )
+        self.scenario.save(update_fields=["retention_coefficient_mode"])
         self.route.transport_volume_tons = Decimal("1000000")
         self.route.save(update_fields=["transport_volume_tons"])
 
@@ -328,6 +332,28 @@ class RouteAnalysisServiceTests(TestCase):
         self.assertEqual(response.kpi.by_year[0].elasticity.rub, "-0.20")
         self.assertIsNotNone(response.kpi.by_year[0].marginality.pct)
 
+    def test_kpi_retention_coefficient_relative_to_base_unchanged_margin(self) -> None:
+        self._attach_elasticity_rule()
+        BTDCategoryValue.objects.filter(
+            scenario=self.scenario,
+            year=2026,
+        ).update(value=Decimal("1.0000"))
+        self.scenario.retention_coefficient_mode = (
+            Scenario.RetentionCoefficientMode.RELATIVE_TO_BASE
+        )
+        self.scenario.save(update_fields=["retention_coefficient_mode"])
+        self.route.transport_volume_tons = Decimal("1000000")
+        self.route.save(update_fields=["transport_volume_tons"])
+
+        response = self.service.calculate(
+            request_dto=self._request(),
+            scenario=self.scenario,
+            route=self.route,
+        )
+
+        self.assertEqual(response.kpi.by_year[0].elasticity.pct, "1.0000")
+        self.assertEqual(response.kpi.by_year[0].elasticity.rub, "0.00")
+
     def test_kpi_retention_coefficient_without_elasticity_set(self) -> None:
         response = self.service.calculate(
             request_dto=self._request(),
@@ -336,6 +362,68 @@ class RouteAnalysisServiceTests(TestCase):
         )
 
         self.assertIsNone(response.kpi.by_year[0].elasticity.pct)
+
+    def test_kpi_retention_coefficient_capped_by_enterprise_load(self) -> None:
+        self._attach_elasticity_rule()
+        self.scenario.retention_coefficient_mode = (
+            Scenario.RetentionCoefficientMode.ABSOLUTE
+        )
+        self.scenario.save(update_fields=["retention_coefficient_mode"])
+        rule = ElasticityRule.objects.get(
+            elasticity_set=self.scenario.elasticity_set,
+            name="Internal KPI rule",
+        )
+        ElasticityRulePoint.objects.filter(
+            rule=rule,
+            marginality=Decimal("0.10"),
+        ).update(coefficient=Decimal("1.2000"))
+        self.route.transport_volume_tons = Decimal("1000000")
+        self.route.enterprise_load_coefficient = Decimal("0.9")
+        self.route.save(
+            update_fields=["transport_volume_tons", "enterprise_load_coefficient"],
+        )
+
+        response = self.service.calculate(
+            request_dto=self._request(),
+            scenario=self.scenario,
+            route=self.route,
+        )
+
+        self.assertEqual(response.kpi.by_year[0].elasticity.pct, "1.1000")
+
+    def test_kpi_retention_coefficient_enterprise_load_from_model_route(self) -> None:
+        self._attach_elasticity_rule()
+        rule = ElasticityRule.objects.get(
+            elasticity_set=self.scenario.elasticity_set,
+            name="Internal KPI rule",
+        )
+        ElasticityRulePoint.objects.filter(
+            rule=rule,
+            marginality=Decimal("0.10"),
+        ).update(coefficient=Decimal("1.2000"))
+        model_route = Route.objects.create(
+            route_set=self.route_set,
+            is_model=True,
+            route_code="MODEL-LOAD",
+            cargo=self.route.cargo,
+            origin_station=self.route.origin_station,
+            destination_station=self.route.destination_station,
+            wagon_kind=self.route.wagon_kind,
+            shipment_type=self.route.shipment_type,
+            message_type=self.route.message_type,
+            enterprise_load_coefficient=Decimal("0.9"),
+        )
+        self.route.model_route = model_route
+        self.route.transport_volume_tons = Decimal("1000000")
+        self.route.save(update_fields=["model_route", "transport_volume_tons"])
+
+        response = self.service.calculate(
+            request_dto=self._request(),
+            scenario=self.scenario,
+            route=Route.objects.select_related("model_route").get(pk=self.route.pk),
+        )
+
+        self.assertEqual(response.kpi.by_year[0].elasticity.pct, "1.1000")
 
     def test_invalid_override_key_rejected(self) -> None:
         dto = RouteAnalysisRequestDTO(
@@ -583,6 +671,115 @@ class RouteAnalysisServiceTests(TestCase):
         price_values = [Decimal(v) for v in self._row_values(response, "price_rub")]
         usd_y0 = Decimal("2000.00") / Decimal("100")
         self.assertEqual(price_values[1], _quantize(usd_y0 * Decimal("200")))
+
+    def test_rzd_tariff_sensitivity_at_zero_relative_mode(self) -> None:
+        self._attach_elasticity_rule()
+
+        response = self.service.calculate(
+            request_dto=self._request(),
+            scenario=self.scenario,
+            route=self.route,
+        )
+
+        zero_point = next(
+            point
+            for point in response.rzd_tariff_sensitivity.points
+            if point.change_pct == "0"
+        )
+        self.assertEqual(zero_point.coefficient, "1.0000")
+
+    def test_rzd_tariff_sensitivity_without_elasticity(self) -> None:
+        response = self.service.calculate(
+            request_dto=self._request(),
+            scenario=self.scenario,
+            route=self.route,
+        )
+
+        self.assertEqual(response.rzd_tariff_sensitivity.points, [])
+
+    def test_rzd_tariff_sensitivity_in_response(self) -> None:
+        self._attach_elasticity_rule()
+
+        response = self.service.calculate(
+            request_dto=self._request(),
+            scenario=self.scenario,
+            route=self.route,
+        )
+
+        self.assertEqual(len(response.rzd_tariff_sensitivity.points), 101)
+        payload = response.to_api_dict()
+        self.assertIn("rzd_tariff_sensitivity", payload)
+        self.assertEqual(len(payload["rzd_tariff_sensitivity"]["points"]), 101)
+
+    def test_rzd_tariff_sensitivity_curve_responds_to_tariff_change(self) -> None:
+        self._attach_elasticity_rule()
+
+        response = self.service.calculate(
+            request_dto=self._request(),
+            scenario=self.scenario,
+            route=self.route,
+        )
+
+        by_pct = {
+            point.change_pct: point.coefficient
+            for point in response.rzd_tariff_sensitivity.points
+        }
+        self.assertEqual(by_pct["0"], "1.0000")
+        self.assertLessEqual(Decimal(by_pct["25"]), Decimal(by_pct["0"]))
+
+    def test_rzd_tariff_sensitivity_high_margin_tariff_increase_stays_at_one(self) -> None:
+        elasticity_set = ElasticitySet.objects.create(
+            name="Export sensitivity",
+            author=self.user,
+        )
+        rule = ElasticityRule.objects.create(
+            elasticity_set=elasticity_set,
+            name="Export sensitivity rule",
+            position=0,
+            message_type=self.route.message_type,
+        )
+        for marginality, coefficient in (
+            (Decimal("0.05"), Decimal("1.0400")),
+            (Decimal("0.13"), Decimal("1.0550")),
+            (Decimal("0.23"), Decimal("1.1100")),
+        ):
+            ElasticityRulePoint.objects.create(
+                rule=rule,
+                marginality=marginality,
+                coefficient=coefficient,
+            )
+        self.scenario.elasticity_set = elasticity_set
+        self.scenario.save(update_fields=["elasticity_set"])
+
+        self.route.market_price_per_ton = Decimal("9915.19")
+        self.route.production_cost_per_ton = Decimal("2930.60")
+        self.route.rzd_cost_total_per_ton = Decimal("3685.16")
+        self.route.operators_cost_per_ton = Decimal("240.00")
+        self.route.transshipment_cost_per_ton = Decimal("763.00")
+        self.route.enterprise_load_coefficient = Decimal("0.9552")
+        self.route.save(
+            update_fields=[
+                "market_price_per_ton",
+                "production_cost_per_ton",
+                "rzd_cost_total_per_ton",
+                "operators_cost_per_ton",
+                "transshipment_cost_per_ton",
+                "enterprise_load_coefficient",
+            ],
+        )
+
+        response = self.service.calculate(
+            request_dto=self._request(),
+            scenario=self.scenario,
+            route=self.route,
+        )
+
+        by_pct = {
+            point.change_pct: point.coefficient
+            for point in response.rzd_tariff_sensitivity.points
+        }
+        self.assertEqual(by_pct["0"], "1.0000")
+        self.assertEqual(by_pct["25"], "1.0000")
 
 
 def _quantize(value: Decimal) -> Decimal:

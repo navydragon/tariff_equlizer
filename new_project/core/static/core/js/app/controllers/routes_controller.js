@@ -1033,6 +1033,24 @@ import {
         it.distance_empty_km ?? "";
       document.getElementById("routeLoadTonsPerWagon").value =
         it.load_tons_per_wagon ?? "";
+      const enterpriseLoadEl = document.getElementById(
+        "routeEnterpriseLoadCoefficient",
+      );
+      if (enterpriseLoadEl) {
+        enterpriseLoadEl.value =
+          it.enterprise_load_coefficient ??
+          it.enterprise_load_coefficient_from_model ??
+          "";
+        const hintEl = enterpriseLoadEl.parentElement?.querySelector(".form-text");
+        if (hintEl) {
+          const inherited =
+            it.enterprise_load_coefficient == null &&
+            it.enterprise_load_coefficient_from_model != null;
+          hintEl.textContent = inherited
+            ? `Доля: 1 = 100%, 0.9 = 90% (из model-маршрута: ${it.enterprise_load_coefficient_from_model})`
+            : "Доля: 1 = 100%, 0.9 = 90%";
+        }
+      }
       document.getElementById("routeEmptyReturnPct").value =
         it.empty_wagon_return_pct ?? "";
       document.getElementById("routeDeliveryLoaded").value =
@@ -1165,6 +1183,9 @@ import {
         document.getElementById("routeDistanceEmpty").value.trim();
       payload.load_tons_per_wagon =
         document.getElementById("routeLoadTonsPerWagon").value.trim();
+      payload.enterprise_load_coefficient = document
+        .getElementById("routeEnterpriseLoadCoefficient")
+        .value.trim();
       payload.empty_wagon_return_pct =
         document.getElementById("routeEmptyReturnPct").value.trim();
       payload.delivery_time_loaded_days =

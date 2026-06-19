@@ -9,6 +9,10 @@ class Scenario(models.Model):
         FIXED = "fixed", "Без изменений"
         BY_FX = "by_fx", "По курсу $"
 
+    class RetentionCoefficientMode(models.TextChoices):
+        ABSOLUTE = "absolute", "По текущей маржинальности"
+        RELATIVE_TO_BASE = "relative_to_base", "Относительно базовой маржинальности"
+
     name = models.CharField("Название", max_length=255)
     description = models.TextField("Описание", blank=True)
     start_year = models.IntegerField("Год начала", default=2025)
@@ -58,6 +62,16 @@ class Scenario(models.Model):
     include_base_tariff_decisions = models.BooleanField(
         "Учитывать базовые тарифные решения",
         default=True,
+    )
+    consider_enterprise_load = models.BooleanField(
+        "Учитывать загрузку предприятия",
+        default=True,
+    )
+    retention_coefficient_mode = models.CharField(
+        "Прогноз коэффициента сохранения грузовой базы",
+        max_length=32,
+        choices=RetentionCoefficientMode.choices,
+        default=RetentionCoefficientMode.RELATIVE_TO_BASE,
     )
 
     class Meta:

@@ -729,6 +729,38 @@ import { persistActiveScenario } from "../lib/scenario_active.js";
       }
     }
 
+    _resolveEnterpriseLoadCoefficient(route) {
+      if (!route) return null;
+      const own = route.enterprise_load_coefficient;
+      if (own != null && own !== "" && Number(own) !== 0) {
+        return own;
+      }
+      const fromModel = route.enterprise_load_coefficient_from_model;
+      if (fromModel != null && fromModel !== "" && Number(fromModel) !== 0) {
+        return fromModel;
+      }
+      return null;
+    }
+
+    _formatEnterpriseLoadCoefficient(value) {
+      const num = Number(value);
+      if (!Number.isFinite(num) || num === 0) return "";
+      const pct = num * 100;
+      const pctText = pct.toLocaleString("ru-RU", {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 2,
+      });
+      return `${pctText}%`;
+    }
+
+    _shouldShowEnterpriseLoadCoefficient(route) {
+      const scenario = this.state.selectedScenario;
+      if (!scenario || scenario.consider_enterprise_load === false) {
+        return false;
+      }
+      return this._resolveEnterpriseLoadCoefficient(route) != null;
+    }
+
     _renderRouteDetails(route) {
       const detailsEl = document.getElementById("routeAnalysisRouteDetails");
       if (!detailsEl) return;
@@ -752,6 +784,12 @@ import { persistActiveScenario } from "../lib/scenario_active.js";
       const msgType = (route.message_type_name || "").trim();
       const wagonKind = (route.wagon_kind_name || "").trim();
       const shipmentType = (route.shipment_type_name || "").trim();
+      const enterpriseLoadRaw = this._shouldShowEnterpriseLoadCoefficient(route)
+        ? this._resolveEnterpriseLoadCoefficient(route)
+        : null;
+      const enterpriseLoad = enterpriseLoadRaw
+        ? this._formatEnterpriseLoadCoefficient(enterpriseLoadRaw)
+        : "";
 
       const pill = (text, icon, variant) => {
         if (!text) return "";
@@ -815,6 +853,7 @@ import { persistActiveScenario } from "../lib/scenario_active.js";
           <div class="mt-2">
             ${row("Род вагона", wagonKind, "ti-truck")}
             ${row("Тип отправки", shipmentType, "ti-send")}
+            ${enterpriseLoad ? row("Загрузка предприятия", enterpriseLoad, "ti-gauge") : ""}
           </div>
         </div>
       `;
@@ -1007,6 +1046,58 @@ import { persistActiveScenario } from "../lib/scenario_active.js";
         }
         showKpi();
         this._renderKpiCards(kpiWrapEl, result.data);
+        return;
+      }
+
+      if (typeValue === "rzd_tariff_sensitivity") {
+        if (!chartCanvas) return;
+        if (typeof window.Chart === "undefined") {
+          showPlaceholder(`
+            <div class="mb-2">
+              <i class="ti ti-alert-triangle" style="font-size: 2rem;"></i>
+            </div>
+            <div>Chart.js не загружен. Обновите страницу.</div>
+          `);
+          return;
+        }
+
+        showPlaceholder(`
+          <div class="text-center text-muted py-4">
+            <div class="spinner-border text-primary" role="status" aria-label="Загрузка"></div>
+            <div class="mt-2">Расчёт чувствительности к тарифу РЖД…</div>
+          </div>
+        `);
+
+        const result = await this._fetchRouteAnalysisData({});
+        if (!result.ok) {
+          showPlaceholder(`
+            <div class="alert alert-danger" role="alert">
+              ${escapeHtml((result.errors || ["Ошибка"]).join("; "))}
+            </div>
+          `);
+          return;
+        }
+
+        const points =
+          result.data &&
+          result.data.rzd_tariff_sensitivity &&
+          Array.isArray(result.data.rzd_tariff_sensitivity.points)
+            ? result.data.rzd_tariff_sensitivity.points
+            : [];
+
+        if (!points.length || points.every((point) => point.coefficient == null)) {
+          showPlaceholder(`
+            <div class="mb-2">
+              <i class="ti ti-info-circle" style="font-size: 2rem;"></i>
+            </div>
+            <div>Для маршрута нет данных эластичности для построения диаграммы.</div>
+          `);
+          return;
+        }
+
+        showChart();
+        const ctx = chartCanvas.getContext("2d");
+        this._renderRzdTariffSensitivityChart(ctx, points);
         return;
       }
 
@@ -2695,6 +2786,122 @@ import { persistActiveScenario } from "../lib/scenario_active.js";
           <div class="route-analysis-kpi-metric__label">${escapeHtml(metric.label || "")}</div>
         </div>
       `;
+    }
+
+    _renderRzdTariffSensitivityChart(ctx, points) {
+      if (!ctx || !points || !points.length) return;
+
+      if (this.state.trendsChart) {
+        try {
+          this.state.trendsChart.destroy();
+        } catch (_e) {
+          // ignore
+        }
+        this.state.trendsChart = null;
+      }
+
+      const labels = points.map((point) => String(point.change_pct));
+      const zeroIndex = points.findIndex((point) => String(point.change_pct) === "0");
+      const coefficientData = points.map((point) => {
+        const value = Number(String(point.coefficient ?? "").replace(",", "."));
+        return Number.isFinite(value) ? value : null;
+      });
+
+      this.state.trendsChart = new window.Chart(ctx, {
+        type: "line",
+        data: {
+          labels,
+          datasets: [
+            {
+              label: "Коэффициент сохранения грузовой базы",
+              data: coefficientData,
+              borderColor: "#1f6feb",
+              backgroundColor: "#1f6feb",
+              borderWidth: 2,
+              pointRadius: coefficientData.map((_value, index) =>
+                index === zeroIndex ? 6 : 2,
+              ),
+              pointHoverRadius: coefficientData.map((_value, index) =>
+                index === zeroIndex ? 7 : 4,
+              ),
+              tension: 0,
+            },
+            {
+              label: "Без изменения объёма",
+              data: labels.map(() => 1),
+              borderColor: "#9ca3af",
+              backgroundColor: "#9ca3af",
+              borderWidth: 2,
+              borderDash: [6, 4],
+              pointRadius: 0,
+              pointHoverRadius: 0,
+              fill: false,
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              position: "bottom",
+              labels: {
+                boxWidth: 18,
+                boxHeight: 10,
+              },
+            },
+            title: {
+              display: true,
+              text: 'Изменение тарифа ОАО "РЖД"',
+              align: "start",
+              font: { size: 16, weight: "600" },
+              padding: { bottom: 12 },
+            },
+            datalabels: {
+              display: false,
+            },
+            tooltip: {
+              enabled: true,
+              mode: "index",
+              intersect: false,
+              callbacks: {
+                label: (context) => {
+                  const label = context.dataset.label || "";
+                  const value = context.parsed.y;
+                  if (value == null || Number.isNaN(value)) {
+                    return `${label}: —`;
+                  }
+                  return `${label}: ${value.toFixed(4)}`;
+                },
+              },
+            },
+          },
+          interaction: {
+            mode: "index",
+            intersect: false,
+          },
+          scales: {
+            x: {
+              title: {
+                display: true,
+                text: 'Изменение тарифа ОАО "РЖД", %',
+              },
+              grid: { display: false },
+              ticks: {
+                maxTicksLimit: 11,
+                autoSkip: true,
+              },
+            },
+            y: {
+              title: {
+                display: true,
+                text: "Коэффициент сохранения грузовой базы",
+              },
+              grid: { color: "#e5e7eb" },
+            },
+          },
+        },
+      });
     }
 
     _renderKpiCards(containerEl, data) {

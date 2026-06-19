@@ -626,6 +626,31 @@ class PriceChangeSettingServiceTests(TestCase):
         self.assertIsNotNone(copied)
         self.assertEqual(copied.export_price_mode, Scenario.ExportPriceMode.BY_FX)
 
+    def test_update_scenario_saves_consider_enterprise_load(self):
+        scenario_service = ScenarioService()
+        from scenarios.domain.dto import UpdateScenarioDTO
+
+        dto = UpdateScenarioDTO(consider_enterprise_load=False)
+        updated, errors = scenario_service.update_scenario(self.scenario.id, dto, self.user)
+        self.assertFalse(errors)
+        self.assertIsNotNone(updated)
+        self.assertFalse(updated.consider_enterprise_load)
+
+        self.scenario.refresh_from_db()
+        self.assertFalse(self.scenario.consider_enterprise_load)
+
+    def test_copy_scenario_copies_consider_enterprise_load(self):
+        self.scenario.consider_enterprise_load = False
+        self.scenario.save(update_fields=["consider_enterprise_load"])
+
+        copied = self.scenario_repository.copy_scenario(
+            source_id=self.scenario.id,
+            new_name="Копия загрузки",
+            new_author=self.user,
+        )
+        self.assertIsNotNone(copied)
+        self.assertFalse(copied.consider_enterprise_load)
+
 
 class ScenarioCopyTests(TestCase):
     """Копирование сценария при создании на базе выбранного."""
@@ -1378,6 +1403,252 @@ class RetentionCoefficientLookupTests(TestCase):
             marginality_ratio_from_percent(Decimal("13.00")),
         )
         self.assertEqual(coefficient, Decimal("1.0550"))
+
+
+class RetentionCoefficientModeTests(TestCase):
+    def setUp(self) -> None:
+        from core.models import (
+            Cargo,
+            CargoGroup,
+            MessageType,
+            RailRoad,
+            Region,
+            Route,
+            RouteSet,
+            ShipmentType,
+            Station,
+            WagonKind,
+        )
+        from scenarios.domain.utils.elasticity_matching import (
+            compute_retention_coefficient,
+            route_base_marginality_ratio,
+        )
+        from scenarios.models import ElasticityRule, ElasticityRulePoint, ElasticitySet, Scenario
+
+        self.compute_retention_coefficient = compute_retention_coefficient
+        self.route_base_marginality_ratio = route_base_marginality_ratio
+
+        self.user = User.objects.create_user(
+            login="retention_mode_user",
+            password="test_pass",
+        )
+        route_set = RouteSet.objects.create(name="Retention mode RS", code="RS_RMODE")
+        self.scenario = Scenario.objects.create(
+            name="Retention mode scenario",
+            start_year=2025,
+            end_year=2026,
+            route_set=route_set,
+            author=self.user,
+        )
+        elasticity_set = ElasticitySet.objects.create(
+            name="Retention mode set",
+            author=self.user,
+        )
+        self.scenario.elasticity_set = elasticity_set
+        self.scenario.save(update_fields=["elasticity_set"])
+
+        cargo_group = CargoGroup.objects.create(
+            code=902,
+            name="Retention mode group",
+            position=1,
+        )
+        cargo = Cargo.objects.create(
+            code=9002,
+            name="Retention mode cargo",
+            cargo_group=cargo_group,
+        )
+        railroad = RailRoad.objects.create(code="RR_RMODE", name="Retention mode road")
+        region = Region.objects.create(
+            short_name="RM",
+            full_name="Retention mode region",
+            type="область",
+        )
+        station = Station.objects.create(
+            esr_code=900002,
+            short_name="RMD",
+            full_name="Retention mode station",
+            region=region,
+            railroad=railroad,
+        )
+        wagon_kind = WagonKind.objects.create(code="WK_RMODE", name="Retention mode wagon")
+        shipment_type = ShipmentType.objects.create(
+            code="ST_RMODE",
+            name="Retention mode shipment",
+        )
+        message_type = MessageType.objects.create(
+            code="MT_RMODE",
+            name="Внутр. перевозки mode",
+        )
+        self.route = Route.objects.create(
+            route_set=route_set,
+            cargo=cargo,
+            origin_station=station,
+            destination_station=station,
+            wagon_kind=wagon_kind,
+            shipment_type=shipment_type,
+            message_type=message_type,
+            route_code="RMOD-001",
+            market_price_per_ton=Decimal("2000"),
+            production_cost_per_ton=Decimal("500"),
+            rzd_cost_total_per_ton=Decimal("1000"),
+            operators_cost_per_ton=Decimal("100"),
+            transshipment_cost_per_ton=Decimal("50"),
+        )
+        self.rule = ElasticityRule.objects.create(
+            elasticity_set=elasticity_set,
+            name="Retention mode rule",
+            position=0,
+            message_type=message_type,
+        )
+        for marginality, coefficient in (
+            (Decimal("-0.10"), Decimal("1.0000")),
+            (Decimal("0.00"), Decimal("0.9000")),
+            (Decimal("0.10"), Decimal("0.8000")),
+            (Decimal("0.20"), Decimal("0.7000")),
+        ):
+            ElasticityRulePoint.objects.create(
+                rule=self.rule,
+                marginality=marginality,
+                coefficient=coefficient,
+            )
+
+    def test_route_base_marginality_ratio_from_db_fields(self) -> None:
+        ratio = self.route_base_marginality_ratio(self.route)
+        self.assertEqual(ratio, Decimal("0.175"))
+
+    def test_compute_retention_coefficient_absolute_mode(self) -> None:
+        from scenarios.models import Scenario
+
+        self.scenario.retention_coefficient_mode = (
+            Scenario.RetentionCoefficientMode.ABSOLUTE
+        )
+        self.scenario.save(update_fields=["retention_coefficient_mode"])
+
+        coefficient = self.compute_retention_coefficient(
+            self.route,
+            self.scenario,
+            Decimal("0.175"),
+        )
+        self.assertEqual(coefficient, Decimal("0.8000"))
+
+    def test_compute_retention_coefficient_relative_mode_unchanged_margin(self) -> None:
+        from scenarios.models import Scenario
+
+        self.scenario.retention_coefficient_mode = (
+            Scenario.RetentionCoefficientMode.RELATIVE_TO_BASE
+        )
+        self.scenario.save(update_fields=["retention_coefficient_mode"])
+
+        base_ratio = self.route_base_marginality_ratio(self.route)
+        coefficient = self.compute_retention_coefficient(
+            self.route,
+            self.scenario,
+            base_ratio,
+        )
+        self.assertEqual(coefficient, Decimal("1"))
+
+    def test_compute_retention_coefficient_relative_mode_margin_drop(self) -> None:
+        from scenarios.models import Scenario
+
+        self.scenario.retention_coefficient_mode = (
+            Scenario.RetentionCoefficientMode.RELATIVE_TO_BASE
+        )
+        self.scenario.save(update_fields=["retention_coefficient_mode"])
+
+        coefficient = self.compute_retention_coefficient(
+            self.route,
+            self.scenario,
+            Decimal("0.05"),
+        )
+        self.assertEqual(coefficient, Decimal("1.1"))
+
+
+class EnterpriseLoadCapTests(TestCase):
+    def test_apply_enterprise_load_cap_limits_growth(self) -> None:
+        from scenarios.domain.utils.elasticity_matching import apply_enterprise_load_cap
+
+        self.assertEqual(
+            apply_enterprise_load_cap(
+                Decimal("1.2"),
+                Decimal("0.9"),
+                enabled=True,
+            ),
+            Decimal("1.1"),
+        )
+
+    def test_apply_enterprise_load_cap_at_full_load(self) -> None:
+        from scenarios.domain.utils.elasticity_matching import apply_enterprise_load_cap
+
+        self.assertEqual(
+            apply_enterprise_load_cap(
+                Decimal("1.2"),
+                Decimal("1"),
+                enabled=True,
+            ),
+            Decimal("1"),
+        )
+
+    def test_apply_enterprise_load_cap_disabled(self) -> None:
+        from scenarios.domain.utils.elasticity_matching import apply_enterprise_load_cap
+
+        self.assertEqual(
+            apply_enterprise_load_cap(
+                Decimal("1.2"),
+                Decimal("0.9"),
+                enabled=False,
+            ),
+            Decimal("1.2"),
+        )
+
+    def test_apply_enterprise_load_cap_skips_zero_load(self) -> None:
+        from scenarios.domain.utils.elasticity_matching import apply_enterprise_load_cap
+
+        self.assertEqual(
+            apply_enterprise_load_cap(
+                Decimal("1.2"),
+                Decimal("0"),
+                enabled=True,
+            ),
+            Decimal("1.2"),
+        )
+
+    def test_resolve_enterprise_load_coefficient_prefers_own_value(self) -> None:
+        from types import SimpleNamespace
+
+        from scenarios.domain.utils.elasticity_matching import (
+            resolve_enterprise_load_coefficient,
+        )
+
+        model_route = SimpleNamespace(enterprise_load_coefficient=Decimal("0.875"))
+        operational = SimpleNamespace(
+            enterprise_load_coefficient=Decimal("0.9"),
+            model_route=model_route,
+            model_route_id=1,
+        )
+
+        self.assertEqual(
+            resolve_enterprise_load_coefficient(operational),
+            Decimal("0.9"),
+        )
+
+    def test_resolve_enterprise_load_coefficient_falls_back_to_model(self) -> None:
+        from types import SimpleNamespace
+
+        from scenarios.domain.utils.elasticity_matching import (
+            resolve_enterprise_load_coefficient,
+        )
+
+        model_route = SimpleNamespace(enterprise_load_coefficient=Decimal("0.875"))
+        operational = SimpleNamespace(
+            enterprise_load_coefficient=None,
+            model_route=model_route,
+            model_route_id=1,
+        )
+
+        self.assertEqual(
+            resolve_enterprise_load_coefficient(operational),
+            Decimal("0.875"),
+        )
 
 
 class ElasticityCoalSeedTests(TestCase):

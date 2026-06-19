@@ -153,9 +153,17 @@ class RouteDTO:
     transport_volume_tons: Optional[str]
     freight_turnover_tkm: Optional[str]
     freight_charge_rub: Optional[str]
+    enterprise_load_coefficient: Optional[str]
+    enterprise_load_coefficient_from_model: Optional[str]
 
     @classmethod
     def from_model(cls, route: Route) -> RouteDTO:
+        model_load: Optional[str] = None
+        if route.model_route_id and route.model_route is not None:
+            model_val = route.model_route.enterprise_load_coefficient
+            if model_val is not None:
+                model_load = _decimal_to_api_str(model_val)
+
         return cls(
             id=route.id,
             route_set_id=route.route_set_id,
@@ -280,6 +288,12 @@ class RouteDTO:
             freight_charge_rub=_decimal_to_api_str(route.freight_charge_rub)
             if route.freight_charge_rub is not None
             else None,
+            enterprise_load_coefficient=_decimal_to_api_str(
+                route.enterprise_load_coefficient,
+            )
+            if route.enterprise_load_coefficient is not None
+            else None,
+            enterprise_load_coefficient_from_model=model_load,
         )
 
     def to_api_dict(self) -> dict[str, Any]:
@@ -346,6 +360,10 @@ class RouteDTO:
             "transport_volume_tons": self.transport_volume_tons,
             "freight_turnover_tkm": self.freight_turnover_tkm,
             "freight_charge_rub": self.freight_charge_rub,
+            "enterprise_load_coefficient": self.enterprise_load_coefficient,
+            "enterprise_load_coefficient_from_model": (
+                self.enterprise_load_coefficient_from_model
+            ),
         }
 
 
@@ -589,6 +607,7 @@ class RouteWriteDTO:
             "transport_volume_tons",
             "freight_turnover_tkm",
             "freight_charge_rub",
+            "enterprise_load_coefficient",
         ):
             if name not in data:
                 continue

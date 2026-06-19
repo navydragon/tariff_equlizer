@@ -135,6 +135,10 @@ class ScenarioService:
             update_data["end_year"] = dto.end_year
         if dto.include_base_tariff_decisions is not None:
             update_data["include_base_tariff_decisions"] = dto.include_base_tariff_decisions
+        if dto.consider_enterprise_load is not None:
+            update_data["consider_enterprise_load"] = dto.consider_enterprise_load
+        if dto.retention_coefficient_mode is not None:
+            update_data["retention_coefficient_mode"] = dto.retention_coefficient_mode
 
         route_set, errors = self._get_route_set(dto.route_set_id)
         if errors:

@@ -2146,7 +2146,7 @@ def route_analysis_api(request):
         )
 
     try:
-        route = Route.objects.select_related("message_type").get(pk=dto.route_id)
+        route = Route.objects.select_related("message_type", "model_route").get(pk=dto.route_id)
     except Route.DoesNotExist:
         return JsonResponse(
             {"success": False, "errors": ["Маршрут не найден"]},
