@@ -1,5 +1,6 @@
 import { fetchJson } from "../lib/http.js";
 import { escapeHtml, setVisible } from "../lib/dom.js";
+import { persistActiveScenario } from "../lib/scenario_active.js";
 
 (function () {
   // eslint-disable-next-line no-console
@@ -28,6 +29,7 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
       "scenarioSelect",
       "searchInput",
       "filtersCollapse",
+      "searchCollapse",
       "pickerModeCargo",
       "pickerModeHolding",
       "cargoFirstFilters",
@@ -79,6 +81,7 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
         boundConfirmHandler: null,
         boundScrollHandler: null,
         boundFiltersToggleHandler: null,
+        boundSearchToggleHandler: null,
         searchTimeout: null,
         cascadeFilterTimeout: null,
         routesRequestInFlight: null,
@@ -128,6 +131,7 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
       this.state.pickerMode = this._getPickerMode();
 
       this._bindFiltersCollapseListener();
+      this._bindSearchCollapseListener();
       this._ensureModalHandlers();
       this._syncPickerModeVisibility();
       this._resetUi();
@@ -158,6 +162,15 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
         event.preventDefault();
       }
       const collapseEl = document.getElementById("routeAnalysisFiltersCollapse");
+      if (!collapseEl || typeof bootstrap === "undefined") return;
+      bootstrap.Collapse.getOrCreateInstance(collapseEl).toggle();
+    }
+
+    toggleSearch(event) {
+      if (event && typeof event.preventDefault === "function") {
+        event.preventDefault();
+      }
+      const collapseEl = document.getElementById("routeAnalysisSearchCollapse");
       if (!collapseEl || typeof bootstrap === "undefined") return;
       bootstrap.Collapse.getOrCreateInstance(collapseEl).toggle();
     }
@@ -271,6 +284,28 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
       }
     }
 
+    _bindSearchCollapseListener() {
+      const collapseEl = document.getElementById("routeAnalysisSearchCollapse");
+      if (!collapseEl || collapseEl.dataset.searchCollapseBound) return;
+      collapseEl.dataset.searchCollapseBound = "1";
+      collapseEl.addEventListener("shown.bs.collapse", () => {
+        this._syncSearchToggleAria(true);
+        if (this.hasSearchInputTarget) {
+          this.searchInputTarget.focus();
+        }
+      });
+      collapseEl.addEventListener("hidden.bs.collapse", () => {
+        this._syncSearchToggleAria(false);
+      });
+    }
+
+    _syncSearchToggleAria(expanded) {
+      const btn = document.getElementById("routeAnalysisSearchToggle");
+      if (btn) {
+        btn.setAttribute("aria-expanded", expanded ? "true" : "false");
+      }
+    }
+
     async openModal() {
       this._resetUi();
       this._syncPickerModeVisibility();
@@ -291,6 +326,7 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
       this.state.routeAnalysisCache.clear();
       this._destroyCascadeTomSelects();
       this._setScenario(scenarioId);
+      this._persistActiveScenario(scenarioId);
       this._resetRouteSearch();
       this._renderRouteDetails(null);
       this.state.selectedRoute = null;
@@ -373,7 +409,8 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
     _selectDefaultScenario() {
       const activeId = this._parseActiveScenarioId();
       const fallbackId = this._firstScenarioId();
-      const scenarioId = activeId || fallbackId;
+      const scenarioId =
+        activeId && this.state.scenarioById.has(activeId) ? activeId : fallbackId;
 
       if (this.hasScenarioSelectTarget && scenarioId != null) {
         this.scenarioSelectTarget.value = String(scenarioId);
@@ -428,6 +465,25 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
       const routeSetId = s && s.route_set_id != null ? Number(s.route_set_id) : null;
       this.state.selectedRouteSetId =
         routeSetId && !Number.isNaN(routeSetId) ? routeSetId : null;
+    }
+
+    _persistActiveScenario(scenarioId) {
+      if (!scenarioId) return;
+
+      const scenario = this.state.scenarioById.get(scenarioId);
+      const activeId = this._parseActiveScenarioId();
+      if (activeId === scenarioId) return;
+
+      void persistActiveScenario(scenarioId, {
+        routeSetId: scenario?.route_set_id,
+        onError: (errors) => {
+          this._showErrors(errors || ["Не удалось сохранить активный сценарий"]);
+        },
+      }).then((ok) => {
+        if (ok) {
+          this.activeScenarioIdValue = String(scenarioId);
+        }
+      });
     }
 
     _resetRouteSearch() {
@@ -621,7 +677,7 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
         if (!text) return "";
         const v = variant || "azure";
         return `
-          <span class="badge bg-${v}-lt text-${v}">
+          <span class="badge bg-${v}-lt text-${v} fw-normal">
             <i class="ti ${escapeHtml(icon)} me-1"></i>
             ${escapeHtml(text)}
           </span>
@@ -631,7 +687,7 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
       for (const route of items) {
         const el = document.createElement("button");
         el.type = "button";
-        el.className = "list-group-item list-group-item-action text-start";
+        el.className = "list-group-item list-group-item-action text-start py-2";
 
         const cargo = route.cargo_name || "";
         const cargoGroup = route.cargo_group_name || "";
@@ -639,23 +695,23 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
         const origin = route.origin_station_name || "";
         const destination = route.destination_station_name || "";
         const msgType = route.message_type_name || "";
-        const routeCode = route.route_code || "";
+        const wagonKind = (route.wagon_kind_name || "").trim();
 
-        const cargoGroupBadge = badge(cargoGroup, "ti-category", "teal");
-        const holdingBadge = badge(holding, "ti-building", "indigo");
-        const msgTypeBadge = badge(msgType, "ti-message", "azure");
+        const badges = [
+          badge(cargo, "ti-box", "lime"),
+          badge(cargoGroup, "ti-category", "teal"),
+          badge(holding, "ti-building", "indigo"),
+          badge(wagonKind, "ti-truck", "orange"),
+          badge(msgType, "ti-message", "azure"),
+        ]
+          .filter(Boolean)
+          .join("");
 
         el.innerHTML = `
-          <div class="d-flex w-100 justify-content-between align-items-stretch gap-2">
-            <div class="d-flex flex-column gap-1 flex-grow-1 min-w-0">
-              <div class="fw-medium text-truncate">${escapeHtml(routeCode)}</div>
-              <div class="text-muted small text-truncate">${escapeHtml(cargo)}</div>
-              <div class="text-muted small text-truncate">${escapeHtml(origin)} → ${escapeHtml(destination)}</div>
-            </div>
-            <div class="d-flex flex-column justify-content-between align-items-end text-end gap-1 flex-shrink-0">
-              <div>${cargoGroupBadge}</div>
-              ${holdingBadge ? `<div>${holdingBadge}</div>` : ""}
-              <div>${msgTypeBadge}</div>
+          <div class="d-flex flex-column gap-1 min-w-0">
+            <div class="fw-medium small text-truncate">${escapeHtml(origin)} → ${escapeHtml(destination)}</div>
+            <div class="d-flex flex-wrap align-items-center gap-1">
+              ${badges}
             </div>
           </div>
         `;
@@ -1712,7 +1768,19 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
         filtersBtn.addEventListener("click", this.state.boundFiltersToggleHandler);
       }
 
+      const searchBtn = document.getElementById("routeAnalysisSearchToggle");
+      if (searchBtn) {
+        if (!this.state.boundSearchToggleHandler) {
+          this.state.boundSearchToggleHandler = (event) => {
+            this.toggleSearch(event);
+          };
+        }
+        searchBtn.removeEventListener("click", this.state.boundSearchToggleHandler);
+        searchBtn.addEventListener("click", this.state.boundSearchToggleHandler);
+      }
+
       this._bindFiltersCollapseListener();
+      this._bindSearchCollapseListener();
     }
 
     _getCascadeSelectEl(targetName) {
@@ -2415,6 +2483,18 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
       );
     }
 
+    _formatMlnTonsDelta(val) {
+      const n = Number(String(val).replace(",", "."));
+      if (!Number.isFinite(n)) return "—";
+      const absFormatted = new Intl.NumberFormat("ru-RU", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }).format(Math.abs(n));
+      if (n > 0) return `+${absFormatted}`;
+      if (n < 0) return `-${absFormatted}`;
+      return absFormatted;
+    }
+
     _formatPct(val) {
       const n = Number(String(val).replace(",", "."));
       if (!Number.isFinite(n)) return "0.00";
@@ -2585,18 +2665,31 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
 
     _renderKpiMetric(metric) {
       if (!metric) return "";
+      const isRetentionCoefficient = String(metric.label || "").includes(
+        "Коэффициент сохранения",
+      );
+      const isMarginality = String(metric.label || "").includes("Маржинальность");
+      const pctNum = Number(String(metric.pct ?? "").replace(",", "."));
+      const pctClass =
+        isMarginality && Number.isFinite(pctNum) && pctNum < 0
+          ? "text-danger"
+          : "";
       const rub =
         metric.rub != null && metric.rub !== ""
-          ? `${this._formatMoney(metric.rub)} руб.`
+          ? isRetentionCoefficient
+            ? `(${this._formatMlnTonsDelta(metric.rub)} млн т)`
+            : `${this._formatMoney(metric.rub)} руб.`
           : "—";
       const pct =
         metric.pct != null && metric.pct !== ""
-          ? `${this._formatPct(metric.pct)}%`
+          ? isRetentionCoefficient
+            ? this._formatPct(metric.pct)
+            : `${this._formatPct(metric.pct)}%`
           : "—";
       return `
         <div class="route-analysis-kpi-metric">
           <div class="route-analysis-kpi-metric__row">
-            <span class="route-analysis-kpi-metric__pct">${escapeHtml(pct)}</span>
+            <span class="route-analysis-kpi-metric__pct ${pctClass}">${escapeHtml(pct)}</span>
             <span class="route-analysis-kpi-metric__rub">${escapeHtml(rub)}</span>
           </div>
           <div class="route-analysis-kpi-metric__label">${escapeHtml(metric.label || "")}</div>
@@ -2620,7 +2713,6 @@ import { escapeHtml, setVisible } from "../lib/dom.js";
             item.transport,
             item.rzd,
             item.marginality,
-            item.volume_share,
             item.elasticity,
           ]
             .filter(Boolean)

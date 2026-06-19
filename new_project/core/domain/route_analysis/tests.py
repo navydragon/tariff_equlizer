@@ -20,6 +20,9 @@ from core.models import (
 from scenarios.models import (
     BTDCategory,
     BTDCategoryValue,
+    ElasticityRule,
+    ElasticityRulePoint,
+    ElasticitySet,
     ExchangeRateSet,
     ExchangeRateValue,
     InflationSet,
@@ -282,6 +285,57 @@ class RouteAnalysisServiceTests(TestCase):
         self.assertEqual(response.kpi.by_year[0].year, 2026)
         self.assertIsNotNone(response.kpi.by_year[0].transport.rub)
         self.assertIsNone(response.kpi.by_year[0].volume_share.rub)
+        self.assertIsNone(response.kpi.by_year[0].elasticity.pct)
+
+    def _attach_elasticity_rule(self) -> None:
+        elasticity_set = ElasticitySet.objects.create(
+            name="Route KPI elasticity",
+            author=self.user,
+        )
+        rule = ElasticityRule.objects.create(
+            elasticity_set=elasticity_set,
+            name="Internal KPI rule",
+            position=0,
+            message_type=self.route.message_type,
+        )
+        for marginality, coefficient in (
+            (Decimal("-0.10"), Decimal("1.0000")),
+            (Decimal("0.00"), Decimal("0.9000")),
+            (Decimal("0.10"), Decimal("0.8000")),
+            (Decimal("0.20"), Decimal("0.7000")),
+        ):
+            ElasticityRulePoint.objects.create(
+                rule=rule,
+                marginality=marginality,
+                coefficient=coefficient,
+            )
+        self.scenario.elasticity_set = elasticity_set
+        self.scenario.save(update_fields=["elasticity_set"])
+
+    def test_kpi_retention_coefficient_from_elasticity_rule(self) -> None:
+        self._attach_elasticity_rule()
+        self.route.transport_volume_tons = Decimal("1000000")
+        self.route.save(update_fields=["transport_volume_tons"])
+
+        response = self.service.calculate(
+            request_dto=self._request(),
+            scenario=self.scenario,
+            route=self.route,
+        )
+
+        # price 2000 - cost 500 - rzd 1000 - oper 100 - per 50 = 350 руб. (17.5%)
+        self.assertEqual(response.kpi.by_year[0].elasticity.pct, "0.8000")
+        self.assertEqual(response.kpi.by_year[0].elasticity.rub, "-0.20")
+        self.assertIsNotNone(response.kpi.by_year[0].marginality.pct)
+
+    def test_kpi_retention_coefficient_without_elasticity_set(self) -> None:
+        response = self.service.calculate(
+            request_dto=self._request(),
+            scenario=self.scenario,
+            route=self.route,
+        )
+
+        self.assertIsNone(response.kpi.by_year[0].elasticity.pct)
 
     def test_invalid_override_key_rejected(self) -> None:
         dto = RouteAnalysisRequestDTO(

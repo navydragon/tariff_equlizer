@@ -7,9 +7,11 @@
 - tariff: отдельные тарифные решения
 - fx: курсы валют
 - inflation: инфляция
+- elasticity: эластичность
 """
 
 from .btd import BTDCategoryRepository, BTDCategoryValueRepository
+from .elasticity import ElasticityRuleRepository, ElasticitySetRepository
 from .fx import ExchangeRateSetRepository, ExchangeRateValueRepository
 from .inflation import InflationSetRepository, InflationValueRepository
 from .price_change import PriceChangeSettingRepository
@@ -24,6 +26,8 @@ __all__ = [
     "ExchangeRateValueRepository",
     "InflationSetRepository",
     "InflationValueRepository",
+    "ElasticitySetRepository",
+    "ElasticityRuleRepository",
     "PriceChangeSettingRepository",
     "TariffRuleRepository",
 ]

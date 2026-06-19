@@ -132,12 +132,27 @@ python manage.py import_rzd_routes --clear
 
 ## 6. Экономика IPEM → маршруты RZD_2026
 
-### 6.0. Уголь 2026: model-маршруты (рекомендуется)
+### 6.0. Уголь 2026: model-маршруты и эластичность (рекомендуется)
 
-Импорт строк из `data/ipem/Уголь_эластика_2026.xlsx` как **model-маршрутов** (`is_model=true`) в тот же `RouteSet RZD_2026`.  
+Импорт из `data/ipem/Уголь_эластика_2026.xlsx`:
+
+- лист **Уголь_эластика** → **model-маршруты** (`is_model=true`) в `RouteSet RZD_2026`;
+- лист **Уголь_коэфф** → набор эластичности **«2026»** (правила «Уголь экспорт» / «Уголь внутренние») и привязка к сценарию.
+
 Operational-маршруты РЖД связываются через `model_route_id` по ключу: **станция + станция + груз + род вагона + тип отправки**.
 
+Правило эластичности **не хранится на маршруте**: при расчётах выбирается runtime по `message_type` из набора сценария (`Scenario.elasticity_set`).
+
 Model-маршруты **не участвуют** в расчётах «Эффект решений» и «Куб эффектов»; в «Экономике грузов» в поиске показываются только они.
+
+```bash
+python manage.py import_ipem_coal_2026_routes ^
+  --file ../data/ipem/Уголь_эластика_2026.xlsx ^
+  --route-set-code RZD_2026 ^
+  --scenario-id 1
+```
+
+Только маршруты (без эластичности), как раньше:
 
 ```bash
 python manage.py import_ipem_coal_2026_routes ^
@@ -148,7 +163,7 @@ python manage.py import_ipem_coal_2026_routes ^
 Проверка без записи:
 
 ```bash
-python manage.py import_ipem_coal_2026_routes --dry-run
+python manage.py import_ipem_coal_2026_routes --dry-run --scenario-id 1
 ```
 
 После импорта пересобрать витрины:

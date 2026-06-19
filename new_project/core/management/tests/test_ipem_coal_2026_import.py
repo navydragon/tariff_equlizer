@@ -9,6 +9,8 @@ from core.management.ipem_economics import (
     build_model_route_from_resolved_row,
     clear_ipem_model_routes,
     link_operational_routes_to_models,
+    parse_cargo_izpod_fields_from_ipem_row,
+    sync_model_routes_cargo_izpod_from_operational,
 )
 from core.models import (
     Cargo,
@@ -121,6 +123,73 @@ class IpemCoal2026ImportTests(TestCase):
             2,
         )
 
+    def test_parse_cargo_izpod_fields_from_ipem_row(self) -> None:
+        fields = parse_cargo_izpod_fields_from_ipem_row(
+            {
+                "Код груза": "16111",
+                "Группа груза": "Уголь каменный",
+            },
+            self.cargo,
+        )
+        self.assertEqual(fields["cargo_code_3"], "161")
+        self.assertEqual(fields["cargo_group_izpod"], "Уголь каменный")
+        self.assertEqual(fields["cargo_code_izpod"], "")
+        self.assertEqual(fields["cargo_code_izpod_3"], "")
+
+    def test_parse_economics_defaults_transshipment_and_excise_to_zero(self) -> None:
+        from core.management.ipem_economics import parse_ipem_coal_2026_economics_row
+
+        economics = parse_ipem_coal_2026_economics_row(
+            {
+                "Расходы по оплате услуг операторов, руб. за тонну": "100",
+                "Расходы на перевалку, руб. за тонну": "",
+                "Акциз/пошлина": "",
+            },
+        )
+        self.assertEqual(economics["transshipment_cost_per_ton"], Decimal("0"))
+        self.assertEqual(economics["excise_or_duty_per_ton"], Decimal("0"))
+        self.assertEqual(economics["operators_cost_per_ton"], Decimal("100"))
+
+    def test_sync_cargo_izpod_from_linked_operational(self) -> None:
+        model_route = Route.objects.create(
+            route_set=self.route_set,
+            is_model=True,
+            route_code="MODEL-IZPOD",
+            cargo=self.cargo,
+            origin_station=self.origin,
+            destination_station=self.destination,
+            wagon_kind=self.wagon_kind,
+            shipment_type=self.shipment_type,
+            message_type=self.message_type,
+        )
+        operational = Route.objects.operational().first()
+        self.assertIsNotNone(operational)
+        operational.cargo_code_izpod = "16222"
+        operational.cargo_group_izpod = "Уголь каменный"
+        operational.cargo_code_3 = "161"
+        operational.cargo_code_izpod_3 = "162"
+        operational.model_route = model_route
+        operational.save(
+            update_fields=[
+                "cargo_code_izpod",
+                "cargo_group_izpod",
+                "cargo_code_3",
+                "cargo_code_izpod_3",
+                "model_route",
+            ],
+        )
+
+        updated = sync_model_routes_cargo_izpod_from_operational(
+            self.route_set,
+            [model_route],
+        )
+        self.assertEqual(updated, 1)
+        model_route.refresh_from_db()
+        self.assertEqual(model_route.cargo_code_izpod, "16222")
+        self.assertEqual(model_route.cargo_group_izpod, "Уголь каменный")
+        self.assertEqual(model_route.cargo_code_3, "161")
+        self.assertEqual(model_route.cargo_code_izpod_3, "162")
+
     def test_import_creates_model_route_from_resolved_row(self) -> None:
         resolved = IpemCoal2026ResolvedRow(
             ipem_row=1,
@@ -142,6 +211,8 @@ class IpemCoal2026ImportTests(TestCase):
             delivery_time_empty_days=5,
             delivery_time_ops_days=1,
             rate_per_wagon_per_day=Decimal("1500.00"),
+            cargo_code_3="161",
+            cargo_group_izpod="Уголь каменный",
         )
         clear_ipem_model_routes(self.route_set)
         model_route = build_model_route_from_resolved_row(self.route_set, resolved)
@@ -150,8 +221,51 @@ class IpemCoal2026ImportTests(TestCase):
         self.assertTrue(model_route.is_model)
         self.assertIsNone(model_route.model_route_id)
         self.assertEqual(model_route.market_price_per_ton, Decimal("5000.00"))
+        self.assertEqual(model_route.cargo_code_3, "161")
+        self.assertEqual(model_route.cargo_group_izpod, "Уголь каменный")
         linked = link_operational_routes_to_models(self.route_set, [model_route])
         self.assertEqual(linked, 2)
+
+    def test_clear_preserves_non_coal_model_routes(self) -> None:
+        other_group = CargoGroup.objects.create(name="Нефть", code=3, position=3)
+        other_cargo = Cargo.objects.create(
+            code="021001",
+            name="НЕФТЬ",
+            cargo_group=other_group,
+        )
+        coal_model = Route.objects.create(
+            route_set=self.route_set,
+            is_model=True,
+            route_code="MODEL-COAL",
+            cargo=self.cargo,
+            origin_station=self.origin,
+            destination_station=self.destination,
+            wagon_kind=self.wagon_kind,
+            shipment_type=self.shipment_type,
+            message_type=self.message_type,
+        )
+        other_model = Route.objects.create(
+            route_set=self.route_set,
+            is_model=True,
+            route_code="MODEL-OIL",
+            cargo=other_cargo,
+            origin_station=self.origin,
+            destination_station=self.destination,
+            wagon_kind=self.wagon_kind,
+            shipment_type=self.shipment_type,
+            message_type=self.message_type,
+        )
+        operational = Route.objects.operational().first()
+        self.assertIsNotNone(operational)
+        operational.model_route = other_model
+        operational.save(update_fields=["model_route"])
+
+        clear_ipem_model_routes(self.route_set)
+
+        self.assertFalse(Route.objects.filter(pk=coal_model.pk).exists())
+        self.assertTrue(Route.objects.filter(pk=other_model.pk).exists())
+        operational.refresh_from_db()
+        self.assertEqual(operational.model_route_id, other_model.pk)
 
     def test_import_command_dry_run(self) -> None:
         xlsx_path = (

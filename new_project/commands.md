@@ -199,21 +199,27 @@ python manage.py import_total_ipem --file total_ipem.csv --route-set-code DEFAUL
 
 ### `import_ipem_coal_2026_routes`
 
-Импорт **model-маршрутов** из `Уголь_эластика_2026.xlsx` в `RouteSet` (по умолчанию `RZD_2026`) и связка operational-маршрутов РЖД через `model_route_id`.
+Импорт **model-маршрутов** из `Уголь_эластика_2026.xlsx` в `RouteSet` (по умолчанию `RZD_2026`) и связка operational-маршрутов РЖД через `model_route_id`.  
+С `--scenario-id` из того же файла загружаются правила эластичности (лист `Уголь_коэфф`) и набор привязывается к сценарию.
 
 | Параметр | По умолчанию | Описание |
 |----------|--------------|----------|
 | `--file` | `../data/ipem/Уголь_эластика_2026.xlsx` | XLSX IPEM |
 | `--route-set-code` | `RZD_2026` | Набор маршрутов |
+| `--scenario-id` | — | Сценарий: seed эластичности + привязка набора |
+| `--skip-elasticity` | — | Только маршруты, даже при `--scenario-id` |
 | `--dry-run` | — | Только проверка резолва |
 
 ```bash
 python manage.py import_ipem_coal_2026_routes \
   --file ../data/ipem/Уголь_эластика_2026.xlsx \
-  --route-set-code RZD_2026
+  --route-set-code RZD_2026 \
+  --scenario-id 1
 
 python manage.py refresh_deploy_caches
 ```
+
+Правило эластичности для маршрута выбирается runtime по `message_type` (без FK на `Route`).
 
 ### `export_ipem_rzd_economics_2025`
 

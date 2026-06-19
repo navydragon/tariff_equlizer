@@ -7,6 +7,7 @@ DTO (Data Transfer Objects) для сценариев.
 - tariff: отдельные тарифные решения
 - fx: курсы валют
 - inflation: инфляция
+- elasticity: эластичность
 """
 
 from .btd import (
@@ -15,6 +16,13 @@ from .btd import (
     CreateBTDCategoryDTO,
     UpdateBTDCategoryDTO,
     UpdateBTDCategoryValueDTO,
+)
+from .elasticity import (
+    CreateElasticityRuleDTO,
+    ElasticityRuleDTO,
+    ElasticityRulePointDTO,
+    ElasticitySetDTO,
+    UpdateElasticityRuleDTO,
 )
 from .fx import (
     ExchangeRateSetDTO,
@@ -60,6 +68,12 @@ __all__ = [
     "InflationSetDTO",
     "InflationValueDTO",
     "UpdateInflationValueDTO",
+    # Elasticity
+    "ElasticitySetDTO",
+    "ElasticityRuleDTO",
+    "ElasticityRulePointDTO",
+    "CreateElasticityRuleDTO",
+    "UpdateElasticityRuleDTO",
     # Tariff rules
     "TariffRuleConditionDTO",
     "TariffRuleYearValueDTO",

@@ -6,6 +6,10 @@ from typing import Any, Optional
 from calculations.domain.services.tariff_load import TariffLoadService
 from core.models import Route
 from scenarios.domain.services.price_change import PriceChangeSettingService
+from scenarios.domain.utils.elasticity_matching import (
+    marginality_ratio_from_percent,
+    resolve_retention_coefficient,
+)
 from scenarios.domain.utils.fx_rates import load_fx_rates_by_year, missing_fx_years
 from scenarios.domain.utils.price_inflation import (
     index_money_series,
@@ -37,6 +41,28 @@ def _to_decimal_or_zero(value: Optional[Decimal]) -> Decimal:
 
 def _format_decimal(value: Decimal) -> str:
     return format(value, "f")
+
+
+def _quantize_money(value: Decimal) -> Decimal:
+    return value.quantize(Decimal("0.01"))
+
+
+def _quantize_coefficient(value: Decimal) -> Decimal:
+    return value.quantize(Decimal("0.0001"))
+
+
+def _retention_volume_delta_mln_tons(
+    route: Route,
+    retention_coefficient: Decimal | None,
+) -> Decimal | None:
+    if retention_coefficient is None:
+        return None
+    base_volume = route.transport_volume_tons
+    if base_volume is None or base_volume <= 0:
+        return None
+    return _quantize_money(
+        base_volume * (retention_coefficient - Decimal("1")) / Decimal("1000000"),
+    )
 
 
 def _is_internal_route(route: Route) -> bool:
@@ -213,6 +239,8 @@ class RouteAnalysisService:
         effects = self._build_effects(years=years, tariff_load=tariff_load)
         kpi = self._build_kpi(
             years=years,
+            scenario=scenario,
+            route=route,
             price_values=price_values,
             transport_values=transport_values,
             rzd_values=rzd_values,
@@ -603,6 +631,8 @@ class RouteAnalysisService:
         self,
         *,
         years: list[int],
+        scenario: Scenario,
+        route: Route,
         price_values: list[Decimal],
         transport_values: list[Decimal],
         rzd_values: list[Decimal],
@@ -619,6 +649,25 @@ class RouteAnalysisService:
             rzd_rub = rzd_values[index]
             margin_rub = marginality_values[index]["rub"]
             margin_pct = marginality_values[index]["pct"]
+            retention_coefficient = resolve_retention_coefficient(
+                route,
+                scenario,
+                marginality_ratio_from_percent(Decimal(margin_pct)),
+            )
+            retention_pct = (
+                _format_decimal(_quantize_coefficient(retention_coefficient))
+                if retention_coefficient is not None
+                else None
+            )
+            loading_mln_tons = _retention_volume_delta_mln_tons(
+                route,
+                retention_coefficient,
+            )
+            retention_delta = (
+                _format_decimal(loading_mln_tons)
+                if loading_mln_tons is not None
+                else None
+            )
 
             def metric(label: str, rub: Decimal, pct_of_price: Decimal) -> KpiMetricDTO:
                 return KpiMetricDTO(
@@ -657,14 +706,10 @@ class RouteAnalysisService:
                     ),
                     elasticity=KpiMetricDTO(
                         label="Коэффициент сохранения грузовой базы",
-                        rub=None,
-                        pct=None,
+                        rub=retention_delta,
+                        pct=retention_pct,
                     ),
                 ),
             )
 
         return KpiResponseDTO(by_year=by_year)
-
-
-def _quantize_money(value: Decimal) -> Decimal:
-    return value.quantize(Decimal("0.01"))

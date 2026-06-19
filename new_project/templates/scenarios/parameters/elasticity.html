@@ -1,0 +1,596 @@
+<div class="card mb-4" id="elasticityCard" data-scenario-id="{{ scenario.id }}">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <h3 class="card-title mb-0">Эластичность</h3>
+    <button type="button" class="btn btn-primary btn-sm" id="elasticityCreateSetBtn">
+      <i class="ti ti-plus"></i>
+      Создать набор
+    </button>
+  </div>
+
+  <div class="card-body">
+    <div id="elasticityErrors"></div>
+
+    <div class="row g-3">
+      <div class="col-md-8">
+        <label for="elasticitySetSelect" class="form-label">Набор эластичности *</label>
+        <select id="elasticitySetSelect" class="form-select">
+          <option value="">Загрузка...</option>
+        </select>
+      </div>
+      <div class="col-md-4">
+        <label class="form-label d-none d-md-block" aria-hidden="true">&nbsp;</label>
+        <div class="d-flex gap-2">
+          <button type="button" class="btn btn-secondary flex-fill" id="elasticityAttachBtn">
+            <i class="ti ti-link"></i>
+            Применить к сценарию
+          </button>
+          <button type="button" class="btn btn-outline-danger" id="elasticityDeleteSetBtn" title="Удалить набор">
+            <i class="ti ti-trash"></i>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card" id="elasticityRulesCard" style="display: none;">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <h3 class="card-title mb-0">Правила эластичности</h3>
+    <button type="button" class="btn btn-primary btn-sm" id="elasticityCreateRuleBtn">
+      <i class="ti ti-plus"></i>
+      Добавить правило
+    </button>
+  </div>
+  <div class="card-body">
+    <div id="elasticityRulesErrors"></div>
+    <div class="table-responsive">
+      <table class="table table-vcenter" id="elasticityRulesTable">
+        <thead>
+          <tr>
+            <th>Название</th>
+            <th>Фильтры</th>
+            <th class="text-center">Точек</th>
+            <th class="text-center">Позиция</th>
+            <th class="text-end">Действия</th>
+          </tr>
+        </thead>
+        <tbody id="elasticityRulesBody">
+          <tr>
+            <td colspan="5" class="text-muted">Выберите набор эластичности</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <small class="form-hint">
+      Пустые фильтры означают «все». При совпадении нескольких правил применяется более специфичное.
+    </small>
+  </div>
+</div>
+
+<div class="modal fade" id="elasticitySetCreateModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Новый набор эластичности</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+      </div>
+      <div class="modal-body">
+        <div id="elasticitySetCreateErrors"></div>
+        <div class="mb-3">
+          <label for="elasticitySetNameInput" class="form-label">Название *</label>
+          <input type="text" class="form-control" id="elasticitySetNameInput" placeholder="Например: 2026" />
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+        <button type="button" class="btn btn-primary" id="elasticitySetCreateSaveBtn">
+          <i class="ti ti-device-floppy"></i>
+          Создать
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="elasticityRuleModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="elasticityRuleModalTitle">Правило эластичности</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+      </div>
+      <div class="modal-body">
+        <div id="elasticityRuleErrors"></div>
+        <div class="row g-3 mb-3">
+          <div class="col-md-6">
+            <label for="elasticityRuleNameInput" class="form-label">Название *</label>
+            <input type="text" class="form-control" id="elasticityRuleNameInput" />
+          </div>
+          <div class="col-md-6">
+            <label for="elasticityRulePositionInput" class="form-label">Позиция</label>
+            <input type="number" min="0" step="1" class="form-control" id="elasticityRulePositionInput" value="0" />
+          </div>
+          <div class="col-md-4">
+            <label for="elasticityRuleCargoGroupSelect" class="form-label">Группа груза</label>
+            <select id="elasticityRuleCargoGroupSelect" class="form-select">
+              <option value="">Все</option>
+            </select>
+          </div>
+          <div class="col-md-4">
+            <label for="elasticityRuleCargoSelect" class="form-label">Груз</label>
+            <select id="elasticityRuleCargoSelect" class="form-select">
+              <option value="">Все</option>
+            </select>
+          </div>
+          <div class="col-md-4">
+            <label for="elasticityRuleMessageTypeSelect" class="form-label">Вид сообщения</label>
+            <select id="elasticityRuleMessageTypeSelect" class="form-select">
+              <option value="">Все</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <h4 class="mb-0">Таблица эластичности</h4>
+          <button type="button" class="btn btn-outline-primary btn-sm" id="elasticityAddPointBtn">
+            <i class="ti ti-plus"></i>
+            Добавить строку
+          </button>
+        </div>
+        <small class="form-hint d-block mb-2">
+          Маржинальность в долях (−0.32 = −32%). Коэффициент — доля сохранённого/привлечённого объёма.
+        </small>
+        <div class="table-responsive">
+          <table class="table table-sm table-vcenter" id="elasticityPointsTable">
+            <thead>
+              <tr>
+                <th>Маржинальность</th>
+                <th>Коэффициент</th>
+                <th class="text-end">Удалить</th>
+              </tr>
+            </thead>
+            <tbody id="elasticityPointsBody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+        <button type="button" class="btn btn-primary" id="elasticityRuleSaveBtn">
+          <i class="ti ti-device-floppy"></i>
+          Сохранить
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  const card = document.getElementById('elasticityCard');
+  if (!card) return;
+
+  const scenarioId = parseInt(card.dataset.scenarioId, 10);
+  const urls = {
+    sets: '{% url "scenarios:elasticity_set_list" %}',
+    createSet: '{% url "scenarios:elasticity_set_create" %}',
+    deleteSetTemplate: '{% url "scenarios:elasticity_set_delete" 0 %}'.replace('/0/', '/__ID__/'),
+    attachTemplate: '{% url "scenarios:elasticity_set_attach" scenario.id %}',
+    overview: '{% url "scenarios:elasticity_overview" scenario.id %}',
+    rulesTemplate: '{% url "scenarios:elasticity_set_rules" 0 %}'.replace('/0/', '/__SET_ID__/'),
+    createRuleTemplate: '{% url "scenarios:elasticity_rule_create" 0 %}'.replace('/0/', '/__SET_ID__/'),
+    ruleDetailTemplate: '{% url "scenarios:elasticity_rule_detail" 0 %}'.replace('/0/', '/__ID__/'),
+    updateRuleTemplate: '{% url "scenarios:elasticity_rule_update" 0 %}'.replace('/0/', '/__ID__/'),
+    deleteRuleTemplate: '{% url "scenarios:elasticity_rule_delete" 0 %}'.replace('/0/', '/__ID__/'),
+    optionsTemplate: '{% url "scenarios:elasticity_rule_options" scenario.id %}?parameter=__PARAM__',
+  };
+
+  const errorsContainer = document.getElementById('elasticityErrors');
+  const rulesErrorsContainer = document.getElementById('elasticityRulesErrors');
+  const selectEl = document.getElementById('elasticitySetSelect');
+  const attachBtn = document.getElementById('elasticityAttachBtn');
+  const deleteBtn = document.getElementById('elasticityDeleteSetBtn');
+  const createSetBtn = document.getElementById('elasticityCreateSetBtn');
+  const rulesCard = document.getElementById('elasticityRulesCard');
+  const rulesBody = document.getElementById('elasticityRulesBody');
+  const createRuleBtn = document.getElementById('elasticityCreateRuleBtn');
+
+  const setCreateModalEl = document.getElementById('elasticitySetCreateModal');
+  const setCreateModal = setCreateModalEl && typeof bootstrap !== 'undefined'
+    ? new bootstrap.Modal(setCreateModalEl)
+    : null;
+  const setNameInput = document.getElementById('elasticitySetNameInput');
+  const setCreateErrors = document.getElementById('elasticitySetCreateErrors');
+  const setCreateSaveBtn = document.getElementById('elasticitySetCreateSaveBtn');
+
+  const ruleModalEl = document.getElementById('elasticityRuleModal');
+  const ruleModal = ruleModalEl && typeof bootstrap !== 'undefined'
+    ? new bootstrap.Modal(ruleModalEl)
+    : null;
+  const ruleModalTitle = document.getElementById('elasticityRuleModalTitle');
+  const ruleErrors = document.getElementById('elasticityRuleErrors');
+  const ruleNameInput = document.getElementById('elasticityRuleNameInput');
+  const rulePositionInput = document.getElementById('elasticityRulePositionInput');
+  const cargoGroupSelect = document.getElementById('elasticityRuleCargoGroupSelect');
+  const cargoSelect = document.getElementById('elasticityRuleCargoSelect');
+  const messageTypeSelect = document.getElementById('elasticityRuleMessageTypeSelect');
+  const pointsBody = document.getElementById('elasticityPointsBody');
+  const addPointBtn = document.getElementById('elasticityAddPointBtn');
+  const ruleSaveBtn = document.getElementById('elasticityRuleSaveBtn');
+
+  let currentSetId = null;
+  let attachedSetId = null;
+  let editingRuleId = null;
+  let filterOptionsLoaded = false;
+
+  function getCookie(name) {
+    let cookieValue = null;
+    if (document.cookie && document.cookie !== '') {
+      const cookies = document.cookie.split(';');
+      for (let i = 0; i < cookies.length; i++) {
+        const cookie = cookies[i].trim();
+        if (cookie.substring(0, name.length + 1) === (name + '=')) {
+          cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+          break;
+        }
+      }
+    }
+    return cookieValue;
+  }
+
+  function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text == null ? '' : String(text);
+    return div.innerHTML;
+  }
+
+  function showErrorMessages(messages, target) {
+    if (!target) return;
+    if (!Array.isArray(messages)) messages = [String(messages)];
+    let html = '<div class="alert alert-danger"><ul class="mb-0">';
+    messages.forEach(m => { html += '<li>' + escapeHtml(m) + '</li>'; });
+    html += '</ul></div>';
+    target.innerHTML = html;
+  }
+
+  function clearErrors(target) {
+    if (target) target.innerHTML = '';
+  }
+
+  function showToast(type, message) {
+    let toastElement;
+    if (type === 'success') {
+      toastElement = document.getElementById('toastSuccess');
+      const timeElement = document.getElementById('toastSuccessTime');
+      if (timeElement) {
+        const now = new Date();
+        timeElement.textContent = now.toLocaleDateString('ru-RU') + ' ' + now.toLocaleTimeString('ru-RU');
+      }
+    } else {
+      toastElement = document.getElementById('toastError');
+      const toastBody = document.getElementById('toastErrorBody');
+      if (toastBody) toastBody.innerHTML = message;
+    }
+    if (toastElement && typeof bootstrap !== 'undefined') {
+      new bootstrap.Toast(toastElement, { autohide: true, delay: 5000 }).show();
+    }
+  }
+
+  function renderFilterBadges(rule) {
+    const badges = [];
+    if (rule.cargo_group_name) badges.push('Группа: ' + rule.cargo_group_name);
+    if (rule.cargo_name) badges.push('Груз: ' + rule.cargo_name);
+    if (rule.message_type_name) badges.push('Сообщение: ' + rule.message_type_name);
+    if (!badges.length) return '<span class="text-muted">Все</span>';
+    return badges.map(b => '<span class="badge bg-secondary-lt me-1">' + escapeHtml(b) + '</span>').join('');
+  }
+
+  function renderRules(rules) {
+    if (!rules || !rules.length) {
+      rulesBody.innerHTML = '<tr><td colspan="5" class="text-muted">Правила не заданы</td></tr>';
+      return;
+    }
+    rulesBody.innerHTML = rules.map(rule => `
+      <tr>
+        <td>${escapeHtml(rule.name)}</td>
+        <td>${renderFilterBadges(rule)}</td>
+        <td class="text-center">${escapeHtml(rule.points_count)}</td>
+        <td class="text-center">${escapeHtml(rule.position)}</td>
+        <td class="text-end">
+          <button type="button" class="btn btn-sm btn-outline-primary elasticity-edit-rule" data-rule-id="${rule.id}">Изменить</button>
+          <button type="button" class="btn btn-sm btn-outline-danger elasticity-delete-rule" data-rule-id="${rule.id}">Удалить</button>
+        </td>
+      </tr>
+    `).join('');
+  }
+
+  async function loadSets() {
+    const response = await fetch(urls.sets);
+    const data = await response.json();
+    if (!data.success) {
+      showErrorMessages(data.errors || 'Ошибка загрузки наборов', errorsContainer);
+      return;
+    }
+    selectEl.innerHTML = '<option value="">— выберите набор —</option>';
+    data.items.forEach(item => {
+      const option = document.createElement('option');
+      option.value = String(item.id);
+      option.textContent = item.name;
+      selectEl.appendChild(option);
+    });
+  }
+
+  async function loadOverview() {
+    const response = await fetch(urls.overview);
+    const data = await response.json();
+    if (!data.success) return;
+    attachedSetId = data.elasticity_set ? data.elasticity_set.id : null;
+    if (attachedSetId) {
+      selectEl.value = String(attachedSetId);
+      currentSetId = attachedSetId;
+      rulesCard.style.display = '';
+      renderRules(data.rules || []);
+    }
+  }
+
+  async function loadRulesForSet(setId) {
+    if (!setId) {
+      rulesCard.style.display = 'none';
+      return;
+    }
+    rulesCard.style.display = '';
+    const response = await fetch(urls.rulesTemplate.replace('__SET_ID__', String(setId)));
+    const data = await response.json();
+    if (!data.success) {
+      showErrorMessages(data.errors || 'Ошибка загрузки правил', rulesErrorsContainer);
+      return;
+    }
+    clearErrors(rulesErrorsContainer);
+    renderRules(data.rules || []);
+  }
+
+  async function loadFilterOptions() {
+    if (filterOptionsLoaded) return;
+    const params = ['cargo_group', 'cargo', 'message_type'];
+    const targets = [cargoGroupSelect, cargoSelect, messageTypeSelect];
+    const responses = await Promise.all(
+      params.map(param =>
+        fetch(urls.optionsTemplate.replace('__PARAM__', param)).then(r => r.json())
+      )
+    );
+    responses.forEach((data, i) => {
+      if (!data.success) return;
+      const select = targets[i];
+      const current = select.value;
+      select.innerHTML = '<option value="">Все</option>';
+      data.items.forEach(item => {
+        const option = document.createElement('option');
+        option.value = String(item.value);
+        option.textContent = item.text;
+        select.appendChild(option);
+      });
+      select.value = current;
+    });
+    filterOptionsLoaded = true;
+  }
+
+  function renderPointRows(points) {
+    if (!points || !points.length) {
+      pointsBody.innerHTML = '';
+      return;
+    }
+    pointsBody.innerHTML = points.map(point => `
+      <tr>
+        <td><input type="number" step="0.0001" class="form-control form-control-sm elasticity-point-marginality" value="${escapeHtml(point.marginality)}" /></td>
+        <td><input type="number" step="0.0001" min="0" class="form-control form-control-sm elasticity-point-coefficient" value="${escapeHtml(point.coefficient)}" /></td>
+        <td class="text-end"><button type="button" class="btn btn-sm btn-outline-danger elasticity-remove-point">×</button></td>
+      </tr>
+    `).join('');
+  }
+
+  function addPointRow(marginality = '', coefficient = '') {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><input type="number" step="0.0001" class="form-control form-control-sm elasticity-point-marginality" value="${escapeHtml(marginality)}" /></td>
+      <td><input type="number" step="0.0001" min="0" class="form-control form-control-sm elasticity-point-coefficient" value="${escapeHtml(coefficient)}" /></td>
+      <td class="text-end"><button type="button" class="btn btn-sm btn-outline-danger elasticity-remove-point">×</button></td>
+    `;
+    pointsBody.appendChild(tr);
+  }
+
+  function collectPoints() {
+    const rows = pointsBody.querySelectorAll('tr');
+    const points = [];
+    rows.forEach(row => {
+      const marginality = row.querySelector('.elasticity-point-marginality')?.value;
+      const coefficient = row.querySelector('.elasticity-point-coefficient')?.value;
+      if (marginality === '' && coefficient === '') return;
+      points.push({ marginality, coefficient });
+    });
+    return points;
+  }
+
+  function fillRuleForm(rule) {
+    ruleNameInput.value = rule.name || '';
+    rulePositionInput.value = rule.position != null ? String(rule.position) : '0';
+    cargoGroupSelect.value = rule.cargo_group_id != null ? String(rule.cargo_group_id) : '';
+    cargoSelect.value = rule.cargo_id || '';
+    messageTypeSelect.value = rule.message_type_id != null ? String(rule.message_type_id) : '';
+    renderPointRows(rule.points || []);
+  }
+
+  async function openCreateRule() {
+    if (!currentSetId) return;
+    editingRuleId = null;
+    ruleModalTitle.textContent = 'Новое правило эластичности';
+    clearErrors(ruleErrors);
+    await loadFilterOptions();
+    fillRuleForm({ name: '', position: 0, points: [] });
+    addPointRow();
+    ruleModal?.show();
+  }
+
+  async function openEditRule(ruleId) {
+    editingRuleId = ruleId;
+    ruleModalTitle.textContent = 'Редактирование правила';
+    clearErrors(ruleErrors);
+    pointsBody.innerHTML = '<tr><td colspan="3" class="text-muted">Загрузка коэффициентов…</td></tr>';
+    ruleModal?.show();
+    const [_, data] = await Promise.all([
+      loadFilterOptions(),
+      fetch(urls.ruleDetailTemplate.replace('__ID__', String(ruleId))).then(r => r.json()),
+    ]);
+    if (!data.success) {
+      ruleModal?.hide();
+      showErrorMessages(data.errors || 'Ошибка загрузки правила', rulesErrorsContainer);
+      return;
+    }
+    fillRuleForm(data.rule);
+  }
+
+  selectEl.addEventListener('change', () => {
+    currentSetId = selectEl.value ? parseInt(selectEl.value, 10) : null;
+    loadRulesForSet(currentSetId);
+  });
+
+  attachBtn.addEventListener('click', async () => {
+    clearErrors(errorsContainer);
+    if (!currentSetId) {
+      showErrorMessages('Выберите набор эластичности', errorsContainer);
+      return;
+    }
+    const response = await fetch(urls.attachTemplate, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': getCookie('csrftoken'),
+      },
+      body: JSON.stringify({ elasticity_set_id: currentSetId }),
+    });
+    const data = await response.json();
+    if (!data.success) {
+      showErrorMessages(data.errors || 'Ошибка привязки', errorsContainer);
+      return;
+    }
+    attachedSetId = currentSetId;
+    showToast('success', 'Набор эластичности применён к сценарию');
+  });
+
+  deleteBtn.addEventListener('click', async () => {
+    clearErrors(errorsContainer);
+    if (!currentSetId) {
+      showErrorMessages('Выберите набор для удаления', errorsContainer);
+      return;
+    }
+    if (!confirm('Удалить набор эластичности? Сценарии будут отвязаны.')) return;
+    const response = await fetch(urls.deleteSetTemplate.replace('__ID__', String(currentSetId)), {
+      method: 'POST',
+      headers: { 'X-CSRFToken': getCookie('csrftoken') },
+    });
+    const data = await response.json();
+    if (!data.success) {
+      showErrorMessages(data.errors || 'Ошибка удаления', errorsContainer);
+      return;
+    }
+    showToast('success', 'Набор эластичности удалён');
+    currentSetId = null;
+    attachedSetId = null;
+    await loadSets();
+    rulesCard.style.display = 'none';
+  });
+
+  createSetBtn.addEventListener('click', () => {
+    clearErrors(setCreateErrors);
+    setNameInput.value = '';
+    setCreateModal?.show();
+  });
+
+  setCreateSaveBtn.addEventListener('click', async () => {
+    clearErrors(setCreateErrors);
+    const response = await fetch(urls.createSet, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': getCookie('csrftoken'),
+      },
+      body: JSON.stringify({ name: setNameInput.value }),
+    });
+    const data = await response.json();
+    if (!data.success) {
+      showErrorMessages(data.errors || 'Ошибка создания', setCreateErrors);
+      return;
+    }
+    setCreateModal?.hide();
+    showToast('success', 'Набор эластичности создан');
+    await loadSets();
+    currentSetId = data.item.id;
+    selectEl.value = String(currentSetId);
+    await loadRulesForSet(currentSetId);
+  });
+
+  createRuleBtn.addEventListener('click', openCreateRule);
+  addPointBtn.addEventListener('click', () => addPointRow());
+
+  pointsBody.addEventListener('click', (event) => {
+    const btn = event.target.closest('.elasticity-remove-point');
+    if (!btn) return;
+    btn.closest('tr')?.remove();
+  });
+
+  rulesBody.addEventListener('click', async (event) => {
+    const editBtn = event.target.closest('.elasticity-edit-rule');
+    const deleteRuleBtn = event.target.closest('.elasticity-delete-rule');
+    if (editBtn) {
+      await openEditRule(parseInt(editBtn.dataset.ruleId, 10));
+      return;
+    }
+    if (deleteRuleBtn) {
+      const ruleId = parseInt(deleteRuleBtn.dataset.ruleId, 10);
+      if (!confirm('Удалить правило эластичности?')) return;
+      const response = await fetch(urls.deleteRuleTemplate.replace('__ID__', String(ruleId)), {
+        method: 'POST',
+        headers: { 'X-CSRFToken': getCookie('csrftoken') },
+      });
+      const data = await response.json();
+      if (!data.success) {
+        showErrorMessages(data.errors || 'Ошибка удаления', rulesErrorsContainer);
+        return;
+      }
+      await loadRulesForSet(currentSetId);
+      showToast('success', 'Правило удалено');
+    }
+  });
+
+  ruleSaveBtn.addEventListener('click', async () => {
+    clearErrors(ruleErrors);
+    const payload = {
+      name: ruleNameInput.value,
+      position: parseInt(rulePositionInput.value || '0', 10),
+      cargo_group_id: cargoGroupSelect.value || null,
+      cargo_id: cargoSelect.value || null,
+      message_type_id: messageTypeSelect.value || null,
+      points: collectPoints(),
+    };
+    const url = editingRuleId
+      ? urls.updateRuleTemplate.replace('__ID__', String(editingRuleId))
+      : urls.createRuleTemplate.replace('__SET_ID__', String(currentSetId));
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': getCookie('csrftoken'),
+      },
+      body: JSON.stringify(payload),
+    });
+    const data = await response.json();
+    if (!data.success) {
+      showErrorMessages(data.errors || 'Ошибка сохранения', ruleErrors);
+      return;
+    }
+    ruleModal?.hide();
+    await loadRulesForSet(currentSetId);
+    showToast('success', 'Правило сохранено');
+  });
+
+  loadSets().then(() => Promise.all([loadOverview(), loadFilterOptions()]));
+})();
+</script>

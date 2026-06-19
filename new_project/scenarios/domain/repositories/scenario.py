@@ -64,6 +64,7 @@ class ScenarioRepository:
             route_set=source.route_set,
             exchange_rate_set=source.exchange_rate_set,
             inflation_set=source.inflation_set,
+            elasticity_set=source.elasticity_set,
             export_price_mode=source.export_price_mode,
             include_base_tariff_decisions=source.include_base_tariff_decisions,
             author=new_author,

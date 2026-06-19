@@ -166,4 +166,61 @@ urlpatterns = [
         views.inflation_value_update_api,
         name="inflation_value_update",
     ),
+
+    # Elasticity API
+    path(
+        "api/elasticity-sets/",
+        views.elasticity_set_list_api,
+        name="elasticity_set_list",
+    ),
+    path(
+        "api/elasticity-sets/create/",
+        views.elasticity_set_create_api,
+        name="elasticity_set_create",
+    ),
+    path(
+        "api/elasticity-sets/<int:elasticity_set_id>/delete/",
+        views.elasticity_set_delete_api,
+        name="elasticity_set_delete",
+    ),
+    path(
+        "api/<int:scenario_id>/elasticity-sets/attach/",
+        views.elasticity_set_attach_api,
+        name="elasticity_set_attach",
+    ),
+    path(
+        "api/<int:scenario_id>/elasticity/",
+        views.elasticity_overview_api,
+        name="elasticity_overview",
+    ),
+    path(
+        "api/elasticity-sets/<int:elasticity_set_id>/rules/",
+        views.elasticity_set_rules_api,
+        name="elasticity_set_rules",
+    ),
+    path(
+        "api/elasticity-rules/<int:rule_id>/",
+        views.elasticity_rule_detail_api,
+        name="elasticity_rule_detail",
+    ),
+    path(
+        "api/elasticity-sets/<int:elasticity_set_id>/rules/create/",
+        views.elasticity_rule_create_api,
+        name="elasticity_rule_create",
+    ),
+    path(
+        "api/elasticity-rules/<int:rule_id>/update/",
+        views.elasticity_rule_update_api,
+        name="elasticity_rule_update",
+    ),
+    path(
+        "api/elasticity-rules/<int:rule_id>/delete/",
+        views.elasticity_rule_delete_api,
+        name="elasticity_rule_delete",
+    ),
+    path(
+        "api/<int:scenario_id>/elasticity-rule-options/",
+        views.elasticity_rule_options_api,
+        name="elasticity_rule_options",
+    ),
 ]

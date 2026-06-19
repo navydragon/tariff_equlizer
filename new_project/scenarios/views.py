@@ -22,6 +22,7 @@ from scenarios.domain.services import (
     BTDCategoryValueService,
     ExchangeRateService,
     InflationService,
+    ElasticityService,
     TariffRuleService,
 )
 from scenarios.domain.dto import (
@@ -29,6 +30,8 @@ from scenarios.domain.dto import (
     UpdateScenarioDTO,
     CreateTariffRuleDTO,
     UpdateTariffRuleDTO,
+    CreateElasticityRuleDTO,
+    UpdateElasticityRuleDTO,
 )
 from scenarios.domain.utils.tariff_rule_display import enrich_rule_dict_for_api
 from scenarios.domain.utils.tariff_conditions import apply_tariff_conditions
@@ -40,6 +43,32 @@ from scenarios.domain.services.tariff_rule_options import (
 
 def _tariff_rule_api_dict(rule, *, route_set_id: int) -> dict:
     return enrich_rule_dict_for_api(asdict(rule), route_set_id=route_set_id)
+
+
+def _elasticity_rule_api_dict(rule, *, include_points: bool = False) -> dict:
+    payload = {
+        "id": rule.id,
+        "elasticity_set_id": rule.elasticity_set_id,
+        "name": rule.name,
+        "position": rule.position,
+        "cargo_group_id": rule.cargo_group_id,
+        "cargo_group_name": rule.cargo_group_name,
+        "cargo_id": rule.cargo_id,
+        "cargo_name": rule.cargo_name,
+        "message_type_id": rule.message_type_id,
+        "message_type_name": rule.message_type_name,
+        "points_count": rule.points_count,
+    }
+    if include_points:
+        payload["points"] = [
+            {
+                "id": point.id,
+                "marginality": point.marginality,
+                "coefficient": point.coefficient,
+            }
+            for point in rule.points
+        ]
+    return payload
 
 
 @login_required
@@ -1171,3 +1200,324 @@ def inflation_value_update_api(request):
             "rate_percent": value_dto.rate_percent,
         }
     )
+
+
+@login_required
+@require_http_methods(["GET"])
+def elasticity_set_list_api(request):
+    service = ElasticityService()
+    sets = service.list_sets(request.user)
+    return JsonResponse(
+        {
+            "success": True,
+            "items": [
+                {
+                    "id": item.id,
+                    "name": item.name,
+                    "author_id": item.author_id,
+                    "author_name": item.author_name,
+                }
+                for item in sets
+            ],
+        },
+    )
+
+
+@login_required
+@require_http_methods(["POST"])
+def elasticity_set_create_api(request):
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse(
+            {"success": False, "errors": ["Неверный формат JSON"]},
+            status=400,
+        )
+
+    name = data.get("name") or ""
+    service = ElasticityService()
+    created, errors = service.create_set(str(name), request.user)
+    if errors:
+        return JsonResponse({"success": False, "errors": errors}, status=400)
+
+    return JsonResponse(
+        {
+            "success": True,
+            "item": {
+                "id": created.id,
+                "name": created.name,
+                "author_id": created.author_id,
+                "author_name": created.author_name,
+            },
+        },
+        status=201,
+    )
+
+
+@login_required
+@require_http_methods(["POST"])
+def elasticity_set_delete_api(request, elasticity_set_id: int):
+    service = ElasticityService()
+    ok, errors = service.delete_set(elasticity_set_id, request.user)
+    if errors:
+        return JsonResponse({"success": False, "errors": errors}, status=400)
+    return JsonResponse({"success": True, "deleted": ok})
+
+
+@login_required
+@require_http_methods(["POST"])
+def elasticity_set_attach_api(request, scenario_id: int):
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse(
+            {"success": False, "errors": ["Неверный формат JSON"]},
+            status=400,
+        )
+
+    try:
+        elasticity_set_id = int(data.get("elasticity_set_id"))
+    except (TypeError, ValueError):
+        return JsonResponse(
+            {"success": False, "errors": ["Некорректный elasticity_set_id"]},
+            status=400,
+        )
+
+    service = ElasticityService()
+    scenario_dto, errors = service.attach_set_to_scenario(
+        scenario_id,
+        elasticity_set_id,
+        request.user,
+    )
+    if errors:
+        return JsonResponse({"success": False, "errors": errors}, status=400)
+
+    return JsonResponse(
+        {
+            "success": True,
+            "scenario": {
+                "id": scenario_dto.id,
+                "elasticity_set_id": scenario_dto.elasticity_set_id,
+                "elasticity_set_name": scenario_dto.elasticity_set_name,
+            },
+        },
+    )
+
+
+@login_required
+@require_http_methods(["GET"])
+def elasticity_overview_api(request, scenario_id: int):
+    service = ElasticityService()
+    payload, errors = service.get_attached_overview(scenario_id, request.user)
+    if errors:
+        return JsonResponse({"success": False, "errors": errors}, status=400)
+
+    elasticity_set = payload.get("elasticity_set")
+    rules = payload.get("rules", [])
+    return JsonResponse(
+        {
+            "success": True,
+            "elasticity_set": elasticity_set.__dict__ if elasticity_set else None,
+            "rules": [
+                _elasticity_rule_api_dict(rule, include_points=False)
+                for rule in rules
+            ],
+        },
+    )
+
+
+@login_required
+@require_http_methods(["GET"])
+def elasticity_set_rules_api(request, elasticity_set_id: int):
+    service = ElasticityService()
+    rules, errors = service.list_rules(elasticity_set_id, request.user)
+    if errors:
+        return JsonResponse({"success": False, "errors": errors}, status=400)
+
+    return JsonResponse(
+        {
+            "success": True,
+            "rules": [
+                _elasticity_rule_api_dict(rule, include_points=False)
+                for rule in rules
+            ],
+        },
+    )
+
+
+@login_required
+@require_http_methods(["GET"])
+def elasticity_rule_detail_api(request, rule_id: int):
+    service = ElasticityService()
+    rule, errors = service.get_rule(rule_id, request.user)
+    if errors:
+        return JsonResponse({"success": False, "errors": errors}, status=400)
+    return JsonResponse(
+        {
+            "success": True,
+            "rule": _elasticity_rule_api_dict(rule, include_points=True),
+        },
+    )
+
+
+@login_required
+@require_http_methods(["POST"])
+def elasticity_rule_create_api(request, elasticity_set_id: int):
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse(
+            {"success": False, "errors": ["Неверный формат JSON"]},
+            status=400,
+        )
+
+    dto = CreateElasticityRuleDTO(
+        elasticity_set_id=elasticity_set_id,
+        name=str(data.get("name") or ""),
+        position=data.get("position"),
+        cargo_group_id=_optional_int(data.get("cargo_group_id")),
+        cargo_id=_optional_str(data.get("cargo_id")),
+        message_type_id=_optional_int(data.get("message_type_id")),
+        points=data.get("points") or [],
+    )
+    service = ElasticityService()
+    rule, errors = service.create_rule(dto, request.user)
+    if errors:
+        return JsonResponse({"success": False, "errors": errors}, status=400)
+
+    return JsonResponse(
+        {
+            "success": True,
+            "rule": _elasticity_rule_api_dict(rule, include_points=True),
+        },
+        status=201,
+    )
+
+
+@login_required
+@require_http_methods(["POST"])
+def elasticity_rule_update_api(request, rule_id: int):
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse(
+            {"success": False, "errors": ["Неверный формат JSON"]},
+            status=400,
+        )
+
+    dto = UpdateElasticityRuleDTO(
+        name=data.get("name"),
+        position=data.get("position"),
+        points=data.get("points"),
+    )
+    if "cargo_group_id" in data:
+        dto.cargo_group_id = _optional_int(data.get("cargo_group_id"))
+    if "cargo_id" in data:
+        dto.cargo_id = _optional_str(data.get("cargo_id"))
+    if "message_type_id" in data:
+        dto.message_type_id = _optional_int(data.get("message_type_id"))
+
+    service = ElasticityService()
+    rule, errors = service.update_rule(rule_id, dto, request.user)
+    if errors:
+        return JsonResponse({"success": False, "errors": errors}, status=400)
+
+    return JsonResponse(
+        {
+            "success": True,
+            "rule": _elasticity_rule_api_dict(rule, include_points=True),
+        },
+    )
+
+
+@login_required
+@require_http_methods(["POST"])
+def elasticity_rule_delete_api(request, rule_id: int):
+    service = ElasticityService()
+    ok, errors = service.delete_rule(rule_id, request.user)
+    if errors:
+        return JsonResponse({"success": False, "errors": errors}, status=400)
+    return JsonResponse({"success": True, "deleted": ok})
+
+
+@login_required
+@require_http_methods(["GET"])
+def elasticity_rule_options_api(request, scenario_id: int):
+    parameter = (request.GET.get("parameter") or "").strip()
+    if parameter == "cargo":
+        parameter = "cargo_code"
+    if parameter not in {"cargo_group", "cargo_code", "message_type"}:
+        return JsonResponse(
+            {"success": False, "errors": ["Неподдерживаемый parameter"]},
+            status=400,
+        )
+
+    try:
+        scenario = Scenario.objects.select_related("route_set", "author").get(
+            id=scenario_id,
+        )
+    except Scenario.DoesNotExist:
+        return JsonResponse({"success": False, "errors": ["Сценарий не найден"]}, status=404)
+
+    if not AppSettingsService().can_write_scenario(
+        author_id=scenario.author_id,
+        user_id=request.user.id,
+    ):
+        return JsonResponse(
+            {"success": False, "errors": ["Нет прав на изменение этого сценария"]},
+            status=403,
+        )
+
+    qs = Route.objects.filter(route_set_id=scenario.route_set_id)
+    items: list[dict] = []
+
+    if parameter == "cargo_group":
+        rows = (
+            qs.exclude(cargo__cargo_group__isnull=True)
+            .values("cargo__cargo_group__code", "cargo__cargo_group__name")
+            .distinct()
+            .order_by("cargo__cargo_group__position", "cargo__cargo_group__code")
+        )
+        items = [
+            {"value": r["cargo__cargo_group__code"], "text": r["cargo__cargo_group__name"]}
+            for r in rows
+        ]
+    elif parameter == "cargo_code":
+        rows = qs.values("cargo__code", "cargo__name").distinct().order_by("cargo__code")
+        items = [
+            {
+                "value": r["cargo__code"],
+                "text": (
+                    f'{format_etsng_code(r["cargo__code"])} — {r["cargo__name"]}'
+                ),
+            }
+            for r in rows
+        ]
+    elif parameter == "message_type":
+        rows = (
+            qs.exclude(message_type__isnull=True)
+            .values("message_type__id", "message_type__name")
+            .distinct()
+            .order_by("message_type__name")
+        )
+        items = [
+            {"value": r["message_type__id"], "text": r["message_type__name"]}
+            for r in rows
+        ]
+
+    return JsonResponse({"success": True, "items": items})
+
+
+def _optional_int(value):
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _optional_str(value):
+    if value in (None, ""):
+        return None
+    return str(value).strip()

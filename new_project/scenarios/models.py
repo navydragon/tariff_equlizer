@@ -1,7 +1,7 @@
 from django.conf import settings
 from django.db import models
 
-from core.models import RouteSet
+from core.models import Cargo, CargoGroup, MessageType, RouteSet
 
 
 class Scenario(models.Model):
@@ -36,6 +36,14 @@ class Scenario(models.Model):
     inflation_set = models.ForeignKey(
         "scenarios.InflationSet",
         verbose_name="Набор инфляции",
+        on_delete=models.PROTECT,
+        related_name="scenarios",
+        null=True,
+        blank=True,
+    )
+    elasticity_set = models.ForeignKey(
+        "scenarios.ElasticitySet",
+        verbose_name="Набор эластичности",
         on_delete=models.PROTECT,
         related_name="scenarios",
         null=True,
@@ -172,6 +180,128 @@ class InflationValue(models.Model):
 
     def __str__(self) -> str:
         return f"{self.inflation_set} {self.year}: {self.rate_percent}%"
+
+
+class ElasticitySet(models.Model):
+    """Набор правил эластичности для переиспользования между сценариями."""
+
+    name = models.CharField("Название набора", max_length=255)
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        verbose_name="Автор",
+        on_delete=models.CASCADE,
+        related_name="elasticity_sets",
+    )
+    created_at = models.DateTimeField("Создано", auto_now_add=True)
+    updated_at = models.DateTimeField("Обновлено", auto_now=True)
+
+    class Meta:
+        verbose_name = "Набор эластичности"
+        verbose_name_plural = "Наборы эластичности"
+        ordering = ["-updated_at", "-created_at", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["author", "name"],
+                name="uniq_elasticity_set_author_name",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class ElasticityRule(models.Model):
+    """Правило эластичности внутри набора с опциональными фильтрами маршрута."""
+
+    elasticity_set = models.ForeignKey(
+        ElasticitySet,
+        verbose_name="Набор эластичности",
+        on_delete=models.CASCADE,
+        related_name="rules",
+    )
+    name = models.CharField("Название правила", max_length=255)
+    position = models.PositiveIntegerField("Позиция", default=0)
+    cargo_group = models.ForeignKey(
+        CargoGroup,
+        verbose_name="Группа груза",
+        on_delete=models.PROTECT,
+        related_name="elasticity_rules",
+        null=True,
+        blank=True,
+    )
+    cargo = models.ForeignKey(
+        Cargo,
+        verbose_name="Груз",
+        on_delete=models.PROTECT,
+        related_name="elasticity_rules",
+        null=True,
+        blank=True,
+    )
+    message_type = models.ForeignKey(
+        MessageType,
+        verbose_name="Вид сообщения",
+        on_delete=models.PROTECT,
+        related_name="elasticity_rules",
+        null=True,
+        blank=True,
+    )
+    created_at = models.DateTimeField("Создано", auto_now_add=True)
+    updated_at = models.DateTimeField("Обновлено", auto_now=True)
+
+    class Meta:
+        verbose_name = "Правило эластичности"
+        verbose_name_plural = "Правила эластичности"
+        ordering = ["elasticity_set", "position", "id"]
+        indexes = [
+            models.Index(
+                fields=["elasticity_set", "position", "id"],
+                name="elast_rule_set_pos_idx",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class ElasticityRulePoint(models.Model):
+    """Точка кривой эластичности: маржинальность → коэффициент объёма."""
+
+    rule = models.ForeignKey(
+        ElasticityRule,
+        verbose_name="Правило",
+        on_delete=models.CASCADE,
+        related_name="points",
+    )
+    marginality = models.DecimalField(
+        "Маржинальность",
+        max_digits=10,
+        decimal_places=4,
+    )
+    coefficient = models.DecimalField(
+        "Коэффициент",
+        max_digits=10,
+        decimal_places=4,
+    )
+
+    class Meta:
+        verbose_name = "Точка эластичности"
+        verbose_name_plural = "Точки эластичности"
+        ordering = ["rule", "marginality", "id"]
+        indexes = [
+            models.Index(
+                fields=["rule", "-marginality"],
+                name="elast_pt_rule_marg_d_idx",
+            ),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["rule", "marginality"],
+                name="uniq_elasticity_rule_point_marginality",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.rule} {self.marginality}: {self.coefficient}"
 
 
 class ScenarioPriceChangeSetting(models.Model):

@@ -17,6 +17,8 @@ class ScenarioDTO:
     exchange_rate_set_name: str
     inflation_set_id: int | None
     inflation_set_name: str
+    elasticity_set_id: int | None
+    elasticity_set_name: str
     author_id: int
     author_name: str
     price_change_settings: dict[str, str] = field(default_factory=dict)
@@ -45,6 +47,10 @@ class ScenarioDTO:
             inflation_set_id=scenario.inflation_set_id,
             inflation_set_name=(
                 str(scenario.inflation_set) if scenario.inflation_set_id else ""
+            ),
+            elasticity_set_id=scenario.elasticity_set_id,
+            elasticity_set_name=(
+                str(scenario.elasticity_set) if scenario.elasticity_set_id else ""
             ),
             author_id=scenario.author.id,
             author_name=str(scenario.author),
@@ -141,6 +147,8 @@ class ScenarioListDTO:
     exchange_rate_set_name: str
     inflation_set_id: int | None
     inflation_set_name: str
+    elasticity_set_id: int | None
+    elasticity_set_name: str
     author_id: int
     author_name: str
     include_base_tariff_decisions: bool = True
@@ -162,6 +170,10 @@ class ScenarioListDTO:
             inflation_set_id=scenario.inflation_set_id,
             inflation_set_name=(
                 str(scenario.inflation_set) if scenario.inflation_set_id else ""
+            ),
+            elasticity_set_id=scenario.elasticity_set_id,
+            elasticity_set_name=(
+                str(scenario.elasticity_set) if scenario.elasticity_set_id else ""
             ),
             author_id=scenario.author.id,
             author_name=str(scenario.author),

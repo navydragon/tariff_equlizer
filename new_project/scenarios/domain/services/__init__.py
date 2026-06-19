@@ -7,9 +7,11 @@
 - tariff: отдельные тарифные решения
 - fx: курсы валют
 - inflation: инфляция
+- elasticity: эластичность
 """
 
 from .btd import BTDCategoryService, BTDCategoryValueService
+from .elasticity import ElasticityService
 from .fx import ExchangeRateService
 from .inflation import InflationService
 from .price_change import PriceChangeSettingService
@@ -23,6 +25,7 @@ __all__ = [
     "TariffRuleService",
     "ExchangeRateService",
     "InflationService",
+    "ElasticityService",
     "PriceChangeSettingService",
 ]
 

@@ -1,5 +1,6 @@
 import { fetchBlob, fetchJson } from "../lib/http.js";
 import { escapeHtml } from "../lib/dom.js";
+import { persistActiveScenario } from "../lib/scenario_active.js";
 import { clearToasts, showToast } from "../lib/toast.js";
 
 (function () {
@@ -63,8 +64,10 @@ import { clearToasts, showToast } from "../lib/toast.js";
       const raw = this.hasScenarioSelectTarget
         ? this.scenarioSelectTarget.value
         : "";
-      this.state.selectedScenarioId = raw ? Number(raw) : null;
+      const scenarioId = raw ? Number(raw) : null;
+      this.state.selectedScenarioId = scenarioId;
       this.state.cacheKey = null;
+      this._persistActiveScenario(scenarioId);
       this._computeEffects();
     }
 
@@ -622,6 +625,29 @@ import { clearToasts, showToast } from "../lib/toast.js";
           delay: 8000,
         }),
       );
+    }
+
+    _persistActiveScenario(scenarioId) {
+      if (!scenarioId) return;
+
+      const scenario = this.state.scenarioById.get(scenarioId);
+      const activeRaw = (this.activeScenarioIdValue || "").trim();
+      const activeId = activeRaw ? Number(activeRaw) : null;
+      if (activeId === scenarioId) return;
+
+      void persistActiveScenario(scenarioId, {
+        routeSetId: scenario?.route_set_id,
+        onError: (errors) => {
+          this._showError(
+            (errors && errors.join("; ")) ||
+              "Не удалось сохранить активный сценарий",
+          );
+        },
+      }).then((ok) => {
+        if (ok) {
+          this.activeScenarioIdValue = String(scenarioId);
+        }
+      });
     }
 
     _clearToasts() {

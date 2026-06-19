@@ -281,11 +281,11 @@
                       ></select>
                     </div>
                     <div class="mb-3">
-                      <label class="form-label" for="routeAnalysisTransportTypeFilter">Вид перевозки</label>
+                      <label class="form-label" for="routeAnalysisTransportTypeFilter">Вид сообщения</label>
                       <select
                         id="routeAnalysisTransportTypeFilter"
                         data-route-analysis-route-picker-target="transportTypeFilterSelect"
-                        placeholder="Выберите вид перевозки…"
+                        placeholder="Выберите вид сообщения…"
                         disabled
                       ></select>
                     </div>
@@ -313,11 +313,11 @@
                       ></select>
                     </div>
                     <div class="mb-3">
-                      <label class="form-label" for="routeAnalysisTransportTypeFilterHolding">Вид перевозки</label>
+                      <label class="form-label" for="routeAnalysisTransportTypeFilterHolding">Вид сообщения</label>
                       <select
                         id="routeAnalysisTransportTypeFilterHolding"
                         data-route-analysis-route-picker-target="transportTypeFilterHoldingSelect"
-                        placeholder="Выберите вид перевозки…"
+                        placeholder="Выберите вид сообщения…"
                         disabled
                       ></select>
                     </div>
@@ -335,17 +335,35 @@
               </div>
             </div>
             <div class="col-12">
-              <label class="form-label" for="routeAnalysisRouteSearchInput">Поиск</label>
-              <input
-                id="routeAnalysisRouteSearchInput"
-                type="text"
-                class="form-control"
-                placeholder="Груз, группа груза, холдинг, станция, код маршрута или вид сообщения…"
-                data-route-analysis-route-picker-target="searchInput"
-                data-action="input->route-analysis-route-picker#onSearchInput"
-              />
-              <div class="form-text">
-                Дополнительно сужает список маршрутов с заполненной рыночной ценой.
+              <button
+                id="routeAnalysisSearchToggle"
+                class="btn btn-link px-0 text-decoration-none"
+                type="button"
+                aria-expanded="false"
+                aria-controls="routeAnalysisSearchCollapse"
+              >
+                <i class="ti ti-search me-1"></i>
+                Поиск
+              </button>
+              <div
+                id="routeAnalysisSearchCollapse"
+                class="collapse"
+                data-route-analysis-route-picker-target="searchCollapse"
+              >
+                <div class="border rounded p-3 bg-light">
+                  <label class="form-label" for="routeAnalysisRouteSearchInput">Поиск по списку</label>
+                  <input
+                    id="routeAnalysisRouteSearchInput"
+                    type="text"
+                    class="form-control"
+                    placeholder="Груз, группа груза, холдинг, станция, код маршрута или вид сообщения…"
+                    data-route-analysis-route-picker-target="searchInput"
+                    data-action="input->route-analysis-route-picker#onSearchInput"
+                  />
+                  <div class="form-text mb-0">
+                    Дополнительно сужает список маршрутов с заполненной рыночной ценой.
+                  </div>
+                </div>
               </div>
             </div>
           </div>

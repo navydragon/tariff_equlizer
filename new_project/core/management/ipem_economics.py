@@ -71,6 +71,7 @@ EXPORT_CSV_COLUMNS: tuple[str, ...] = (
 
 IPEM_COAL_2026_SHEET = "Уголь_эластика"
 IPEM_COAL_2026_HEADER_ROW = 2
+IPEM_COAL_CARGO_GROUP_CODE = 1
 
 IPEM_COAL_2026_OVERLAP_COLUMNS: tuple[str, ...] = (
     "ipem_row",
@@ -193,6 +194,10 @@ class IpemCoal2026ResolvedRow:
     delivery_time_empty_days: Optional[int]
     delivery_time_ops_days: Optional[int]
     rate_per_wagon_per_day: Optional[Decimal]
+    cargo_code_izpod: str = ""
+    cargo_group_izpod: str = ""
+    cargo_code_3: str = ""
+    cargo_code_izpod_3: str = ""
 
 
 @dataclass
@@ -207,6 +212,41 @@ class IpemCoal2026ImportResult:
 
 def normalize_name(value: str) -> str:
     return (value or "").strip().casefold()
+
+
+def _first_three_chars(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()[:3]
+
+
+def parse_cargo_izpod_fields_from_ipem_row(
+    row: dict[str, str],
+    cargo: Cargo,
+) -> dict[str, str]:
+    cargo_code_raw = (row.get("Код груза") or cargo.code or "").strip()
+    cargo_group = (row.get("Группа груза") or "").strip()
+    if not cargo_group and cargo.cargo_group_id:
+        cargo_group = cargo.cargo_group.name
+    return {
+        "cargo_code_izpod": "",
+        "cargo_group_izpod": cargo_group,
+        "cargo_code_3": _first_three_chars(cargo_code_raw),
+        "cargo_code_izpod_3": "",
+    }
+
+
+CARGO_IZPOD_ROUTE_FIELDS: tuple[str, ...] = (
+    "cargo_code_izpod",
+    "cargo_group_izpod",
+    "cargo_code_3",
+    "cargo_code_izpod_3",
+)
+
+IPEM_COAL_ECONOMICS_DEFAULT_ZERO_FIELDS: tuple[str, ...] = (
+    "transshipment_cost_per_ton",
+    "excise_or_duty_per_ton",
+)
 
 
 def require_rapidfuzz() -> None:
@@ -580,6 +620,9 @@ def parse_ipem_coal_2026_economics_row(row: dict[str, str]) -> dict[str, Optiona
         if raw is None and route_field == "transport_total_cost_per_ton":
             raw = row.get("Общие транспортные расходы, руб. за тонну")
         economics[route_field] = parse_decimal_cell(raw or "")
+    for route_field in IPEM_COAL_ECONOMICS_DEFAULT_ZERO_FIELDS:
+        if economics[route_field] is None:
+            economics[route_field] = Decimal("0")
     return economics
 
 
@@ -683,6 +726,7 @@ def resolve_ipem_coal_2026_row(
 
     economics = parse_ipem_coal_2026_economics_row(row)
     shipper = resolve_shipper_from_ipem_row(row)
+    cargo_izpod = parse_cargo_izpod_fields_from_ipem_row(row, cargo)
 
     return (
         IpemCoal2026ResolvedRow(
@@ -713,6 +757,7 @@ def resolve_ipem_coal_2026_row(
             rate_per_wagon_per_day=parse_decimal_cell(
                 row.get("Ставка на вагон, руб. за вагон в сутки", "")
             ),
+            **cargo_izpod,
         ),
         [],
     )
@@ -743,15 +788,34 @@ def build_model_route_from_resolved_row(
         delivery_time_empty_days=resolved.delivery_time_empty_days,
         delivery_time_ops_days=resolved.delivery_time_ops_days,
         rate_per_wagon_per_day=resolved.rate_per_wagon_per_day,
+        cargo_code_izpod=resolved.cargo_code_izpod,
+        cargo_group_izpod=resolved.cargo_group_izpod,
+        cargo_code_3=resolved.cargo_code_3,
+        cargo_code_izpod_3=resolved.cargo_code_izpod_3,
     )
     for field_name, value in resolved.economics.items():
         setattr(route, field_name, value)
     return route
 
 
+def _coal_model_routes_qs(route_set: RouteSet):
+    return Route.objects.filter(
+        route_set=route_set,
+        is_model=True,
+        cargo__cargo_group__code=IPEM_COAL_CARGO_GROUP_CODE,
+    )
+
+
 def clear_ipem_model_routes(route_set: RouteSet) -> None:
-    Route.objects.filter(route_set=route_set, is_model=False).update(model_route=None)
-    Route.objects.filter(route_set=route_set, is_model=True).delete()
+    coal_model_ids = list(_coal_model_routes_qs(route_set).values_list("pk", flat=True))
+    if not coal_model_ids:
+        return
+    Route.objects.filter(
+        route_set=route_set,
+        is_model=False,
+        model_route_id__in=coal_model_ids,
+    ).update(model_route=None)
+    Route.objects.filter(pk__in=coal_model_ids).delete()
 
 
 def link_operational_routes_to_models(
@@ -769,6 +833,31 @@ def link_operational_routes_to_models(
             shipment_type_id=model_route.shipment_type_id,
         ).update(model_route_id=model_route.pk)
     return linked_total
+
+
+def sync_model_routes_cargo_izpod_from_operational(
+    route_set: RouteSet,
+    model_routes: Iterable[Route],
+) -> int:
+    updated_total = 0
+    for model_route in model_routes:
+        operational = (
+            Route.objects.operational()
+            .filter(route_set=route_set, model_route_id=model_route.pk)
+            .first()
+        )
+        if operational is None:
+            continue
+        updates = {
+            field: getattr(operational, field) or ""
+            for field in CARGO_IZPOD_ROUTE_FIELDS
+            if getattr(operational, field)
+        }
+        if not updates:
+            continue
+        Route.objects.filter(pk=model_route.pk).update(**updates)
+        updated_total += 1
+    return updated_total
 
 
 def import_ipem_coal_2026_model_routes(
@@ -840,6 +929,7 @@ def import_ipem_coal_2026_model_routes(
         route_set,
         created,
     )
+    sync_model_routes_cargo_izpod_from_operational(route_set, created)
     return result
 
 
