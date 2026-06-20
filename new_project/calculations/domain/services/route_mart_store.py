@@ -175,38 +175,39 @@ class MartMeta:
 class MartSidecarView:
     """Column-oriented mmap sidecar для KPI/масок без pandas DataFrame."""
 
-    columns: dict[str, np.ndarray]
+    column_arrays: dict[str, np.ndarray]
 
     @property
     def empty(self) -> bool:
         return len(self) == 0
 
     def __len__(self) -> int:
-        if not self.columns:
+        if not self.column_arrays:
             return 0
-        return int(len(next(iter(self.columns.values()))))
+        return int(len(next(iter(self.column_arrays.values()))))
 
     def __contains__(self, key: str) -> bool:
-        return key in self.columns
+        return key in self.column_arrays
 
     @property
     def column_names(self) -> frozenset[str]:
-        return frozenset(self.columns.keys())
+        return frozenset(self.column_arrays.keys())
 
     @property
     def columns(self) -> frozenset[str]:
+        """Имена колонок (совместимость с `'col' in df.columns`)."""
         return self.column_names
 
     def __getitem__(self, key: str) -> np.ndarray:
-        return self.columns[key]
+        return self.column_arrays[key]
 
     def get(self, key: str, default=None):
-        return self.columns.get(key, default)
+        return self.column_arrays.get(key, default)
 
     def to_dataframe(self) -> pd.DataFrame:
         if self.empty:
             return pd.DataFrame()
-        return pd.DataFrame(self.columns)
+        return pd.DataFrame(self.column_arrays)
 
 
 def mart_meta_path(parquet_path: Path) -> Path:
@@ -1024,7 +1025,7 @@ def load_mart_sidecar(
     timings["masks_npz_read_ms"] = timings["masks_npy_read_ms"]
 
     if not columns:
-        return MartSidecarView(columns={}), timings
+        return MartSidecarView(column_arrays={}), timings
     lengths = {len(value) for value in columns.values()}
     if len(lengths) != 1:
         target_len = max(lengths)
@@ -1033,7 +1034,7 @@ def load_mart_sidecar(
             for key, value in columns.items()
             if len(value) == target_len
         }
-    return MartSidecarView(columns=columns), timings
+    return MartSidecarView(column_arrays=columns), timings
 
 
 def load_mart_sidecar_dataframe(
@@ -1128,7 +1129,7 @@ def try_load_route_mart(
         if charge is None:
             charge = ensure_charge_npy(path)
         if charge is not None:
-            view = MartSidecarView(columns={"freight_charge_rub": charge})
+            view = MartSidecarView(column_arrays={"freight_charge_rub": charge})
             timings["charge_npy_read_ms"] = int((time.perf_counter() - t_read) * 1000)
             timings["parquet_read_ms"] = timings["charge_npy_read_ms"]
             timings["mart_read_mode"] = "charge_npy"
