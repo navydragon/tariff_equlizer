@@ -9,7 +9,7 @@ from calculations.domain.services.route_mask_cache import save_rule_mask
 from calculations.domain.services.route_mart_store import (
     ensure_compute_sidecars,
     load_mart_meta,
-    load_mart_sidecar_dataframe,
+    load_mart_sidecar,
     mart_meta_path,
     resolve_mart_parquet_path,
 )
@@ -50,13 +50,13 @@ def prewarm_rule_mask(*, rule: TariffRule) -> PrewarmResult | None:
     if not ensure_compute_sidecars(parquet_path):
         return None
 
-    df, _timings = load_mart_sidecar_dataframe(parquet_path, include_charge=False)
-    if df.empty:
+    sidecar, _timings = load_mart_sidecar(parquet_path, include_charge=False)
+    if sidecar.empty:
         return None
 
     mart_meta = load_mart_meta(parquet_path)
     conditions = TariffLoadService._rule_conditions_payload(rule)
-    mask = build_rule_mask_numpy(df, conditions, mart_meta=mart_meta).astype(
+    mask = build_rule_mask_numpy(sidecar, conditions, mart_meta=mart_meta).astype(
         bool,
         copy=False,
     )

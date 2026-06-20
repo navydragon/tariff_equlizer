@@ -41,6 +41,7 @@ from calculations.domain.services.route_effects_loader import (
 from calculations.domain.services.route_mask_cache import mask_cache_dir
 from calculations.domain.services.route_mart_store import (
     MartMeta,
+    MartSidecarView,
     load_mart_meta,
     resolve_light_mart_columns,
     resolve_mart_parquet_path,
@@ -283,7 +284,7 @@ class ScenarioEffectsPandasService:
         scenario: Scenario,
         *,
         columns: list[str] | None = None,
-    ) -> tuple[pd.DataFrame, MartMeta | None, dict[str, int | str]]:
+    ) -> tuple[MartSidecarView | pd.DataFrame, MartMeta | None, dict[str, int | str]]:
         route_set_id = scenario.route_set_id
         df, mart_meta, load_timings = fetch_routes_dataframe_cached_timed(
             route_set_id,
@@ -342,7 +343,7 @@ class ScenarioEffectsPandasService:
 
     def _compute_arrays(
         self,
-        df: pd.DataFrame,
+        sidecar: MartSidecarView | pd.DataFrame,
         context,
         years: list[int],
         *,
@@ -352,7 +353,7 @@ class ScenarioEffectsPandasService:
     ) -> tuple[GlobalTotals, dict[str, int], FullComputeArrays | None]:
         rule_specs = rule_specs_from_context(self._tariff_load, context)
         return compute_arrays_full(
-            df,
+            sidecar,
             years=years,
             base_coef_by_year=context.base_coef_by_year,
             rule_specs=rule_specs,
@@ -362,17 +363,29 @@ class ScenarioEffectsPandasService:
 
     @staticmethod
     def _collect_filter_options(
-        df: pd.DataFrame,
+        sidecar: MartSidecarView | pd.DataFrame,
         mart_meta: MartMeta | None,
     ) -> dict[str, list[str]]:
         if mart_meta is not None and mart_meta.filter_options:
             return normalize_filter_options(mart_meta.filter_options)
-        if df.empty:
+        if isinstance(sidecar, MartSidecarView):
+            if sidecar.empty:
+                return {"cargo_groups": ["—"], "holdings": ["Прочие"]}
+            if mart_meta is not None and mart_meta.dimension_labels:
+                cargo_groups = set(mart_meta.dimension_labels.get("cargo_group", []))
+                cargo_groups.add("—")
+                holdings = set(mart_meta.dimension_labels.get("holding", [])) or {"Прочие"}
+                return normalize_filter_options({
+                    "cargo_groups": sort_cargo_group_names(cargo_groups),
+                    "holdings": sorted(holdings),
+                })
+            return {"cargo_groups": ["—"], "holdings": ["Прочие"]}
+        if sidecar.empty:
             return {"cargo_groups": ["—"], "holdings": ["Прочие"]}
 
-        cargo_groups = set(df["cargo_group"].dropna().astype(str).tolist())
+        cargo_groups = set(sidecar["cargo_group"].dropna().astype(str).tolist())
         cargo_groups.add("—")
-        holdings = set(df["holding"].dropna().astype(str).tolist())
+        holdings = set(sidecar["holding"].dropna().astype(str).tolist())
         return normalize_filter_options({
             "cargo_groups": sort_cargo_group_names(cargo_groups),
             "holdings": sorted(holdings),
@@ -431,7 +444,7 @@ class ScenarioEffectsPandasService:
 
     def _compute_kpi_totals(
         self,
-        df: pd.DataFrame,
+        sidecar: MartSidecarView | pd.DataFrame,
         context,
         years: list[int],
         *,
@@ -440,7 +453,7 @@ class ScenarioEffectsPandasService:
     ) -> tuple[GlobalTotals, dict[str, int]]:
         rule_specs = rule_specs_from_context(self._tariff_load, context)
         return compute_kpi_totals(
-            df,
+            sidecar,
             years=years,
             base_coef_by_year=context.base_coef_by_year,
             rule_specs=rule_specs,

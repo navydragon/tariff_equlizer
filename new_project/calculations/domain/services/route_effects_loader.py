@@ -6,6 +6,7 @@ from django.db import connection
 
 from calculations.domain.services.route_mart_store import (
     MartMeta,
+    MartSidecarView,
     save_route_mart,
     try_load_route_mart,
 )
@@ -81,7 +82,7 @@ def fetch_routes_dataframe_cached_timed(
     route_set_id: int,
     *,
     columns: list[str] | None = None,
-) -> tuple[pd.DataFrame, MartMeta | None, dict[str, int | str]]:
+) -> tuple[MartSidecarView | pd.DataFrame, MartMeta | None, dict[str, int | str]]:
     """
     Витрина маршрутов (после JOIN и normalize) из parquet-файла или из БД.
     columns: подмножество колонок parquet для ускорения KPI-расчёта.

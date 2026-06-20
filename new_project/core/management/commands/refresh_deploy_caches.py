@@ -67,6 +67,12 @@ class Command(BaseCommand):
             help="Прогреть один набор маршрутов (по умолчанию — все непустые).",
         )
 
+        parser.add_argument(
+            "--warm-scenarios",
+            action="store_true",
+            help="После прогрева витрин прогреть KPI-снимки сценариев.",
+        )
+
     def handle(self, *args, **options) -> None:
         if options["clear_only"] and options["warm_only"]:
             raise CommandError("Нельзя одновременно указывать --clear-only и --warm-only.")
@@ -89,6 +95,8 @@ class Command(BaseCommand):
 
         if not options["clear_only"]:
             self._warm_route_marts(route_set_id=options["route_set_id"])
+            if options.get("warm_scenarios"):
+                self._warm_scenario_snapshots(route_set_id=options["route_set_id"])
 
     def _clear_caches(self) -> None:
         self.stdout.write("==> Очищаем дисковые кеши и Redis/LocMem")
@@ -159,3 +167,27 @@ class Command(BaseCommand):
         )
         if removed_masks:
             self.stdout.write(f"        удалено устаревших mask dirs: {removed_masks}")
+
+    def _warm_scenario_snapshots(self, *, route_set_id: int | None) -> None:
+        from calculations.domain.services.scenario_effects_warm import (
+            warm_scenario_kpi_snapshot,
+        )
+        from scenarios.models import Scenario
+
+        qs = Scenario.objects.filter(route_set_id__isnull=False).order_by("id")
+        if route_set_id is not None:
+            qs = qs.filter(route_set_id=route_set_id)
+        scenarios = list(qs)
+        if not scenarios:
+            self.stdout.write("Нет сценариев для прогрева KPI.")
+            return
+
+        self.stdout.write(f"==> Прогреваем KPI-снимки для {len(scenarios)} сценари(ев)")
+        for scenario in scenarios:
+            self.stdout.write(
+                f"    scenario id={scenario.id} «{scenario.name}»…",
+            )
+            started = time.perf_counter()
+            warm_scenario_kpi_snapshot(scenario_id=scenario.id)
+            elapsed_ms = int((time.perf_counter() - started) * 1000)
+            self.stdout.write(f"        готово за {elapsed_ms} ms")

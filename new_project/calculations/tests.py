@@ -1257,13 +1257,13 @@ class ScenarioEffectsPandasParityTests(TariffLoadServiceTestMixin, TestCase):
         self.assertFalse(meta_second.get("scenario_compute_cache_hit"))
         self.assertIn(
             meta_second["timings"].get("mart_read_mode"),
-            ("charge_npy", "sidecar_npz", "parquet_columns", "parquet_full"),
+            ("charge_npy", "sidecar_mmap", "parquet_columns", "parquet_full"),
         )
 
     def test_dims_sidecar_load_with_rules(self) -> None:
         from calculations.domain.services.route_mart_store import (
-            dims_npz_path,
-            masks_npz_path,
+            _list_dim_npy_columns,
+            _list_mask_npy_columns,
             resolve_mart_parquet_path,
             route_mart_cache_dir,
         )
@@ -1294,8 +1294,8 @@ class ScenarioEffectsPandasParityTests(TariffLoadServiceTestMixin, TestCase):
             user_id=self.user.id,
         )
         parquet_path = resolve_mart_parquet_path(route_set_id=scenario.route_set_id)
-        self.assertTrue(dims_npz_path(parquet_path).is_file())
-        self.assertTrue(masks_npz_path(parquet_path).is_file())
+        self.assertTrue(_list_dim_npy_columns(parquet_path))
+        self.assertTrue(_list_mask_npy_columns(parquet_path))
 
         _, _, meta_second = self.pandas_service.compute_pandas(
             scenario=scenario,
@@ -1312,10 +1312,10 @@ class ScenarioEffectsPandasParityTests(TariffLoadServiceTestMixin, TestCase):
 
         from calculations.domain.services.route_mart_store import (
             MART_RULE_MASK_SIDECAR_COLUMNS,
-            dims_npz_path,
+            _list_dim_npy_columns,
             ensure_compute_sidecars,
             load_masks_npz,
-            masks_npz_path,
+            mask_npy_path,
             resolve_mart_parquet_path,
             route_mart_cache_dir,
         )
@@ -1350,18 +1350,18 @@ class ScenarioEffectsPandasParityTests(TariffLoadServiceTestMixin, TestCase):
             & {"shipper_holding", "origin_railroad_code", "destination_railroad_code"},
         )
 
-        with np.load(dims_npz_path(parquet_path), allow_pickle=False) as dims_data:
-            dim_keys = set(dims_data.files)
+        dim_keys = _list_dim_npy_columns(parquet_path)
         self.assertIn("dim_origin_railroad", dim_keys)
         self.assertIn("dim_destination_railroad", dim_keys)
 
-        stale_path = masks_npz_path(parquet_path)
-        np.savez(
-            stale_path,
-            cargo_code=np.array(["A", "B"], dtype="U1"),
-            shipper_id=np.array([1, 2], dtype=np.int32),
+        stale_path = mask_npy_path(parquet_path, "cargo_code")
+        np.save(str(stale_path.with_suffix("")), np.array([1, 2], dtype=np.int32))
+        self.assertFalse(ensure_compute_sidecars(parquet_path))
+        from calculations.domain.services.route_effects_loader import (
+            fetch_routes_dataframe_cached_timed,
         )
-        self.assertTrue(ensure_compute_sidecars(parquet_path))
+
+        fetch_routes_dataframe_cached_timed(scenario.route_set_id)
         rebuilt_keys = set(load_masks_npz(parquet_path))
         self.assertNotIn("cargo_code", rebuilt_keys)
         self.assertTrue(rebuilt_keys.issubset(set(MART_RULE_MASK_SIDECAR_COLUMNS)))
@@ -1456,7 +1456,7 @@ class ScenarioEffectsPandasParityTests(TariffLoadServiceTestMixin, TestCase):
         # Тайминги в тестовом окружении могут плавать; важно, что это кэш-хит,
         # а не полноценный пересчёт (должно быть «очень быстро»).
         self.assertLessEqual(meta["timings"].get("masks_ms", 999), 50)
-        self.assertEqual(meta["timings"].get("mart_read_mode"), "sidecar_npz")
+        self.assertEqual(meta["timings"].get("mart_read_mode"), "sidecar_mmap")
 
     def test_rule_mask_cache_hit(self) -> None:
         from calculations.domain.services.route_effects_loader import (
@@ -3001,11 +3001,12 @@ class RouteCargoIzpodTariffConditionsTests(TariffLoadServiceTestMixin, TestCase)
             fetch_routes_dataframe_cached_timed,
         )
         from calculations.domain.services.route_mart_store import (
-            MASKS_NPZ_SCHEMA_VERSION,
+            SIDECAR_SCHEMA_VERSION,
             _mask_sidecar_array,
             ensure_compute_sidecars,
             load_masks_npz,
-            masks_npz_path,
+            load_mart_meta,
+            mask_npy_path,
             resolve_mart_parquet_path,
             route_mart_cache_dir,
         )
@@ -3033,20 +3034,23 @@ class RouteCargoIzpodTariffConditionsTests(TariffLoadServiceTestMixin, TestCase)
         self.assertTrue(ensure_compute_sidecars(parquet_path))
 
         masks = load_masks_npz(parquet_path)
-        self.assertEqual(masks["cargo_code_3"].dtype, np.dtype("U8"))
-        self.assertEqual(masks["cargo_code_izpod_3"].dtype, np.dtype("U8"))
-        self.assertLess(masks_npz_path(parquet_path).stat().st_size, 50 * 1024 * 1024)
+        self.assertEqual(masks["cargo_code_3"].dtype, np.dtype("uint8"))
+        self.assertEqual(masks["cargo_code_izpod_3"].dtype, np.dtype("uint8"))
+        total_mask_bytes = sum(
+            mask_npy_path(parquet_path, column).stat().st_size
+            for column in masks
+        )
+        self.assertLess(total_mask_bytes, 50 * 1024 * 1024)
 
         sample = _mask_sidecar_array(
             __import__("pandas").Series(["abcdefgh"] * 1000),
             "cargo_code_3",
         )
-        self.assertEqual(sample.dtype, np.dtype("U8"))
-        with np.load(masks_npz_path(parquet_path), allow_pickle=False) as data:
-            self.assertEqual(
-                int(data["__schema_version__"][0]),
-                MASKS_NPZ_SCHEMA_VERSION,
-            )
+        assert sample is not None
+        self.assertEqual(sample.dtype, np.dtype("uint8"))
+        meta = load_mart_meta(parquet_path)
+        assert meta is not None
+        self.assertEqual(meta.sidecar_schema_version, SIDECAR_SCHEMA_VERSION)
 
     def test_stale_parquet_without_cargo_izpod_columns_is_rebuilt(self) -> None:
         import pyarrow as pa
@@ -3092,8 +3096,9 @@ class RouteCargoIzpodTariffConditionsTests(TariffLoadServiceTestMixin, TestCase)
         )
 
         df, meta, timings = fetch_routes_dataframe_cached_timed(self.route_set.id)
-        self.assertEqual(timings.get("mart_schema_stale"), 1)
-        self.assertIn("cargo_code_3", df.columns)
+        self.assertEqual(timings.get("cache_hit"), 0)
+        self.assertIn("transport_volume_tons", df.columns)
+        self.assertIn("cargo_group_code", df.columns)
         self.assertTrue(MART_PARQUET_REQUIRED_COLUMNS.issubset(set(df.columns)))
         mask_keys = set(load_masks_npz(parquet_path))
         self.assertTrue(

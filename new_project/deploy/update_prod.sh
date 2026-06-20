@@ -10,18 +10,22 @@ usage() {
                              (только migrate + collectstatic + restart)
   --warm-caches              После очистки прогреть parquet-витрины (нужно много RAM;
                              на ~2M маршрутов без swap процесс может быть убит OOM)
+  --warm-scenarios           После --warm-caches прогреть KPI-снимки сценариев
+                             (первый заход в UI ~0.1 с вместо cold load)
   --skip-git-pull            Не выполнять git pull
   -h, --help                 Показать эту справку
 
 Переменные окружения (эквивалент флагов):
   SKIP_CACHE_REFRESH=1       то же, что --skip-cache-refresh
   WARM_DEPLOY_CACHES=1       то же, что --warm-caches
+  WARM_DEPLOY_SCENARIOS=1    то же, что --warm-scenarios
   SKIP_GIT_PULL=1            то же, что --skip-git-pull
 EOF
 }
 
 SKIP_CACHE_REFRESH="${SKIP_CACHE_REFRESH:-}"
 WARM_DEPLOY_CACHES="${WARM_DEPLOY_CACHES:-}"
+WARM_DEPLOY_SCENARIOS="${WARM_DEPLOY_SCENARIOS:-}"
 SKIP_GIT_PULL="${SKIP_GIT_PULL:-}"
 
 while [[ $# -gt 0 ]]; do
@@ -32,6 +36,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --warm-caches)
       WARM_DEPLOY_CACHES=1
+      shift
+      ;;
+    --warm-scenarios)
+      WARM_DEPLOY_SCENARIOS=1
       shift
       ;;
     --skip-git-pull)
@@ -115,11 +123,15 @@ if [[ -z "${SKIP_CACHE_REFRESH}" ]]; then
   echo "==> Очищаем дисковые кеши и Redis/LocMem (--clear-only)"
   run_manage_as_service_user "refresh_deploy_caches --clear-only"
 
-  if [[ -n "${WARM_DEPLOY_CACHES}" ]]; then
-    echo "==> Прогреваем parquet-витрины маршрутов (может занять несколько минут и много RAM)"
-    if ! run_manage_as_service_user "refresh_deploy_caches --warm-only"; then
+  if [[ -n "${WARM_DEPLOY_CACHES}" || -n "${WARM_DEPLOY_SCENARIOS}" ]]; then
+    warm_args="--warm-only"
+    if [[ -n "${WARM_DEPLOY_SCENARIOS}" ]]; then
+      warm_args="${warm_args} --warm-scenarios"
+    fi
+    echo "==> Прогреваем кеши (refresh_deploy_caches ${warm_args})"
+    if ! run_manage_as_service_user "refresh_deploy_caches ${warm_args}"; then
       echo "WARNING: прогрев кешей не завершился (часто OOM на больших наборах маршрутов)." >&2
-      echo "         Сервис будет запущен; прогрейте вручную: refresh_deploy_caches --warm-only" >&2
+      echo "         Сервис будет запущен; прогрейте вручную: refresh_deploy_caches ${warm_args}" >&2
     fi
   else
     echo "==> Прогрев витрин пропущен (по умолчанию). Для прогрева: ./deploy/update_prod.sh --warm-caches"

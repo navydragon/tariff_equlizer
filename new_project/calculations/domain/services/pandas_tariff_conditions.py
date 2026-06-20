@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from calculations.domain.services.route_mart_store import MartMeta
+from calculations.domain.services.route_mart_store import MartMeta, MartSidecarView
 
 PARAMETER_COLUMN_MAP = {
     "cargo_group": "cargo_group_code",
@@ -64,6 +64,53 @@ def _label_codes(values: list, labels: list[str]) -> list[int]:
         if key in label_to_code:
             codes.append(label_to_code[key])
     return codes
+
+
+def _mask_sidecar_codes_array(
+    arr: np.ndarray,
+    *,
+    labels: list[str],
+    compare_vals: list,
+) -> tuple[np.ndarray, list[int]] | None:
+    if not labels or not np.issubdtype(arr.dtype, np.integer):
+        return None
+    compare_codes = _label_codes([str(v) for v in compare_vals], labels)
+    if not compare_codes:
+        return None
+    return np.asarray(arr, dtype=np.int32), compare_codes
+
+
+def _sidecar_has_column(sidecar: MartSidecarView | pd.DataFrame, column: str) -> bool:
+    if isinstance(sidecar, MartSidecarView):
+        return column in sidecar
+    return column in sidecar.columns
+
+
+def _sidecar_len(sidecar: MartSidecarView | pd.DataFrame) -> int:
+    return len(sidecar)
+
+
+def _sidecar_is_empty(sidecar: MartSidecarView | pd.DataFrame) -> bool:
+    if isinstance(sidecar, MartSidecarView):
+        return sidecar.empty
+    return sidecar.empty
+
+
+def _sidecar_column_array(
+    sidecar: MartSidecarView | pd.DataFrame,
+    column: str,
+    *,
+    dtype: np.dtype | type | None = None,
+) -> np.ndarray:
+    if isinstance(sidecar, MartSidecarView):
+        arr = sidecar[column]
+        if dtype is not None:
+            return np.asarray(arr, dtype=dtype)
+        return np.asarray(arr)
+    series = sidecar[column]
+    if dtype is not None:
+        return series.to_numpy(dtype=dtype, copy=False)
+    return series.to_numpy(copy=False)
 
 
 def _parse_int_ids(vals: list) -> list[int]:
@@ -152,15 +199,15 @@ def _resolve_dim_compare_codes(
 
 
 def build_rule_mask_numpy(
-    df: pd.DataFrame,
+    sidecar: MartSidecarView | pd.DataFrame,
     conditions: list[dict],
     *,
     mart_meta: MartMeta | None = None,
 ) -> np.ndarray:
-    if df.empty:
+    if _sidecar_is_empty(sidecar):
         return np.zeros(0, dtype=bool)
 
-    mask = np.ones(len(df), dtype=bool)
+    mask = np.ones(_sidecar_len(sidecar), dtype=bool)
 
     for condition in conditions or []:
         parameter = (condition.get("parameter") or "").strip()
@@ -168,34 +215,57 @@ def build_rule_mask_numpy(
         values = condition.get("values")
 
         if parameter == "distance_belt" and operator in ("include", "exclude"):
-            if "distance_belt" not in df.columns:
+            if not _sidecar_has_column(sidecar, "distance_belt"):
                 continue
             belt_vals = [
                 str(v) for v in _as_list(values) if v is not None and str(v) != ""
             ]
             if not belt_vals:
                 continue
-            series = df["distance_belt"].fillna("").astype(str).to_numpy()
+            arr = _sidecar_column_array(sidecar, "distance_belt")
+            coded = (
+                _mask_sidecar_codes_array(
+                    arr,
+                    labels=(mart_meta.dimension_labels.get("distance_belt", [])
+                            if mart_meta is not None else []),
+                    compare_vals=belt_vals,
+                )
+                if mart_meta is not None
+                else None
+            )
+            if coded is not None:
+                belt_arr, compare_codes = coded
+                if operator == "include":
+                    mask &= np.isin(belt_arr, compare_codes)
+                elif operator == "exclude":
+                    mask &= ~np.isin(belt_arr, compare_codes)
+                continue
+            if isinstance(sidecar, MartSidecarView):
+                belt_arr = np.char.strip(arr.astype(str))
+            else:
+                belt_arr = sidecar["distance_belt"].fillna("").astype(str).to_numpy()
             if operator == "include":
-                mask &= np.isin(series, belt_vals)
+                mask &= np.isin(belt_arr, belt_vals)
             elif operator == "exclude":
-                mask &= ~np.isin(series, belt_vals)
+                mask &= ~np.isin(belt_arr, belt_vals)
             continue
 
         if parameter == "distance_belt" and operator in ("lt", "gt"):
-            if "distance_belt_midpoint_km" not in df.columns:
+            if not _sidecar_has_column(sidecar, "distance_belt_midpoint_km"):
                 continue
             try:
                 num = int(values)
             except (TypeError, ValueError):
                 continue
-            series = pd.to_numeric(
-                df["distance_belt_midpoint_km"], errors="coerce"
-            ).to_numpy(dtype=np.float64)
+            series_arr = _sidecar_column_array(
+                sidecar,
+                "distance_belt_midpoint_km",
+                dtype=np.float64,
+            )
             if operator == "lt":
-                mask &= np.nan_to_num(series, nan=np.inf) < num
+                mask &= np.nan_to_num(series_arr, nan=np.inf) < num
             elif operator == "gt":
-                mask &= np.nan_to_num(series, nan=-1.0) > num
+                mask &= np.nan_to_num(series_arr, nan=-1.0) > num
             continue
 
         column = PARAMETER_COLUMN_MAP.get(parameter)
@@ -211,13 +281,16 @@ def build_rule_mask_numpy(
             f"dim_{dim_parameter}" if dim_parameter in _DIM_PARAMETERS else None
         )
 
-        if dim_column and dim_column in df.columns and mart_meta is not None:
+        if dim_column and _sidecar_has_column(sidecar, dim_column) and mart_meta is not None:
             labels = mart_meta.dimension_labels.get(dim_parameter, [])
             compare_codes = _resolve_dim_compare_codes(dim_parameter, vals, labels)
             if not compare_codes:
-                if parameter in _CODE_FALLBACK_PARAMETERS and column in df.columns:
+                if parameter in _CODE_FALLBACK_PARAMETERS and _sidecar_has_column(
+                    sidecar,
+                    column,
+                ):
                     compare_vals = [str(v) for v in vals]
-                    series = df[column].astype(str).to_numpy()
+                    series = _sidecar_column_array(sidecar, column, dtype=str)
                     if operator == "include":
                         mask &= np.isin(series, compare_vals)
                     elif operator == "exclude":
@@ -225,17 +298,16 @@ def build_rule_mask_numpy(
                 else:
                     mask &= False
                 continue
-            series = df[dim_column].to_numpy(dtype=np.int32, copy=False)
+            series = _sidecar_column_array(sidecar, dim_column, dtype=np.int32)
             if operator == "include":
                 mask &= np.isin(series, compare_codes)
             elif operator == "exclude":
                 mask &= ~np.isin(series, compare_codes)
             continue
 
-        if column not in df.columns:
+        if not _sidecar_has_column(sidecar, column):
             continue
 
-        series = df[column]
         if parameter in {"wagon_kind", "shipment_type", "message_type", "shipper"}:
             compare_vals: list = []
             for val in vals:
@@ -243,7 +315,7 @@ def build_rule_mask_numpy(
                     compare_vals.append(int(val))
                 except (TypeError, ValueError):
                     compare_vals.append(val)
-            arr = series.to_numpy()
+            arr = _sidecar_column_array(sidecar, column)
             if operator == "include":
                 mask &= np.isin(arr, compare_vals)
             elif operator == "exclude":
@@ -251,11 +323,30 @@ def build_rule_mask_numpy(
             continue
 
         compare_vals = vals
-        arr = series.astype(str).to_numpy()
+        arr = _sidecar_column_array(sidecar, column)
+        coded = (
+            _mask_sidecar_codes_array(
+                arr,
+                labels=(mart_meta.dimension_labels.get(column, [])
+                        if mart_meta is not None else []),
+                compare_vals=compare_vals,
+            )
+            if mart_meta is not None
+            else None
+        )
+        if coded is not None:
+            coded_arr, compare_codes = coded
+            if operator == "include":
+                mask &= np.isin(coded_arr, compare_codes)
+            elif operator == "exclude":
+                mask &= ~np.isin(coded_arr, compare_codes)
+            continue
+
+        str_arr = arr.astype(str)
         if operator == "include":
-            mask &= np.isin(arr, compare_vals)
+            mask &= np.isin(str_arr, compare_vals)
         elif operator == "exclude":
-            mask &= ~np.isin(arr, compare_vals)
+            mask &= ~np.isin(str_arr, compare_vals)
 
     return mask
 

@@ -10,7 +10,7 @@ from calculations.domain.services.route_mask_cache import mask_cache_dir
 from calculations.domain.services.route_mart_store import (
     ensure_compute_sidecars,
     load_mart_meta,
-    load_mart_sidecar_dataframe,
+    load_mart_sidecar,
     mart_meta_path,
     resolve_mart_parquet_path,
 )
@@ -47,6 +47,15 @@ def _resolve_ready_parquet_path(*, route_set_id: int) -> Path | None:
     if not ensure_compute_sidecars(parquet_path):
         return None
     return parquet_path
+
+
+def warm_scenario_kpi_snapshot(*, scenario_id: int) -> None:
+    """Прогревает KPI-снимок сценария (deploy / refresh_deploy_caches --warm-scenarios)."""
+    warm_scenario_after_rule_change(
+        scenario_id=scenario_id,
+        change="create",
+        mask_changed=False,
+    )
 
 
 def warm_scenario_after_rule_change(
@@ -118,7 +127,7 @@ def warm_scenario_after_rule_change(
         )
         update_warm_status(scenario_id=scenario_id, data_version=data_version)
 
-        df, _sidecar_timings = load_mart_sidecar_dataframe(parquet_path, include_charge=True)
+        df, _sidecar_timings = load_mart_sidecar(parquet_path, include_charge=True)
         if df.empty:
             return
 
@@ -131,7 +140,10 @@ def warm_scenario_after_rule_change(
             route_set_id=scenario.route_set_id,
             mart_meta=mart_meta,
         )
-        filter_options = ScenarioEffectsPandasService._collect_filter_options(df, mart_meta)
+        filter_options = ScenarioEffectsPandasService._collect_filter_options(
+            df,
+            mart_meta,
+        )
         if mart_meta is not None:
             skipped_charge = mart_meta.skipped_charge
             skipped_volume = mart_meta.routes_without_volume

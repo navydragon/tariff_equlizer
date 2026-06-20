@@ -11,7 +11,7 @@ import pandas as pd
 from concurrent.futures import ThreadPoolExecutor
 
 from calculations.domain.services.route_mask_cache import build_or_load_rule_mask
-from calculations.domain.services.route_mart_store import MartMeta
+from calculations.domain.services.route_mart_store import MartMeta, MartSidecarView
 from calculations.domain.services.scenario_effects_compact import _COMPUTE_DTYPE
 from calculations.domain.services.scenario_effects_formatting import GlobalTotals
 from calculations.domain.services.tariff_load import ScenarioTariffContext, TariffLoadService
@@ -75,8 +75,14 @@ def _base_coef_array(
     )
 
 
+def _sidecar_charge_array(sidecar: MartSidecarView | pd.DataFrame) -> np.ndarray:
+    if isinstance(sidecar, MartSidecarView):
+        return np.asarray(sidecar["freight_charge_rub"], dtype=_COMPUTE_DTYPE)
+    return sidecar["freight_charge_rub"].to_numpy(dtype=_COMPUTE_DTYPE, copy=False)
+
+
 def _prepare_rules_state(
-    df: pd.DataFrame,
+    sidecar: MartSidecarView | pd.DataFrame,
     *,
     years: list[int],
     rule_specs: list[RuleComputeSpec],
@@ -90,7 +96,7 @@ def _prepare_rules_state(
     list[np.ndarray],
     dict[str, int],
 ]:
-    n_routes = len(df)
+    n_routes = len(sidecar)
     n_years = len(years)
     rules_coef = np.ones((n_routes, n_years), dtype=_COMPUTE_DTYPE)
     rule_meta: list[tuple[int, str]] = []
@@ -111,7 +117,7 @@ def _prepare_rules_state(
             route_set_id=route_set_id,
             rule_id=rule_spec.id,
             conditions=rule_spec.conditions,
-            df=df,
+            df=sidecar,
             mart_meta=mart_meta,
             cache_dir=resolved_mask_dir,
         )
@@ -147,7 +153,7 @@ def _prepare_rules_state(
 
 
 def compute_kpi_totals(
-    df: pd.DataFrame,
+    sidecar: MartSidecarView | pd.DataFrame,
     *,
     years: list[int],
     base_coef_by_year: dict[int, Decimal],
@@ -158,15 +164,18 @@ def compute_kpi_totals(
     import time
 
     timings: dict[str, int] = {}
-    if df.empty:
+    if isinstance(sidecar, MartSidecarView):
+        if sidecar.empty:
+            return GlobalTotals(), timings
+    elif sidecar.empty:
         return GlobalTotals(), timings
 
-    initial = df["freight_charge_rub"].to_numpy(dtype=_COMPUTE_DTYPE, copy=False)
+    initial = _sidecar_charge_array(sidecar)
     base_coef_arr = _base_coef_array(years, base_coef_by_year)
 
     rules_coef, rule_meta, _rule_masks, _rule_effective, mask_timings = (
         _prepare_rules_state(
-            df,
+            sidecar,
             years=years,
             rule_specs=rule_specs,
             route_set_id=route_set_id,
@@ -218,7 +227,7 @@ def compute_kpi_totals(
 
 
 def compute_arrays_full(
-    df: pd.DataFrame,
+    sidecar: MartSidecarView | pd.DataFrame,
     *,
     years: list[int],
     base_coef_by_year: dict[int, Decimal],
@@ -231,17 +240,20 @@ def compute_arrays_full(
     import time
 
     timings: dict[str, int] = {}
-    if df.empty:
+    if isinstance(sidecar, MartSidecarView):
+        if sidecar.empty:
+            return GlobalTotals(), timings, None
+    elif sidecar.empty:
         return GlobalTotals(), timings, None
 
-    n_routes = len(df)
+    n_routes = len(sidecar)
     n_years = len(years)
-    initial = df["freight_charge_rub"].to_numpy(dtype=_COMPUTE_DTYPE, copy=False)
+    initial = _sidecar_charge_array(sidecar)
     base_coef_arr = _base_coef_array(years, base_coef_by_year)
 
     rules_coef, rule_meta, rule_masks, rule_effective_by_year, mask_timings = (
         _prepare_rules_state(
-            df,
+            sidecar,
             years=years,
             rule_specs=rule_specs,
             route_set_id=route_set_id,

@@ -9,9 +9,9 @@ from pathlib import Path
 from calculations.domain.services.route_mart_store import (
     MartMeta,
     load_mart_meta,
-    load_mart_sidecar_dataframe,
+    load_mart_sidecar,
     load_route_mart_parquet,
-    resolve_light_mart_columns,
+    ensure_compute_sidecars,
 )
 from calculations.domain.services.scenario_compute_store import (
     ScenarioComputeBundle,
@@ -80,19 +80,27 @@ def _run_deferred_full_compute(job: DeferredFullComputeJob) -> None:
             return
 
         parquet_path = Path(job.parquet_path)
-        df, _sidecar_timings = load_mart_sidecar_dataframe(
+        if not ensure_compute_sidecars(parquet_path):
+            logger.error(
+                "Deferred compute aborted: sidecars incomplete for %s",
+                parquet_path,
+            )
+            return
+
+        sidecar, _sidecar_timings = load_mart_sidecar(
             parquet_path,
             include_charge=True,
         )
-        if df.empty or "freight_charge_rub" not in df.columns:
-            light_columns = resolve_light_mart_columns(
-                has_rules=bool(job.rule_specs),
+        if sidecar.empty or "freight_charge_rub" not in sidecar:
+            logger.error(
+                "Deferred compute aborted: charge sidecar missing for %s",
+                parquet_path,
             )
-            df = load_route_mart_parquet(parquet_path, columns=light_columns)
+            return
         mart_meta = job.mart_meta or load_mart_meta(parquet_path)
 
         _global_totals, _timings, arrays = compute_arrays_full(
-            df,
+            sidecar,
             years=job.years,
             base_coef_by_year=job.base_coef_by_year,
             rule_specs=job.rule_specs,
@@ -104,9 +112,36 @@ def _run_deferred_full_compute(job: DeferredFullComputeJob) -> None:
         if arrays is None:
             return
 
-        df_full = load_route_mart_parquet(parquet_path)
+        volume_sidecar, _volume_timings = load_mart_sidecar(
+            parquet_path,
+            include_charge=False,
+            include_volume=True,
+        )
+        if volume_sidecar.empty or "transport_volume_tons" not in volume_sidecar:
+            compact_df = load_route_mart_parquet(
+                parquet_path,
+                columns=["transport_volume_tons"],
+            )
+            dims_sidecar, _ = load_mart_sidecar(
+                parquet_path,
+                include_charge=False,
+            )
+            if not dims_sidecar.empty:
+                for column in dims_sidecar.column_names:
+                    compact_df[column] = dims_sidecar[column]
+        else:
+            compact_df = volume_sidecar.to_dataframe()
+            dims_sidecar, _ = load_mart_sidecar(
+                parquet_path,
+                include_charge=False,
+            )
+            if not dims_sidecar.empty:
+                for column in dims_sidecar.column_names:
+                    if column not in compact_df.columns:
+                        compact_df[column] = dims_sidecar[column]
+
         dimensions, dimension_labels, volume = prepare_compact_inputs(
-            df_full,
+            compact_df,
             mart_meta,
         )
         compact = build_compact_from_arrays(
