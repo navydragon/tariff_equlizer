@@ -160,7 +160,7 @@ def make_cache_key(*, user_id: int, scenario_id: int) -> str:
 
 
 def _payload_for_redis(payload: ScenarioEffectsCachePayload) -> ScenarioEffectsCachePayload:
-    """Compact хранится только на диске (arrays.npz); в Redis — метаданные сессии."""
+    """Compact хранится только на диске (.npy-массивы); в Redis — метаданные сессии."""
     if payload.compact is None:
         return payload
     return ScenarioEffectsCachePayload(

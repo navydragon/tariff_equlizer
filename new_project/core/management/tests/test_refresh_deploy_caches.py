@@ -87,7 +87,7 @@ class RefreshDeployCachesTests(TestCase):
             Path(self.cache_dirs["SCENARIO_COMPUTE_CACHE_DIR"]) / "1" / "deadbeef"
         )
         stale_compute.mkdir(parents=True)
-        (stale_compute / "arrays.npz").write_bytes(b"stale")
+        (stale_compute / "baseline_rub.npy").write_bytes(b"stale")
 
     def tearDown(self) -> None:
         self.settings_override.disable()
@@ -104,7 +104,7 @@ class RefreshDeployCachesTests(TestCase):
                 Path(self.cache_dirs["SCENARIO_COMPUTE_CACHE_DIR"])
                 / "1"
                 / "deadbeef"
-                / "arrays.npz"
+                / "baseline_rub.npy"
             ).exists(),
         )
         self.assertIsNone(cache.get("scenario_effects:1:1:abc"))
@@ -130,7 +130,7 @@ class RefreshDeployCachesTests(TestCase):
                 Path(self.cache_dirs["SCENARIO_COMPUTE_CACHE_DIR"])
                 / "1"
                 / "deadbeef"
-                / "arrays.npz"
+                / "baseline_rub.npy"
             ).exists(),
         )
 

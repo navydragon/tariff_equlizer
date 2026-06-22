@@ -3171,10 +3171,10 @@ class TariffRulesCacheAuditTests(TariffLoadServiceTestMixin, TestCase):
 
         shutil.rmtree(scenario_compute_cache_root(), ignore_errors=True)
 
-    def test_kpi_only_overwrites_stale_npz(self) -> None:
+    def test_kpi_only_overwrites_stale_compact_files(self) -> None:
         import numpy as np
         from calculations.domain.services.scenario_compute_store import (
-            NPZ_FILENAME,
+            BASELINE_RUB_FILENAME,
             METADATA_FILENAME,
             save_scenario_compute_kpi_only,
             scenario_compute_dir,
@@ -3206,9 +3206,9 @@ class TariffRulesCacheAuditTests(TariffLoadServiceTestMixin, TestCase):
             scenario_id=self.scenario.id,
             data_version=data_version,
         )
-        np.savez(
-            cache_dir / NPZ_FILENAME.replace(".npz", ""),
-            baseline_rub=np.array([1.0], dtype=np.float32),
+        np.save(
+            cache_dir / BASELINE_RUB_FILENAME.replace(".npy", ""),
+            np.array([1.0], dtype=np.float32),
         )
 
         bundle = try_load_scenario_compute(
@@ -3228,7 +3228,7 @@ class TariffRulesCacheAuditTests(TariffLoadServiceTestMixin, TestCase):
             skipped_charge=0,
             routes_without_volume=0,
         )
-        self.assertFalse((cache_dir / NPZ_FILENAME).is_file())
+        self.assertFalse((cache_dir / BASELINE_RUB_FILENAME).is_file())
 
     def test_distance_belt_include_sidecar_ignored(self) -> None:
         from calculations.domain.services.route_mart_store import MartMeta
@@ -3303,10 +3303,10 @@ class TariffRulesCacheAuditTests(TariffLoadServiceTestMixin, TestCase):
         self.assertFalse(mask[1])
         self.assertTrue(mask[2])
 
-    def test_kpi_only_skips_npz_when_deferred_running(self) -> None:
+    def test_kpi_only_skips_compact_cleanup_when_deferred_running(self) -> None:
         import numpy as np
         from calculations.domain.services.scenario_compute_store import (
-            NPZ_FILENAME,
+            BASELINE_RUB_FILENAME,
             save_scenario_compute_kpi_only,
             scenario_compute_dir,
         )
@@ -3331,9 +3331,9 @@ class TariffRulesCacheAuditTests(TariffLoadServiceTestMixin, TestCase):
             data_version=data_version,
         )
         cache_dir.mkdir(parents=True, exist_ok=True)
-        np.savez(
-            cache_dir / NPZ_FILENAME.replace(".npz", ""),
-            baseline_rub=np.array([1.0], dtype=np.float32),
+        np.save(
+            cache_dir / BASELINE_RUB_FILENAME.replace(".npy", ""),
+            np.array([1.0], dtype=np.float32),
         )
 
         job = DeferredFullComputeJob(
@@ -3364,9 +3364,114 @@ class TariffRulesCacheAuditTests(TariffLoadServiceTestMixin, TestCase):
                 skipped_charge=0,
                 routes_without_volume=0,
             )
-            self.assertTrue((cache_dir / NPZ_FILENAME).is_file())
+            self.assertTrue((cache_dir / BASELINE_RUB_FILENAME).is_file())
         finally:
             lock.release()
+
+    def test_save_and_load_compact_uses_npy_sidecars(self) -> None:
+        import gc
+        import numpy as np
+        from calculations.domain.services.scenario_compute_store import (
+            BASELINE_RUB_FILENAME,
+            BASE_BY_YEAR_FILENAME,
+            CHARGE_BY_YEAR_FILENAME,
+            RULES_BY_YEAR_FILENAME,
+            VOLUME_TONS_FILENAME,
+            ScenarioComputeBundle,
+            is_scenario_compact_on_disk,
+            save_scenario_compute,
+            scenario_compute_dir,
+            try_load_scenario_compute,
+        )
+        from calculations.domain.services.scenario_effects_cache import (
+            CompactRouteEffects,
+            compute_scenario_data_version,
+        )
+        from calculations.domain.services.scenario_effects_formatting import GlobalTotals
+
+        context = self.service.build_scenario_context(self.scenario)
+        data_version = compute_scenario_data_version(
+            scenario=self.scenario,
+            base_coef_by_year=context.base_coef_by_year,
+            rules=context.rules,
+        )
+        compact = CompactRouteEffects(
+            years=[2025, 2026],
+            dimensions={
+                "cargo_group": np.array([0, 1], dtype=np.int32),
+                "cargo_code": np.array([0, 1], dtype=np.int32),
+                "direction": np.array([0, 0], dtype=np.int32),
+                "wagon_kind": np.array([0, 0], dtype=np.int32),
+                "transport_type": np.array([0, 0], dtype=np.int32),
+                "shipment_category": np.array([0, 0], dtype=np.int32),
+                "park_type": np.array([0, 0], dtype=np.int32),
+                "holding": np.array([0, 0], dtype=np.int32),
+            },
+            dimension_labels={
+                "cargo_group": ["A", "B"],
+                "cargo_code": ["C1", "C2"],
+                "direction": ["D"],
+                "wagon_kind": ["W"],
+                "transport_type": ["T"],
+                "shipment_category": ["S"],
+                "park_type": ["P"],
+                "holding": ["H1"],
+            },
+            baseline_rub=np.array([1.0, 2.0], dtype=np.float32),
+            volume_tons=np.array([3.0, 4.0], dtype=np.float32),
+            base_by_year=np.array([[10.0, 11.0], [12.0, 13.0]], dtype=np.float32),
+            rules_by_year=np.array([[1.0, 1.5], [2.0, 2.5]], dtype=np.float32),
+            charge_by_year=np.array([[100.0, 110.0], [120.0, 130.0]], dtype=np.float32),
+            rule_meta=[],
+            rule_by_year=None,
+        )
+        totals = GlobalTotals()
+        totals.baseline_total = Decimal("3")
+
+        save_scenario_compute(
+            scenario_id=self.scenario.id,
+            data_version=data_version,
+            bundle=ScenarioComputeBundle(
+                compact=compact,
+                global_totals=totals,
+                filter_options={"cargo_groups": ["A", "B"], "holdings": ["H1"]},
+                skipped_charge=0,
+                routes_without_volume=0,
+            ),
+        )
+        cache_dir = scenario_compute_dir(
+            scenario_id=self.scenario.id,
+            data_version=data_version,
+        )
+
+        for filename in (
+            BASELINE_RUB_FILENAME,
+            VOLUME_TONS_FILENAME,
+            BASE_BY_YEAR_FILENAME,
+            RULES_BY_YEAR_FILENAME,
+            CHARGE_BY_YEAR_FILENAME,
+        ):
+            self.assertTrue((cache_dir / filename).is_file())
+        self.assertTrue(is_scenario_compact_on_disk(
+            scenario_id=self.scenario.id,
+            data_version=data_version,
+        ))
+
+        bundle = try_load_scenario_compute(
+            scenario_id=self.scenario.id,
+            data_version=data_version,
+        )
+        self.assertIsNotNone(bundle)
+        assert bundle is not None
+        assert bundle.compact is not None
+        np.testing.assert_array_equal(bundle.compact.baseline_rub, compact.baseline_rub)
+        np.testing.assert_array_equal(bundle.compact.base_by_year, compact.base_by_year)
+        np.testing.assert_array_equal(bundle.compact.rules_by_year, compact.rules_by_year)
+        np.testing.assert_array_equal(bundle.compact.charge_by_year, compact.charge_by_year)
+        np.testing.assert_array_equal(bundle.compact.volume_tons, compact.volume_tons)
+        del bundle
+        del compact
+        gc.collect()
 
     def test_rule_rename_changes_data_version(self) -> None:
         from calculations.domain.services.scenario_effects_cache import (

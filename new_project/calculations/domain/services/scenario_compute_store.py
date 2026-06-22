@@ -16,7 +16,11 @@ from calculations.domain.services.scenario_effects_compact import _DIMENSION_COL
 from calculations.domain.services.scenario_effects_formatting import GlobalTotals
 from core.domain.cargo.ordering import normalize_filter_options
 
-NPZ_FILENAME = "arrays.npz"
+BASELINE_RUB_FILENAME = "baseline_rub.npy"
+VOLUME_TONS_FILENAME = "volume_tons.npy"
+BASE_BY_YEAR_FILENAME = "base_by_year.npy"
+RULES_BY_YEAR_FILENAME = "rules_by_year.npy"
+CHARGE_BY_YEAR_FILENAME = "charge_by_year.npy"
 RULE_BY_YEAR_FILENAME = "rule_by_year.npy"
 METADATA_FILENAME = "metadata.json"
 
@@ -64,15 +68,42 @@ def _global_totals_from_json(payload: dict) -> GlobalTotals:
 
 def _compact_arrays_for_store(compact: CompactRouteEffects) -> dict[str, np.ndarray]:
     arrays: dict[str, np.ndarray] = {
-        "baseline_rub": compact.baseline_rub.astype(np.float32, copy=False),
-        "volume_tons": compact.volume_tons.astype(np.float32, copy=False),
-        "base_by_year": compact.base_by_year.astype(np.float32, copy=False),
-        "rules_by_year": compact.rules_by_year.astype(np.float32, copy=False),
-        "charge_by_year": compact.charge_by_year.astype(np.float32, copy=False),
+        BASELINE_RUB_FILENAME: compact.baseline_rub.astype(np.float32, copy=False),
+        VOLUME_TONS_FILENAME: compact.volume_tons.astype(np.float32, copy=False),
+        BASE_BY_YEAR_FILENAME: compact.base_by_year.astype(np.float32, copy=False),
+        RULES_BY_YEAR_FILENAME: compact.rules_by_year.astype(np.float32, copy=False),
+        CHARGE_BY_YEAR_FILENAME: compact.charge_by_year.astype(np.float32, copy=False),
     }
     for column in _DIMENSION_COLUMNS:
-        arrays[f"dim_{column}"] = compact.dimensions[column].astype(np.int32, copy=False)
+        arrays[_dimension_filename(column)] = compact.dimensions[column].astype(
+            np.int32,
+            copy=False,
+        )
     return arrays
+
+
+def _dimension_filename(column: str) -> str:
+    return f"dim_{column}.npy"
+
+
+def _dimension_path(cache_dir: Path, column: str) -> Path:
+    return cache_dir / _dimension_filename(column)
+
+
+def _compact_array_paths(cache_dir: Path) -> dict[str, Path]:
+    return {
+        "baseline_rub": cache_dir / BASELINE_RUB_FILENAME,
+        "volume_tons": cache_dir / VOLUME_TONS_FILENAME,
+        "base_by_year": cache_dir / BASE_BY_YEAR_FILENAME,
+        "rules_by_year": cache_dir / RULES_BY_YEAR_FILENAME,
+        "charge_by_year": cache_dir / CHARGE_BY_YEAR_FILENAME,
+    }
+
+
+def _compact_required_paths(cache_dir: Path) -> list[Path]:
+    paths = list(_compact_array_paths(cache_dir).values())
+    paths.extend(_dimension_path(cache_dir, column) for column in _DIMENSION_COLUMNS)
+    return paths
 
 
 def _atomic_replace(tmp_path: Path, final_path: Path, *, max_attempts: int = 12) -> None:
@@ -98,6 +129,22 @@ def _save_rule_by_year(path: Path, rule_by_year: np.ndarray) -> None:
     tmp_base = path.with_name(path.stem + ".tmp")
     np.save(tmp_base, rule_by_year.astype(np.float32, copy=False))
     _atomic_replace(Path(f"{tmp_base}.npy"), path)
+
+
+def _save_npy_array(array: np.ndarray, out_path: Path) -> None:
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_base = out_path.parent / (out_path.stem + ".tmp")
+    np.save(tmp_base, array)
+    _atomic_replace(Path(f"{tmp_base}.npy"), out_path)
+
+
+def _load_npy_mmap(path: Path, *, dtype=None) -> np.ndarray | None:
+    if not path.is_file():
+        return None
+    loaded = np.load(path, mmap_mode="r")
+    if dtype is None:
+        return np.asarray(loaded)
+    return np.asarray(loaded, dtype=dtype)
 
 
 def _load_rule_by_year(cache_dir: Path, data) -> np.ndarray | None:
@@ -140,17 +187,18 @@ def _remove_compact_sidecars(
     scenario_id: int | None = None,
     data_version: str | None = None,
 ) -> None:
-    skip_npz = False
+    skip_compact = False
     if scenario_id is not None and data_version is not None:
         from calculations.domain.services.scenario_effects_deferred import (
             is_deferred_running,
         )
 
-        skip_npz = is_deferred_running(scenario_id, data_version)
+        skip_compact = is_deferred_running(scenario_id, data_version)
 
-    for path in (cache_dir / NPZ_FILENAME, cache_dir / RULE_BY_YEAR_FILENAME):
-        if path.name == NPZ_FILENAME and skip_npz:
-            continue
+    if skip_compact:
+        return
+
+    for path in _compact_required_paths(cache_dir) + [cache_dir / RULE_BY_YEAR_FILENAME]:
         if path.is_file():
             path.unlink()
 
@@ -224,13 +272,8 @@ def save_scenario_compute(
     if compact is None:
         raise ValueError("save_scenario_compute requires a compact bundle")
     arrays = _compact_arrays_for_store(compact)
-
-    tmp_path = cache_dir / "arrays.write.npz"
-    with open(tmp_path, "wb") as handle:
-        np.savez(handle, **arrays)
-        handle.flush()
-        os.fsync(handle.fileno())
-    _atomic_replace(tmp_path, cache_dir / NPZ_FILENAME)
+    for filename, array in arrays.items():
+        _save_npy_array(array, cache_dir / filename)
 
     rule_by_year_path = cache_dir / RULE_BY_YEAR_FILENAME
     if compact.rule_by_year is not None:
@@ -270,7 +313,7 @@ def is_scenario_compact_on_disk(*, scenario_id: int, data_version: str) -> bool:
     metadata = json.loads(meta_path.read_text(encoding="utf-8"))
     if metadata.get("kpi_only"):
         return False
-    return (cache_dir / NPZ_FILENAME).is_file()
+    return all(path.is_file() for path in _compact_required_paths(cache_dir))
 
 
 def try_load_scenario_compute(
@@ -279,7 +322,6 @@ def try_load_scenario_compute(
     data_version: str,
 ) -> ScenarioComputeBundle | None:
     cache_dir = scenario_compute_dir(scenario_id=scenario_id, data_version=data_version)
-    npz_path = cache_dir / NPZ_FILENAME
     meta_path = cache_dir / METADATA_FILENAME
     if not meta_path.is_file():
         return None
@@ -294,27 +336,43 @@ def try_load_scenario_compute(
             routes_without_volume=int(metadata.get("routes_without_volume", 0)),
         )
 
-    if not npz_path.is_file():
+    if not is_scenario_compact_on_disk(
+        scenario_id=scenario_id,
+        data_version=data_version,
+    ):
         return None
 
-    with np.load(npz_path, allow_pickle=False) as data:
-        rule_by_year = _load_rule_by_year(cache_dir, data)
-        dimensions = {
-            column: data[f"dim_{column}"].astype(np.int32, copy=False)
-            for column in _DIMENSION_COLUMNS
-        }
-        compact = CompactRouteEffects(
-            years=[int(year) for year in metadata["years"]],
-            dimensions=dimensions,
-            dimension_labels=metadata.get("dimension_labels") or {},
-            baseline_rub=data["baseline_rub"],
-            volume_tons=data["volume_tons"],
-            base_by_year=data["base_by_year"],
-            rules_by_year=data["rules_by_year"],
-            charge_by_year=data["charge_by_year"],
-            rule_meta=[(int(item[0]), str(item[1])) for item in metadata.get("rule_meta", [])],
-            rule_by_year=rule_by_year,
-        )
+    compact_arrays = _compact_array_paths(cache_dir)
+    baseline_rub = _load_npy_mmap(compact_arrays["baseline_rub"], dtype=np.float32)
+    volume_tons = _load_npy_mmap(compact_arrays["volume_tons"], dtype=np.float32)
+    base_by_year = _load_npy_mmap(compact_arrays["base_by_year"], dtype=np.float32)
+    rules_by_year = _load_npy_mmap(compact_arrays["rules_by_year"], dtype=np.float32)
+    charge_by_year = _load_npy_mmap(compact_arrays["charge_by_year"], dtype=np.float32)
+    dimensions = {
+        column: _load_npy_mmap(_dimension_path(cache_dir, column), dtype=np.int32)
+        for column in _DIMENSION_COLUMNS
+    }
+    if (
+        baseline_rub is None
+        or volume_tons is None
+        or base_by_year is None
+        or rules_by_year is None
+        or charge_by_year is None
+        or any(value is None for value in dimensions.values())
+    ):
+        return None
+    compact = CompactRouteEffects(
+        years=[int(year) for year in metadata["years"]],
+        dimensions={column: value for column, value in dimensions.items() if value is not None},
+        dimension_labels=metadata.get("dimension_labels") or {},
+        baseline_rub=baseline_rub,
+        volume_tons=volume_tons,
+        base_by_year=base_by_year,
+        rules_by_year=rules_by_year,
+        charge_by_year=charge_by_year,
+        rule_meta=[(int(item[0]), str(item[1])) for item in metadata.get("rule_meta", [])],
+        rule_by_year=_load_rule_by_year(cache_dir, None),
+    )
 
     return ScenarioComputeBundle(
         compact=compact,
