@@ -1175,6 +1175,7 @@ def save_route_mart(
     df: pd.DataFrame,
     skipped_charge: int = 0,
     routes_without_volume: int = 0,
+    prewarm_masks: bool = True,
 ) -> dict[str, int | str]:
     timings: dict[str, int | str] = {}
     t0 = time.perf_counter()
@@ -1202,9 +1203,12 @@ def save_route_mart(
     save_volume_npy(df, path)
     save_dims_npy(df, path)
     save_masks_npy(df, path)
+    t_sidecars = time.perf_counter()
+    timings["sidecars_write_ms"] = int((t_sidecars - t0) * 1000)
+
     save_route_mart_parquet(_build_slim_parquet_dataframe(df), path)
     t_write = time.perf_counter()
-    timings["parquet_write_ms"] = int((t_write - t0) * 1000)
+    timings["parquet_write_ms"] = int((t_write - t_sidecars) * 1000)
     timings["mart_cache_size_mb"] = int(path.stat().st_size / (1024 * 1024))
 
     removed = _cleanup_stale_parquet_files(
@@ -1224,11 +1228,16 @@ def save_route_mart(
     )
     timings["mart_cache_cleanup_removed"] = removed
 
-    from calculations.domain.services.rule_mask_prewarm import (
-        prewarm_rules_for_route_set,
-    )
+    if prewarm_masks:
+        from calculations.domain.services.rule_mask_prewarm import (
+            prewarm_rules_for_route_set,
+        )
 
-    timings["rule_masks_prewarmed"] = prewarm_rules_for_route_set(
-        route_set_id=route_set_id,
-    )
+        prewarm_stats = prewarm_rules_for_route_set(route_set_id=route_set_id)
+        timings["rule_masks_prewarmed"] = prewarm_stats["prewarmed"]
+        timings["masks_prewarm_ms"] = prewarm_stats["elapsed_ms"]
+        timings["masks_sidecar_load_ms"] = prewarm_stats["sidecar_load_ms"]
+    else:
+        timings["rule_masks_prewarmed"] = 0
+        timings["masks_prewarm_ms"] = 0
     return timings

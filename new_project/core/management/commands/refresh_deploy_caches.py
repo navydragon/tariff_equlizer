@@ -72,6 +72,11 @@ class Command(BaseCommand):
             action="store_true",
             help="После прогрева витрин прогреть KPI-снимки сценариев.",
         )
+        parser.add_argument(
+            "--skip-mask-prewarm",
+            action="store_true",
+            help="Не прогревать маски тарифных правил (быстрее; маски построятся при первом расчёте).",
+        )
 
     def handle(self, *args, **options) -> None:
         if options["clear_only"] and options["warm_only"]:
@@ -94,7 +99,10 @@ class Command(BaseCommand):
                 ) from exc
 
         if not options["clear_only"]:
-            self._warm_route_marts(route_set_id=options["route_set_id"])
+            self._warm_route_marts(
+                route_set_id=options["route_set_id"],
+                prewarm_masks=not options["skip_mask_prewarm"],
+            )
             if options.get("warm_scenarios"):
                 self._warm_scenario_snapshots(route_set_id=options["route_set_id"])
 
@@ -105,7 +113,12 @@ class Command(BaseCommand):
             self.stdout.write(f"    {root}")
         self.stdout.write(self.style.SUCCESS("Кеши очищены."))
 
-    def _warm_route_marts(self, *, route_set_id: int | None) -> None:
+    def _warm_route_marts(
+        self,
+        *,
+        route_set_id: int | None,
+        prewarm_masks: bool,
+    ) -> None:
         route_sets = self._route_sets_to_warm(route_set_id=route_set_id)
         if not route_sets:
             self.stdout.write("Нет наборов маршрутов для прогрева.")
@@ -113,7 +126,7 @@ class Command(BaseCommand):
 
         self.stdout.write(f"==> Прогреваем route mart для {len(route_sets)} набор(ов)")
         for route_set in route_sets:
-            self._warm_single_route_set(route_set)
+            self._warm_single_route_set(route_set, prewarm_masks=prewarm_masks)
 
     def _route_sets_to_warm(self, *, route_set_id: int | None) -> list[RouteSet]:
         if route_set_id is not None:
@@ -136,25 +149,49 @@ class Command(BaseCommand):
                 result.append(route_set)
         return result
 
-    def _warm_single_route_set(self, route_set: RouteSet) -> None:
+    def _warm_single_route_set(
+        self,
+        route_set: RouteSet,
+        *,
+        prewarm_masks: bool,
+    ) -> None:
         routes_count = Route.objects.filter(route_set_id=route_set.id).count()
         self.stdout.write(
             f"    [{route_set.id}] {route_set.code} — {routes_count} маршрутов…",
         )
         started = time.perf_counter()
-        _df, _meta, timings = fetch_routes_dataframe_cached_timed(route_set.id)
-        elapsed_ms = int((time.perf_counter() - started) * 1000)
-        load_ms = timings.get("routes_sql_execute_ms", 0)
-        if isinstance(load_ms, str):
-            load_ms = 0
-        parquet_write_ms = timings.get("parquet_write_ms", 0)
-        if isinstance(parquet_write_ms, str):
-            parquet_write_ms = 0
-        mart_path = timings.get("mart_cache_path", "—")
-        self.stdout.write(
-            f"        готово за {elapsed_ms} ms "
-            f"(sql={load_ms} ms, parquet_write={parquet_write_ms} ms)",
+        _df, _meta, timings = fetch_routes_dataframe_cached_timed(
+            route_set.id,
+            prewarm_masks=prewarm_masks,
         )
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        cache_hit = bool(timings.get("cache_hit"))
+        timing_parts = []
+        for label, key in (
+            ("sql", "routes_sql_execute_ms"),
+            ("fetch", "routes_fetch_ms"),
+            ("df", "dataframe_build_ms"),
+            ("normalize", "normalize_ms"),
+            ("sidecars", "sidecars_write_ms"),
+            ("parquet", "parquet_write_ms"),
+            ("masks", "masks_prewarm_ms"),
+        ):
+            value = timings.get(key)
+            if isinstance(value, int):
+                timing_parts.append(f"{label}={value} ms")
+        masks_count = timings.get("rule_masks_prewarmed")
+        if isinstance(masks_count, int) and masks_count:
+            timing_parts.append(f"masks_count={masks_count}")
+        timing_details = ", ".join(timing_parts)
+        mart_path = timings.get("mart_cache_path", "—")
+        if cache_hit:
+            self.stdout.write(
+                f"        cache hit за {elapsed_ms} ms ({timing_details})",
+            )
+        else:
+            self.stdout.write(
+                f"        готово за {elapsed_ms} ms ({timing_details})",
+            )
         self.stdout.write(f"        {mart_path}")
         from calculations.domain.services.route_mask_cache import (
             mask_cache_dir,

@@ -82,6 +82,7 @@ def fetch_routes_dataframe_cached_timed(
     route_set_id: int,
     *,
     columns: list[str] | None = None,
+    prewarm_masks: bool = True,
 ) -> tuple[MartSidecarView | pd.DataFrame, MartMeta | None, dict[str, int | str]]:
     """
     Витрина маршрутов (после JOIN и normalize) из parquet-файла или из БД.
@@ -114,6 +115,7 @@ def fetch_routes_dataframe_cached_timed(
         df=df,
         skipped_charge=skipped_charge,
         routes_without_volume=without_volume,
+        prewarm_masks=prewarm_masks,
     )
     timings.update(write_timings)
     timings["cache_hit"] = 0

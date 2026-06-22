@@ -40,6 +40,8 @@ COL_DISTANCE_BELT = "Пояс дальности по 10_01"
 COL_CARGO_GROUP_CMTP = "Группа груза (ЦМТП)"
 COL_CARGO_GROUP_IZPOD = "Группа груза(изпод)"
 COL_CARGO_CODE_IZPOD = "Код груза(изпод)"
+COL_CARGO_CODE_3 = "Код груза(3цифры)"
+COL_CARGO_CODE_IZPOD_3 = "Код груза(изпод)(3цифры)"
 COL_OKPO = "ОКПО_компании_отпр"
 COL_INN = "ИНН_компании"
 COL_SHIPPER_NAME = "Наименование_компании"
@@ -51,28 +53,49 @@ COL_CHARGE_RUB = "Провозная плата (руб)"
 DEFAULT_ROUTE_SET_CODE = "RZD_2026"
 DEFAULT_ROUTE_SET_NAME = "РЖД 2026"
 
-SELECT_SQL = f"""
+_BASE_SELECT_COLS = [
+    COL_INDEX,
+    COL_CARGO_CODE,
+    COL_ORIGIN_ESR,
+    COL_DEST_ESR,
+    COL_WAGON_KIND,
+    COL_MESSAGE_TYPE,
+    COL_SHIPMENT_TYPE,
+    COL_SHIPMENT_CATEGORY,
+    COL_PARK_TYPE,
+    COL_DISTANCE_BELT,
+    COL_CARGO_GROUP_CMTP,
+    COL_CARGO_GROUP_IZPOD,
+    COL_CARGO_CODE_IZPOD,
+    COL_OKPO,
+    COL_INN,
+    COL_SHIPPER_NAME,
+    COL_HOLDING,
+    COL_VOLUME_TONS,
+    COL_TURNOVER_TKM,
+    COL_CHARGE_RUB,
+]
+
+_OPTIONAL_SELECT_COLS = (
+    COL_CARGO_CODE_3,
+    COL_CARGO_CODE_IZPOD_3,
+)
+
+
+def _rzd_table_columns(conn: sqlite3.Connection) -> set[str]:
+    cur = conn.execute(f'PRAGMA table_info("{RZD_TABLE}")')
+    return {row[1] for row in cur.fetchall()}
+
+
+def _build_select_sql(available_columns: set[str]) -> str:
+    cols = list(_BASE_SELECT_COLS)
+    for col in _OPTIONAL_SELECT_COLS:
+        if col in available_columns:
+            cols.append(col)
+    selected = ",\n        ".join(f"[{col}]" for col in cols)
+    return f"""
     SELECT
-        [{COL_INDEX}],
-        [{COL_CARGO_CODE}],
-        [{COL_ORIGIN_ESR}],
-        [{COL_DEST_ESR}],
-        [{COL_WAGON_KIND}],
-        [{COL_MESSAGE_TYPE}],
-        [{COL_SHIPMENT_TYPE}],
-        [{COL_SHIPMENT_CATEGORY}],
-        [{COL_PARK_TYPE}],
-        [{COL_DISTANCE_BELT}],
-        [{COL_CARGO_GROUP_CMTP}],
-        [{COL_CARGO_GROUP_IZPOD}],
-        [{COL_CARGO_CODE_IZPOD}],
-        [{COL_OKPO}],
-        [{COL_INN}],
-        [{COL_SHIPPER_NAME}],
-        [{COL_HOLDING}],
-        [{COL_VOLUME_TONS}],
-        [{COL_TURNOVER_TKM}],
-        [{COL_CHARGE_RUB}]
+        {selected}
     FROM [{RZD_TABLE}]
 """
 
@@ -109,6 +132,23 @@ def _first_three_chars(value: Any) -> str:
     if value is None:
         return ""
     return str(value).strip()[:3]
+
+
+def _strip_text(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _resolve_cargo_code_3(
+    row: sqlite3.Row,
+    *,
+    source_col: str,
+    fallback_value: Any,
+) -> str:
+    if source_col in row.keys():
+        return _strip_text(row[source_col])
+    return _first_three_chars(fallback_value)
 
 
 def _parse_decimal(value: Any) -> Optional[Decimal]:
@@ -512,7 +552,7 @@ class Command(BaseCommand):
         conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row
         try:
-            sql = SELECT_SQL
+            sql = _build_select_sql(_rzd_table_columns(conn))
             if limit > 0:
                 sql += f" LIMIT {int(limit)}"
             cursor = conn.execute(sql)
@@ -630,10 +670,18 @@ class Command(BaseCommand):
         charge = _parse_decimal(row[COL_CHARGE_RUB])
 
         izpod_raw = row[COL_CARGO_CODE_IZPOD]
-        cargo_code_izpod = "" if izpod_raw is None else str(izpod_raw).strip()
+        cargo_code_izpod = _strip_text(izpod_raw)
         cargo_group_izpod = (row[COL_CARGO_GROUP_IZPOD] or "").strip()
-        cargo_code_3 = _first_three_chars(row[COL_CARGO_CODE])
-        cargo_code_izpod_3 = _first_three_chars(izpod_raw)
+        cargo_code_3 = _resolve_cargo_code_3(
+            row,
+            source_col=COL_CARGO_CODE_3,
+            fallback_value=row[COL_CARGO_CODE],
+        )
+        cargo_code_izpod_3 = _resolve_cargo_code_3(
+            row,
+            source_col=COL_CARGO_CODE_IZPOD_3,
+            fallback_value=izpod_raw,
+        )
 
         from core.domain.distance_belt import parse_distance_belt_midpoint
 
