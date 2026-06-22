@@ -169,7 +169,9 @@ class Command(BaseCommand):
         timing_parts = []
         for label, key in (
             ("sql", "routes_sql_execute_ms"),
+            ("copy", "routes_copy_read_ms"),
             ("fetch", "routes_fetch_ms"),
+            ("arrow", "routes_arrow_parse_ms"),
             ("df", "dataframe_build_ms"),
             ("normalize", "normalize_ms"),
             ("sidecars", "sidecars_write_ms"),

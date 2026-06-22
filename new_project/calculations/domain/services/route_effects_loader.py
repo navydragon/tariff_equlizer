@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import io
 import time
+
 import pandas as pd
+import pyarrow.csv as pacsv
 from django.db import connection
 
 from calculations.domain.services.route_mart_store import (
@@ -37,6 +40,168 @@ def _read_sql(sql: str, params: list | tuple | None = None) -> pd.DataFrame:
 
 def _table(model) -> str:
     return model._meta.db_table
+
+
+def _build_routes_sql(*, route_set_id: int | None = None, parameterized: bool = False) -> str:
+    if parameterized:
+        route_set_filter = "%s"
+    else:
+        if route_set_id is None:
+            raise ValueError("route_set_id is required when parameterized=False")
+        route_set_filter = str(int(route_set_id))
+
+    route_table = _table(Route)
+    cargo_table = _table(Cargo)
+    cargo_group_table = _table(CargoGroup)
+    station_table = _table(Station)
+    railroad_table = _table(RailRoad)
+    wagon_kind_table = _table(WagonKind)
+    shipment_type_table = _table(ShipmentType)
+    message_type_table = _table(MessageType)
+    shipper_table = _table(Shipper)
+
+    return f"""
+        SELECT
+            r.id,
+            r.freight_charge_rub,
+            r.transport_volume_tons,
+            r.shipper_id,
+            COALESCE(NULLIF(TRIM(s.holding), ''), 'Прочие') AS shipper_holding,
+            r.cargo_id,
+            r.origin_station_id,
+            r.destination_station_id,
+            r.wagon_kind_id,
+            r.shipment_type_id,
+            r.message_type_id,
+            r.distance_loaded_km,
+            COALESCE(NULLIF(TRIM(r.distance_belt), ''), '') AS distance_belt,
+            r.distance_belt_midpoint_km,
+            CAST(c.code AS TEXT) AS cargo_code,
+            cg.name AS cargo_group,
+            CAST(cg.code AS TEXT) AS cargo_group_code,
+            origin_rr.code AS origin_railroad_code,
+            origin_rr.direction AS direction_raw,
+            dest_rr.code AS destination_railroad_code,
+            wk.name AS wagon_kind,
+            COALESCE(NULLIF(TRIM(r.shipment_category), ''), '—') AS shipment_category,
+            COALESCE(NULLIF(TRIM(r.park_type), ''), '—') AS park_type,
+            COALESCE(NULLIF(TRIM(r.cargo_code_3), ''), '') AS cargo_code_3,
+            COALESCE(NULLIF(TRIM(r.cargo_code_izpod_3), ''), '') AS cargo_code_izpod_3,
+            COALESCE(NULLIF(TRIM(r.cargo_group_izpod), ''), '') AS cargo_group_izpod,
+            COALESCE(NULLIF(TRIM(r.special_container_type), ''), '') AS special_container_type,
+            mt.name AS transport_type
+        FROM {route_table} r
+        LEFT JOIN {shipper_table} s ON r.shipper_id = s.id
+        LEFT JOIN {cargo_table} c ON r.cargo_id = c.code
+        LEFT JOIN {cargo_group_table} cg ON c.cargo_group_id = cg.code
+        LEFT JOIN {station_table} origin_st ON r.origin_station_id = origin_st.esr_code
+        LEFT JOIN {railroad_table} origin_rr ON origin_st.railroad_id = origin_rr.code
+        LEFT JOIN {station_table} dest_st ON r.destination_station_id = dest_st.esr_code
+        LEFT JOIN {railroad_table} dest_rr ON dest_st.railroad_id = dest_rr.code
+        LEFT JOIN {wagon_kind_table} wk ON r.wagon_kind_id = wk.id
+        LEFT JOIN {shipment_type_table} st ON r.shipment_type_id = st.id
+        LEFT JOIN {message_type_table} mt ON r.message_type_id = mt.id
+        WHERE r.route_set_id = {route_set_filter}
+          AND r.is_model = false
+          AND r.freight_charge_rub IS NOT NULL
+          AND r.freight_charge_rub > 0
+    """
+
+
+def _coerce_route_mart_numeric_columns(df: pd.DataFrame) -> None:
+    for column in (
+        "freight_charge_rub",
+        "transport_volume_tons",
+        "distance_loaded_km",
+        "distance_belt_midpoint_km",
+    ):
+        if column in df.columns:
+            df[column] = pd.to_numeric(df[column], errors="coerce")
+
+
+def _finalize_routes_dataframe(
+    df: pd.DataFrame,
+    *,
+    timings: dict[str, int | str],
+    t_before_normalize: float,
+) -> tuple[pd.DataFrame, dict[str, int | str]]:
+    _coerce_route_mart_numeric_columns(df)
+    normalize_route_dimensions(df)
+    timings["normalize_ms"] = int((time.perf_counter() - t_before_normalize) * 1000)
+    return df, timings
+
+
+def _fetch_routes_dataframe_legacy(
+    route_set_id: int,
+) -> tuple[pd.DataFrame, dict[str, int | str]]:
+    routes_sql = _build_routes_sql(parameterized=True)
+
+    timings: dict[str, int | str] = {"routes_load_mode": "legacy"}
+    t0 = time.perf_counter()
+
+    with connection.cursor() as cursor:
+        cursor.execute(routes_sql, [route_set_id])
+        t_execute = time.perf_counter()
+        columns = [col[0] for col in cursor.description]
+        rows = cursor.fetchall()
+        t_fetch = time.perf_counter()
+
+    timings["routes_sql_execute_ms"] = int((t_execute - t0) * 1000)
+    timings["routes_fetch_ms"] = int((t_fetch - t_execute) * 1000)
+
+    if not rows:
+        timings["dataframe_build_ms"] = 0
+        timings["normalize_ms"] = 0
+        return pd.DataFrame(columns=columns), timings
+
+    df = pd.DataFrame.from_records(rows, columns=columns)
+    t_df = time.perf_counter()
+    timings["dataframe_build_ms"] = int((t_df - t_fetch) * 1000)
+
+    return _finalize_routes_dataframe(df, timings=timings, t_before_normalize=t_df)
+
+
+def _fetch_routes_dataframe_postgres_copy(
+    route_set_id: int,
+) -> tuple[pd.DataFrame, dict[str, int | str]]:
+    routes_sql = _build_routes_sql(route_set_id=route_set_id)
+    copy_sql = (
+        f"COPY ({routes_sql}) TO STDOUT WITH (FORMAT CSV, HEADER TRUE, NULL '')"
+    )
+
+    timings: dict[str, int | str] = {"routes_load_mode": "postgres_copy"}
+    t0 = time.perf_counter()
+
+    raw_conn = connection.connection
+    buffer = io.BytesIO()
+    with raw_conn.cursor() as cursor:
+        with cursor.copy(copy_sql) as copy:
+            while chunk := copy.read():
+                buffer.write(chunk)
+    t_copy = time.perf_counter()
+
+    timings["routes_sql_execute_ms"] = 0
+    timings["routes_copy_read_ms"] = int((t_copy - t0) * 1000)
+    timings["routes_fetch_ms"] = timings["routes_copy_read_ms"]
+
+    if buffer.getbuffer().nbytes == 0:
+        timings["routes_arrow_parse_ms"] = 0
+        timings["dataframe_build_ms"] = 0
+        timings["normalize_ms"] = 0
+        return pd.DataFrame(), timings
+
+    buffer.seek(0)
+    table = pacsv.read_csv(buffer)
+    df = table.to_pandas(
+        timestamp_as_object=True,
+        strings_to_categoricals=False,
+    )
+    t_pandas = time.perf_counter()
+
+    timings["routes_arrow_parse_ms"] = int((t_pandas - t_copy) * 1000)
+    timings["dataframe_build_ms"] = timings["routes_arrow_parse_ms"]
+
+    return _finalize_routes_dataframe(df, timings=timings, t_before_normalize=t_pandas)
 
 
 def fetch_route_set_stats(route_set_id: int) -> tuple[int, int]:
@@ -140,95 +305,14 @@ def fetch_routes_dataframe_cached(route_set_id: int) -> pd.DataFrame:
 
 def fetch_routes_dataframe_timed(
     route_set_id: int,
-) -> tuple[pd.DataFrame, dict[str, int]]:
+) -> tuple[pd.DataFrame, dict[str, int | str]]:
     """
     Загружает маршруты с измерениями одним SQL-запросом.
     Возвращает DataFrame и под-тайминги (мс) для диагностики.
     """
-    route_table = _table(Route)
-    cargo_table = _table(Cargo)
-    cargo_group_table = _table(CargoGroup)
-    station_table = _table(Station)
-    railroad_table = _table(RailRoad)
-    wagon_kind_table = _table(WagonKind)
-    shipment_type_table = _table(ShipmentType)
-    message_type_table = _table(MessageType)
-    shipper_table = _table(Shipper)
-
-    routes_sql = f"""
-        SELECT
-            r.id,
-            r.freight_charge_rub,
-            r.transport_volume_tons,
-            r.shipper_id,
-            COALESCE(NULLIF(TRIM(s.holding), ''), 'Прочие') AS shipper_holding,
-            r.cargo_id,
-            r.origin_station_id,
-            r.destination_station_id,
-            r.wagon_kind_id,
-            r.shipment_type_id,
-            r.message_type_id,
-            r.distance_loaded_km,
-            COALESCE(NULLIF(TRIM(r.distance_belt), ''), '') AS distance_belt,
-            r.distance_belt_midpoint_km,
-            CAST(c.code AS TEXT) AS cargo_code,
-            cg.name AS cargo_group,
-            CAST(cg.code AS TEXT) AS cargo_group_code,
-            origin_rr.code AS origin_railroad_code,
-            origin_rr.direction AS direction_raw,
-            dest_rr.code AS destination_railroad_code,
-            wk.name AS wagon_kind,
-            COALESCE(NULLIF(TRIM(r.shipment_category), ''), '—') AS shipment_category,
-            COALESCE(NULLIF(TRIM(r.park_type), ''), '—') AS park_type,
-            COALESCE(NULLIF(TRIM(r.cargo_code_3), ''), '') AS cargo_code_3,
-            COALESCE(NULLIF(TRIM(r.cargo_code_izpod_3), ''), '') AS cargo_code_izpod_3,
-            COALESCE(NULLIF(TRIM(r.cargo_group_izpod), ''), '') AS cargo_group_izpod,
-            COALESCE(NULLIF(TRIM(r.special_container_type), ''), '') AS special_container_type,
-            mt.name AS transport_type
-        FROM {route_table} r
-        LEFT JOIN {shipper_table} s ON r.shipper_id = s.id
-        LEFT JOIN {cargo_table} c ON r.cargo_id = c.code
-        LEFT JOIN {cargo_group_table} cg ON c.cargo_group_id = cg.code
-        LEFT JOIN {station_table} origin_st ON r.origin_station_id = origin_st.esr_code
-        LEFT JOIN {railroad_table} origin_rr ON origin_st.railroad_id = origin_rr.code
-        LEFT JOIN {station_table} dest_st ON r.destination_station_id = dest_st.esr_code
-        LEFT JOIN {railroad_table} dest_rr ON dest_st.railroad_id = dest_rr.code
-        LEFT JOIN {wagon_kind_table} wk ON r.wagon_kind_id = wk.id
-        LEFT JOIN {shipment_type_table} st ON r.shipment_type_id = st.id
-        LEFT JOIN {message_type_table} mt ON r.message_type_id = mt.id
-        WHERE r.route_set_id = %s
-          AND r.is_model = false
-          AND r.freight_charge_rub IS NOT NULL
-          AND r.freight_charge_rub > 0
-    """
-
-    timings: dict[str, int] = {}
-    t0 = time.perf_counter()
-
-    with connection.cursor() as cursor:
-        cursor.execute(routes_sql, [route_set_id])
-        t_execute = time.perf_counter()
-        columns = [col[0] for col in cursor.description]
-        rows = cursor.fetchall()
-        t_fetch = time.perf_counter()
-
-    timings["routes_sql_execute_ms"] = int((t_execute - t0) * 1000)
-    timings["routes_fetch_ms"] = int((t_fetch - t_execute) * 1000)
-
-    if not rows:
-        timings["dataframe_build_ms"] = 0
-        timings["normalize_ms"] = 0
-        return pd.DataFrame(columns=columns), timings
-
-    df = pd.DataFrame.from_records(rows, columns=columns)
-    t_df = time.perf_counter()
-    timings["dataframe_build_ms"] = int((t_df - t_fetch) * 1000)
-
-    normalize_route_dimensions(df)
-    t_norm = time.perf_counter()
-    timings["normalize_ms"] = int((t_norm - t_df) * 1000)
-
-    return df, timings
+    if connection.vendor == "postgresql":
+        return _fetch_routes_dataframe_postgres_copy(route_set_id)
+    return _fetch_routes_dataframe_legacy(route_set_id)
 
 
 def normalize_route_dimensions(df: pd.DataFrame) -> None:

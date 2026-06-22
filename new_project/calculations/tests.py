@@ -410,6 +410,52 @@ class ScenarioEffectsServiceTests(TariffLoadServiceTestMixin, TestCase):
         skipped_charge, _without_volume = fetch_route_set_stats(self.route_set.id)
         self.assertEqual(skipped_charge, 0)
 
+    def test_fetch_routes_dataframe_timed_uses_legacy_on_sqlite(self) -> None:
+        from django.db import connection
+
+        from calculations.domain.services.route_effects_loader import (
+            fetch_routes_dataframe_timed,
+        )
+
+        if connection.vendor == "postgresql":
+            self.skipTest("SQLite-only assertion")
+
+        _df, timings = fetch_routes_dataframe_timed(self.route_set.id)
+        self.assertEqual(timings.get("routes_load_mode"), "legacy")
+
+    def test_fetch_routes_postgres_copy_matches_legacy(self) -> None:
+        from django.db import connection
+
+        from calculations.domain.services.route_effects_loader import (
+            _fetch_routes_dataframe_legacy,
+            _fetch_routes_dataframe_postgres_copy,
+        )
+
+        if connection.vendor != "postgresql":
+            self.skipTest("PostgreSQL-only parity test")
+
+        legacy_df, _legacy_timings = _fetch_routes_dataframe_legacy(self.route_set.id)
+        copy_df, copy_timings = _fetch_routes_dataframe_postgres_copy(self.route_set.id)
+
+        self.assertEqual(copy_timings.get("routes_load_mode"), "postgres_copy")
+        self.assertEqual(list(legacy_df.columns), list(copy_df.columns))
+        self.assertEqual(len(legacy_df), len(copy_df))
+        if legacy_df.empty:
+            return
+
+        legacy_sorted = legacy_df.sort_values("id").reset_index(drop=True)
+        copy_sorted = copy_df.sort_values("id").reset_index(drop=True)
+        for column in ("id", "freight_charge_rub", "cargo_group", "holding"):
+            legacy_values = legacy_sorted[column].tolist()
+            copy_values = copy_sorted[column].tolist()
+            if column == "freight_charge_rub":
+                self.assertEqual(
+                    [float(value) for value in legacy_values],
+                    [float(value) for value in copy_values],
+                )
+            else:
+                self.assertEqual(legacy_values, copy_values)
+
     def test_freight_charge_base_effect(self) -> None:
         self._setup_btd("1.1000")
 
