@@ -194,7 +194,7 @@ def _fetch_routes_dataframe_postgres_copy(
     table = pacsv.read_csv(buffer)
     df = table.to_pandas(
         timestamp_as_object=True,
-        strings_to_categoricals=False,
+        strings_to_categorical=False,
     )
     t_pandas = time.perf_counter()
 
