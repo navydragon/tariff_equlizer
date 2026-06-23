@@ -139,6 +139,13 @@ import { renderErrors } from "../lib/errors.js";
       return checkbox ? !!checkbox.checked : true;
     }
 
+    collectConsiderTurnoverChanges() {
+      const checkbox = this.element.querySelector(
+        "#editScenarioConsiderTurnoverChanges",
+      );
+      return checkbox ? !!checkbox.checked : false;
+    }
+
     collectRetentionCoefficientMode() {
       const checked = this.element.querySelector(
         'input.btn-check[name="retention_coefficient_mode"]:checked',
@@ -185,6 +192,7 @@ import { renderErrors } from "../lib/errors.js";
         route_set_id: routeSetId || null,
         price_change_settings: this.collectPriceChangeSettings(),
         export_price_mode: this.collectExportPriceMode(),
+        consider_turnover_changes: this.collectConsiderTurnoverChanges(),
         consider_enterprise_load: this.collectConsiderEnterpriseLoad(),
         retention_coefficient_mode: this.collectRetentionCoefficientMode(),
       };

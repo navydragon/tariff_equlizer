@@ -10,6 +10,13 @@
   <div class="card-body">
     <div id="elasticityErrors"></div>
 
+    <div class="mb-3">
+      <span class="text-muted">Активный в сценарии:</span>
+      <span id="elasticityActiveSetHint" class="ms-1 badge bg-secondary">
+        {% if scenario.elasticity_set_id %}{{ scenario.elasticity_set }}{% else %}не выбран{% endif %}
+      </span>
+    </div>
+
     <div class="row g-3">
       <div class="col-md-8">
         <label for="elasticitySetSelect" class="form-label">Набор эластичности *</label>
@@ -324,6 +331,12 @@
     const data = await response.json();
     if (!data.success) return;
     attachedSetId = data.elasticity_set ? data.elasticity_set.id : null;
+    const hintEl = document.getElementById('elasticityActiveSetHint');
+    if (hintEl) {
+      const name = data.elasticity_set && data.elasticity_set.name ? String(data.elasticity_set.name) : '';
+      hintEl.textContent = attachedSetId ? (name || `#${attachedSetId}`) : 'не выбран';
+      hintEl.className = 'ms-1 badge ' + (attachedSetId ? 'bg-success' : 'bg-secondary');
+    }
     if (attachedSetId) {
       selectEl.value = String(attachedSetId);
       currentSetId = attachedSetId;

@@ -10,6 +10,13 @@
   <div class="card-body">
     <div id="fxErrors"></div>
 
+    <div class="mb-3">
+      <span class="text-muted">Активный в сценарии:</span>
+      <span id="fxActiveSetHint" class="ms-1 badge bg-secondary">
+        {% if scenario.exchange_rate_set_id %}{{ scenario.exchange_rate_set }}{% else %}не выбран{% endif %}
+      </span>
+    </div>
+
     <div class="row g-3">
       <div class="col-md-8">
         <label for="fxRateSetSelect" class="form-label">Набор курсов *</label>
@@ -257,6 +264,12 @@
     currentRateSetId = rateSet ? rateSet.id : null;
     if (currentRateSetId) {
       selectEl.value = String(currentRateSetId);
+    }
+    const hintEl = document.getElementById('fxActiveSetHint');
+    if (hintEl) {
+      const name = rateSet && rateSet.name ? String(rateSet.name) : '';
+      hintEl.textContent = currentRateSetId ? (name || `#${currentRateSetId}`) : 'не выбран';
+      hintEl.className = 'ms-1 badge ' + (currentRateSetId ? 'bg-success' : 'bg-secondary');
     }
     updateDeleteButtonState();
     renderMatrix(years, data.values || {});

@@ -10,6 +10,13 @@
   <div class="card-body">
     <div id="inflationErrors"></div>
 
+    <div class="mb-3">
+      <span class="text-muted">Активный в сценарии:</span>
+      <span id="inflationActiveSetHint" class="ms-1 badge bg-secondary">
+        {% if scenario.inflation_set_id %}{{ scenario.inflation_set }}{% else %}не выбран{% endif %}
+      </span>
+    </div>
+
     <div class="row g-3">
       <div class="col-md-8">
         <label for="inflationSetSelect" class="form-label">Набор инфляции *</label>
@@ -257,6 +264,12 @@
     currentInflationSetId = inflationSet ? inflationSet.id : null;
     if (currentInflationSetId) {
       selectEl.value = String(currentInflationSetId);
+    }
+    const hintEl = document.getElementById('inflationActiveSetHint');
+    if (hintEl) {
+      const name = inflationSet && inflationSet.name ? String(inflationSet.name) : '';
+      hintEl.textContent = currentInflationSetId ? (name || `#${currentInflationSetId}`) : 'не выбран';
+      hintEl.className = 'ms-1 badge ' + (currentInflationSetId ? 'bg-success' : 'bg-secondary');
     }
     updateDeleteButtonState();
     renderMatrix(years, data.values || {});

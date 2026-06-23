@@ -36,21 +36,7 @@
     </small>
   </div>
 
-  <div class="mb-3">
-    <label class="form-check form-switch">
-      <input
-        class="form-check-input"
-        type="checkbox"
-        id="turnoverChangesToggle"
-        {% if scenario.consider_turnover_changes %}checked{% endif %}
-      />
-      <span class="form-check-label">Учитывать изменения грузооборота</span>
-    </label>
-    <small class="form-hint">
-      Если включить — в расчётах эффектов провозная плата и объём перевозок
-      умножаются на коэффициенты изменения грузооборота из набора маршрутов.
-    </small>
-  </div>
+  {# Переключатель перенесён на вкладку «Основные сведения» #}
 
   <div id="btdUiContainer">
     <div class="card" id="btdCategoriesCard" data-scenario-id="{{ scenario.id }}">
@@ -286,52 +272,6 @@
     });
   }
 
-  const turnoverToggle = document.getElementById('turnoverChangesToggle');
-
-  async function persistTurnoverToggle(checked) {
-    if (!updateUrl) throw new Error('updateUrl is missing');
-
-    const response = await fetch(updateUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-CSRFToken': getCookie('csrftoken'),
-      },
-      body: JSON.stringify({
-        consider_turnover_changes: !!checked,
-      }),
-    });
-    return await response.json();
-  }
-
-  if (turnoverToggle) {
-    turnoverToggle.addEventListener('change', async function() {
-      const checked = !!turnoverToggle.checked;
-      turnoverToggle.disabled = true;
-      try {
-        const data = await persistTurnoverToggle(checked);
-        if (!data || !data.success) {
-          const messages = (data && (data.errors || data.error)) || 'Ошибка сохранения';
-          showToast('error', Array.isArray(messages) ? messages.join('<br>') : messages);
-          turnoverToggle.checked = !checked;
-          return;
-        }
-
-        showToast(
-          'success',
-          checked
-            ? 'Учёт изменений грузооборота включён'
-            : 'Учёт изменений грузооборота выключен',
-        );
-      } catch (e) {
-        console.error('Ошибка сохранения флага грузооборота:', e);
-        showToast('error', 'Ошибка сохранения');
-        turnoverToggle.checked = !checked;
-      } finally {
-        turnoverToggle.disabled = false;
-      }
-    });
-  }
 })();
 
 (function() {
