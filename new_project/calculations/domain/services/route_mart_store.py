@@ -213,7 +213,14 @@ class MartSidecarView:
     def to_dataframe(self) -> pd.DataFrame:
         if self.empty:
             return pd.DataFrame()
-        return pd.DataFrame(self.column_arrays)
+        # pandas DataFrame требует 1D массив на колонку; 2D sidecar (например turnover_coef)
+        # фильтруем, чтобы не падать в deferred compute / legacy местах.
+        safe: dict[str, np.ndarray] = {
+            key: value
+            for key, value in self.column_arrays.items()
+            if getattr(value, "ndim", 1) == 1
+        }
+        return pd.DataFrame(safe)
 
 
 def mart_meta_path(parquet_path: Path) -> Path:
@@ -1075,9 +1082,13 @@ def load_mart_sidecar(
             columns["transport_volume_tons"] = volume
         timings["volume_npy_read_ms"] = int((time.perf_counter() - t_volume) * 1000)
 
-    turnover_coef = load_turnover_coef_npy(parquet_path)
-    if turnover_coef is not None:
-        columns["turnover_coef"] = turnover_coef
+    # turnover_coef (2D) нужен для расчёта эффектов, но ломает to_dataframe() в местах,
+    # где sidecar превращают в pandas (deferred volume path). Поэтому включаем его
+    # только когда запрашивается charge (compute path).
+    if include_charge:
+        turnover_coef = load_turnover_coef_npy(parquet_path)
+        if turnover_coef is not None:
+            columns["turnover_coef"] = turnover_coef
 
     t_dims = time.perf_counter()
     columns.update(load_dims_npy_mmap(parquet_path))
