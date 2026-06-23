@@ -139,6 +139,7 @@ def warm_scenario_after_rule_change(
             rule_specs=rule_specs,
             route_set_id=scenario.route_set_id,
             mart_meta=mart_meta,
+            consider_turnover_changes=bool(scenario.consider_turnover_changes),
         )
         filter_options = ScenarioEffectsPandasService._collect_filter_options(
             df,
@@ -201,6 +202,7 @@ def warm_scenario_after_rule_change(
                 skipped_charge=skipped_charge,
                 routes_without_volume=skipped_volume,
                 include_rule_breakdown=False,
+                consider_turnover_changes=bool(scenario.consider_turnover_changes),
             ),
         )
     except Exception as exc:

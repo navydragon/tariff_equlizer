@@ -13,6 +13,12 @@ from django.db import transaction
 from django.utils import timezone
 
 from core.domain.cargo.formatting import parse_etsng_code
+from core.domain.route.turnover_coefficients import (
+    TURNOVER_COEF_YEARS,
+    coefs_from_row,
+    coefs_to_route_kwargs,
+    sqlite_column_for_year,
+)
 from core.management.reference_clear import clear_routes_for_route_set
 from core.management.rzd_paths import RZD_TABLE, get_rzd_db_path
 from core.models import (
@@ -81,6 +87,10 @@ _OPTIONAL_SELECT_COLS = (
     COL_CARGO_CODE_IZPOD_3,
 )
 
+_TURNOVER_COEF_OPTIONAL_COLS = tuple(
+    sqlite_column_for_year(year) for year in TURNOVER_COEF_YEARS
+)
+
 
 def _rzd_table_columns(conn: sqlite3.Connection) -> set[str]:
     cur = conn.execute(f'PRAGMA table_info("{RZD_TABLE}")')
@@ -90,6 +100,9 @@ def _rzd_table_columns(conn: sqlite3.Connection) -> set[str]:
 def _build_select_sql(available_columns: set[str]) -> str:
     cols = list(_BASE_SELECT_COLS)
     for col in _OPTIONAL_SELECT_COLS:
+        if col in available_columns:
+            cols.append(col)
+    for col in _TURNOVER_COEF_OPTIONAL_COLS:
         if col in available_columns:
             cols.append(col)
     selected = ",\n        ".join(f"[{col}]" for col in cols)
@@ -687,6 +700,8 @@ class Command(BaseCommand):
 
         distance_belt = (row[COL_DISTANCE_BELT] or "").strip()
 
+        turnover_coefs = coefs_to_route_kwargs(coefs_from_row(row))
+
         return Route(
             route_set=route_set,
             route_code=route_code,
@@ -712,4 +727,5 @@ class Command(BaseCommand):
             transport_volume_tons=volume,
             freight_turnover_tkm=turnover,
             freight_charge_rub=charge,
+            **turnover_coefs,
         )

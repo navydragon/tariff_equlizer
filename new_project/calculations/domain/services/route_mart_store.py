@@ -15,11 +15,16 @@ from django.utils import timezone
 
 from calculations.domain.services.scenario_effects_compact import _DIMENSION_COLUMNS
 from core.domain.cargo.ordering import sort_cargo_group_names
+from core.domain.route.turnover_coefficients import (
+    TURNOVER_COEF_YEARS,
+    route_field_for_year,
+)
 from core.models import RouteSet, Setting
 
 META_SUFFIX = ".meta.json"
 CHARGE_NPY_SUFFIX = ".charge.npy"
 VOLUME_NPY_SUFFIX = ".volume.npy"
+TURNOVER_COEF_NPY_SUFFIX = ".turnover_coef.npy"
 DIMS_NPZ_SUFFIX = ".dims.npz"  # legacy, только для миграции
 MASKS_NPZ_SUFFIX = ".masks.npz"  # legacy, только для миграции
 DIM_NPY_SUFFIX = ".dim_"
@@ -67,7 +72,7 @@ _MASK_SIDECAR_INT_COLUMNS = frozenset(
 )
 
 # Версия sidecar на диске (отдельные .npy + mmap); bump при смене dtype/колонок.
-SIDECAR_SCHEMA_VERSION = 4
+SIDECAR_SCHEMA_VERSION = 5
 # Legacy npz (до v4).
 MASKS_NPZ_SCHEMA_VERSION = 3
 MASKS_NPZ_META_KEYS = frozenset({"__schema_version__"})
@@ -169,6 +174,7 @@ class MartMeta:
     row_count: int = 0
     filter_options: dict[str, list[str]] | None = None
     sidecar_schema_version: int = 0
+    turnover_coef_years: list[int] | None = None
 
 
 @dataclass
@@ -220,6 +226,10 @@ def charge_npy_path(parquet_path: Path) -> Path:
 
 def volume_npy_path(parquet_path: Path) -> Path:
     return parquet_path.with_name(parquet_path.stem + VOLUME_NPY_SUFFIX)
+
+
+def turnover_coef_npy_path(parquet_path: Path) -> Path:
+    return parquet_path.with_name(parquet_path.stem + TURNOVER_COEF_NPY_SUFFIX)
 
 
 def dims_npz_path(parquet_path: Path) -> Path:
@@ -365,6 +375,7 @@ def save_mart_meta(
         "row_count": meta.row_count,
         "filter_options": meta.filter_options,
         "sidecar_schema_version": meta.sidecar_schema_version,
+        "turnover_coef_years": meta.turnover_coef_years,
     }
     tmp_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     os.replace(tmp_path, path)
@@ -382,6 +393,7 @@ def load_mart_meta(parquet_path: Path) -> MartMeta | None:
         row_count=int(payload.get("row_count", 0)),
         filter_options=payload.get("filter_options"),
         sidecar_schema_version=int(payload.get("sidecar_schema_version", 0)),
+        turnover_coef_years=payload.get("turnover_coef_years"),
     )
 
 
@@ -517,6 +529,50 @@ def ensure_volume_npy(parquet_path: Path) -> np.ndarray | None:
         return None
     save_volume_npy(volume_df, parquet_path)
     return load_volume_npy(parquet_path)
+
+
+def _turnover_coef_columns() -> list[str]:
+    return [route_field_for_year(year) for year in TURNOVER_COEF_YEARS]
+
+
+def build_turnover_coef_array(df: pd.DataFrame) -> np.ndarray:
+    n_rows = len(df)
+    result = np.ones((n_rows, len(TURNOVER_COEF_YEARS)), dtype=np.float32)
+    for index, year in enumerate(TURNOVER_COEF_YEARS):
+        column = route_field_for_year(year)
+        if column not in df.columns:
+            continue
+        values = (
+            pd.to_numeric(df[column], errors="coerce")
+            .fillna(1.0)
+            .to_numpy(dtype=np.float32, copy=False)
+        )
+        np.round(values, 3, out=values)
+        result[:, index] = values
+    return result
+
+
+def save_turnover_coef_npy(df: pd.DataFrame, parquet_path: Path) -> None:
+    out_path = turnover_coef_npy_path(parquet_path)
+    tmp_base = out_path.parent / (out_path.stem + ".tmp")
+    coef = build_turnover_coef_array(df)
+    np.save(tmp_base, coef)
+    _atomic_replace(Path(f"{tmp_base}.npy"), out_path)
+
+
+def load_turnover_coef_npy(parquet_path: Path) -> np.ndarray | None:
+    path = turnover_coef_npy_path(parquet_path)
+    if not path.is_file():
+        return None
+    loaded = np.load(path, mmap_mode="r")
+    return np.asarray(loaded, dtype=np.float32)
+
+
+def _turnover_coef_needs_rebuild(parquet_path: Path) -> bool:
+    meta = load_mart_meta(parquet_path)
+    if meta is None or meta.sidecar_schema_version < SIDECAR_SCHEMA_VERSION:
+        return True
+    return not turnover_coef_npy_path(parquet_path).is_file()
 
 
 def _mask_sidecar_columns_in_df(df: pd.DataFrame) -> list[str]:
@@ -901,8 +957,10 @@ def _sidecars_complete(parquet_path: Path) -> bool:
     return (
         charge_npy_path(parquet_path).is_file()
         and volume_npy_path(parquet_path).is_file()
+        and turnover_coef_npy_path(parquet_path).is_file()
         and not _dims_npy_needs_rebuild(parquet_path)
         and not _masks_npy_needs_rebuild(parquet_path)
+        and not _turnover_coef_needs_rebuild(parquet_path)
     )
 
 
@@ -919,11 +977,14 @@ def ensure_compute_sidecars(parquet_path: Path) -> bool:
 
     need_charge = not charge_npy_path(parquet_path).is_file()
     need_volume = not volume_npy_path(parquet_path).is_file()
+    need_turnover = _turnover_coef_needs_rebuild(parquet_path)
     need_dims = _dims_npy_needs_rebuild(parquet_path)
     need_masks = _masks_npy_needs_rebuild(parquet_path)
 
     has_source = _parquet_has_sidecar_source_columns(parquet_path)
     if (need_dims or need_masks or need_charge) and not has_source:
+        return False
+    if need_turnover:
         return False
 
     columns_to_read: list[str] = list(MART_COMPUTE_BASE_COLUMNS)
@@ -1013,6 +1074,10 @@ def load_mart_sidecar(
         if volume is not None:
             columns["transport_volume_tons"] = volume
         timings["volume_npy_read_ms"] = int((time.perf_counter() - t_volume) * 1000)
+
+    turnover_coef = load_turnover_coef_npy(parquet_path)
+    if turnover_coef is not None:
+        columns["turnover_coef"] = turnover_coef
 
     t_dims = time.perf_counter()
     columns.update(load_dims_npy_mmap(parquet_path))
@@ -1193,6 +1258,7 @@ def save_route_mart(
         row_count=len(df),
         filter_options=filter_options,
         sidecar_schema_version=SIDECAR_SCHEMA_VERSION,
+        turnover_coef_years=list(TURNOVER_COEF_YEARS),
     )
     meta = _merge_mask_labels_into_meta(df, meta) or meta
     save_mart_meta(
@@ -1201,6 +1267,7 @@ def save_route_mart(
     )
     save_charge_npy(df, path)
     save_volume_npy(df, path)
+    save_turnover_coef_npy(df, path)
     save_dims_npy(df, path)
     save_masks_npy(df, path)
     t_sidecars = time.perf_counter()

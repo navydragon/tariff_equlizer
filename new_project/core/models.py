@@ -651,6 +651,48 @@ class Route(models.Model):
         null=True,
         blank=True,
     )
+    turnover_change_coef_2025 = models.DecimalField(
+        "Коэфф. изменения грузооборота 2025",
+        max_digits=6,
+        decimal_places=3,
+        null=True,
+        blank=True,
+    )
+    turnover_change_coef_2026 = models.DecimalField(
+        "Коэфф. изменения грузооборота 2026",
+        max_digits=6,
+        decimal_places=3,
+        null=True,
+        blank=True,
+    )
+    turnover_change_coef_2027 = models.DecimalField(
+        "Коэфф. изменения грузооборота 2027",
+        max_digits=6,
+        decimal_places=3,
+        null=True,
+        blank=True,
+    )
+    turnover_change_coef_2028 = models.DecimalField(
+        "Коэфф. изменения грузооборота 2028",
+        max_digits=6,
+        decimal_places=3,
+        null=True,
+        blank=True,
+    )
+    turnover_change_coef_2029 = models.DecimalField(
+        "Коэфф. изменения грузооборота 2029",
+        max_digits=6,
+        decimal_places=3,
+        null=True,
+        blank=True,
+    )
+    turnover_change_coef_2030 = models.DecimalField(
+        "Коэфф. изменения грузооборота 2030",
+        max_digits=6,
+        decimal_places=3,
+        null=True,
+        blank=True,
+    )
     is_model = models.BooleanField(
         "Модельный маршрут IPEM",
         default=False,

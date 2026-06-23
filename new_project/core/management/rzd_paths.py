@@ -4,7 +4,7 @@ from pathlib import Path
 
 from django.conf import settings
 
-RZD_DB_FILENAME = "01_2026-05-19.db"
+RZD_DB_FILENAME = "02_2026-06-22.db"
 RZD_TABLE = "ИХ_ГП"
 
 

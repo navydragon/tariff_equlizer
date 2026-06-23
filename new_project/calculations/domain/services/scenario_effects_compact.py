@@ -93,6 +93,7 @@ def build_compact_from_arrays(
     dimensions: dict[str, np.ndarray] | None = None,
     dimension_labels: dict[str, list[str]] | None = None,
     volume: np.ndarray | None = None,
+    turnover_coef: np.ndarray | None = None,
 ) -> CompactRouteEffects:
     resolved_dimensions: dict[str, np.ndarray] = {}
     resolved_labels: dict[str, list[str]] = {}
@@ -122,6 +123,10 @@ def build_compact_from_arrays(
             raise ValueError("volume or df is required")
         volume = extract_volume_array(df)
 
+    volume_by_year: np.ndarray | None = None
+    if turnover_coef is not None:
+        volume_by_year = _as_float32(volume[:, None] * turnover_coef)
+
     return CompactRouteEffects(
         years=years,
         dimensions=resolved_dimensions,
@@ -137,6 +142,7 @@ def build_compact_from_arrays(
             if rule_by_year is not None
             else None
         ),
+        volume_by_year=volume_by_year,
     )
 
 

@@ -33,6 +33,7 @@ class CompactRouteEffects:
     charge_by_year: np.ndarray
     rule_meta: list[tuple[int, str]] = field(default_factory=list)
     rule_by_year: np.ndarray | None = None
+    volume_by_year: np.ndarray | None = None
 
 
 @dataclass
@@ -97,6 +98,7 @@ def compute_scenario_data_version(
         str(scenario.end_year),
         str(route_set.id),
         route_set.updated_at.isoformat() if route_set.updated_at else "",
+        f"consider_turnover_changes:{bool(getattr(scenario, 'consider_turnover_changes', False))}",
     ]
     for year in sorted(base_coef_by_year):
         parts.append(f"base:{year}:{base_coef_by_year[year]}")

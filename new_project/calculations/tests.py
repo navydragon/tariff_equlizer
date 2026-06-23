@@ -4,7 +4,7 @@ from decimal import Decimal
 import pandas as pd
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
-from django.test import Client, TestCase
+from django.test import Client, SimpleTestCase, TestCase
 from django.urls import reverse
 
 from calculations.domain.dto.scenario_absolute import ScenarioAbsoluteRequestDTO
@@ -3731,3 +3731,82 @@ class TariffRulesCacheAuditTests(TariffLoadServiceTestMixin, TestCase):
             mart_meta=meta,
         )
         self.assertLessEqual(timings2.get("masks_ms", 999), 50)
+
+
+class TurnoverEffectsComputeTests(TestCase):
+    def setUp(self) -> None:
+        self.route_set = RouteSet.objects.create(name="RS-TO", code="RS_TO")
+
+    def test_build_turnover_coef_matrix_uses_one_outside_forecast_years(self) -> None:
+        import numpy as np
+
+        from calculations.domain.services.route_mart_store import MartSidecarView
+        from calculations.domain.services.scenario_effects_compute import (
+            build_turnover_coef_matrix,
+        )
+
+        sidecar = MartSidecarView(
+            column_arrays={
+                "freight_charge_rub": np.array([1.0]),
+                "turnover_coef": np.array([[1.0, 1.2, 1.0, 1.0, 1.0, 0.9]], dtype=np.float32),
+            },
+        )
+        matrix = build_turnover_coef_matrix(
+            sidecar,
+            [2025, 2026, 2031],
+            enabled=True,
+        )
+        np.testing.assert_allclose(matrix, [[1.0, 1.2, 1.0]])
+
+    def test_compute_kpi_totals_applies_turnover_to_charge(self) -> None:
+        import numpy as np
+
+        from calculations.domain.services.route_mart_store import MartSidecarView
+        from calculations.domain.services.scenario_effects_compute import compute_kpi_totals
+
+        sidecar = MartSidecarView(
+            column_arrays={
+                "freight_charge_rub": np.array([100.0]),
+                "turnover_coef": np.array([[1.0, 1.2, 1.0, 1.0, 1.0, 1.0]], dtype=np.float32),
+            },
+        )
+        totals, _ = compute_kpi_totals(
+            sidecar,
+            years=[2025, 2026],
+            base_coef_by_year={2025: Decimal("1"), 2026: Decimal("1")},
+            rule_specs=[],
+            route_set_id=self.route_set.id,
+            mart_meta=None,
+            consider_turnover_changes=True,
+        )
+        self.assertEqual(totals.baseline_total, Decimal("100"))
+        self.assertEqual(totals.charge_by_year[2026], Decimal("120"))
+
+    def test_compute_scenario_data_version_depends_on_turnover_flag(self) -> None:
+        from calculations.domain.services.scenario_effects_cache import (
+            compute_scenario_data_version,
+        )
+
+        user = get_user_model().objects.create_user(login="turnover-version", password="pass")
+        scenario = Scenario.objects.create(
+            name="TV",
+            start_year=2025,
+            end_year=2026,
+            route_set=self.route_set,
+            author=user,
+            consider_turnover_changes=False,
+        )
+        base_coef = {2025: Decimal("1"), 2026: Decimal("1")}
+        version_off = compute_scenario_data_version(
+            scenario=scenario,
+            base_coef_by_year=base_coef,
+            rules=[],
+        )
+        scenario.consider_turnover_changes = True
+        scenario.save(update_fields=["consider_turnover_changes"])
+        version_on = compute_scenario_data_version(
+            scenario=scenario,
+            base_coef_by_year=base_coef,
+            rules=[],
+        )
+        self.assertNotEqual(version_off, version_on)

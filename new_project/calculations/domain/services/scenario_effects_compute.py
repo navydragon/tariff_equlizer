@@ -15,6 +15,7 @@ from calculations.domain.services.route_mart_store import MartMeta, MartSidecarV
 from calculations.domain.services.scenario_effects_compact import _COMPUTE_DTYPE
 from calculations.domain.services.scenario_effects_formatting import GlobalTotals
 from calculations.domain.services.tariff_load import ScenarioTariffContext, TariffLoadService
+from core.domain.route.turnover_coefficients import TURNOVER_COEF_YEARS
 
 
 def effective_rule_coefficient(coefficient: float, base_percent: float) -> float:
@@ -42,6 +43,7 @@ class FullComputeArrays:
     charge_by_year: np.ndarray
     rule_meta: list[tuple[int, str]]
     rule_by_year: np.ndarray | None
+    turnover_coef: np.ndarray | None = None
 
 
 def rule_specs_from_context(
@@ -79,6 +81,50 @@ def _sidecar_charge_array(sidecar: MartSidecarView | pd.DataFrame) -> np.ndarray
     if isinstance(sidecar, MartSidecarView):
         return np.asarray(sidecar["freight_charge_rub"], dtype=_COMPUTE_DTYPE)
     return sidecar["freight_charge_rub"].to_numpy(dtype=_COMPUTE_DTYPE, copy=False)
+
+
+def _stored_turnover_coef_matrix(
+    sidecar: MartSidecarView | pd.DataFrame,
+    *,
+    n_routes: int,
+) -> np.ndarray:
+    if isinstance(sidecar, MartSidecarView):
+        raw = sidecar.get("turnover_coef")
+    elif "turnover_coef" in sidecar.columns:
+        values = sidecar["turnover_coef"]
+        if isinstance(values, pd.DataFrame):
+            raw = values.to_numpy(dtype=_COMPUTE_DTYPE, copy=False)
+        else:
+            raw = np.asarray(values, dtype=_COMPUTE_DTYPE)
+    else:
+        raw = None
+    if raw is None:
+        return np.ones((n_routes, len(TURNOVER_COEF_YEARS)), dtype=_COMPUTE_DTYPE)
+    matrix = np.asarray(raw, dtype=_COMPUTE_DTYPE)
+    if matrix.ndim == 1:
+        matrix = matrix.reshape(n_routes, len(TURNOVER_COEF_YEARS))
+    return matrix
+
+
+def build_turnover_coef_matrix(
+    sidecar: MartSidecarView | pd.DataFrame,
+    years: list[int],
+    *,
+    enabled: bool,
+) -> np.ndarray:
+    n_routes = len(sidecar)
+    n_years = len(years)
+    if not enabled or n_routes == 0 or n_years == 0:
+        return np.ones((n_routes, n_years), dtype=_COMPUTE_DTYPE)
+
+    stored = _stored_turnover_coef_matrix(sidecar, n_routes=n_routes)
+    year_to_index = {year: index for index, year in enumerate(TURNOVER_COEF_YEARS)}
+    result = np.ones((n_routes, n_years), dtype=_COMPUTE_DTYPE)
+    for year_index, year in enumerate(years):
+        stored_index = year_to_index.get(year)
+        if stored_index is not None:
+            result[:, year_index] = stored[:, stored_index]
+    return result
 
 
 def _prepare_rules_state(
@@ -160,6 +206,7 @@ def compute_kpi_totals(
     rule_specs: list[RuleComputeSpec],
     route_set_id: int,
     mart_meta: MartMeta | None,
+    consider_turnover_changes: bool = False,
 ) -> tuple[GlobalTotals, dict[str, int]]:
     import time
 
@@ -171,6 +218,11 @@ def compute_kpi_totals(
         return GlobalTotals(), timings
 
     initial = _sidecar_charge_array(sidecar)
+    turnover_coef = build_turnover_coef_matrix(
+        sidecar,
+        years,
+        enabled=consider_turnover_changes,
+    )
     base_coef_arr = _base_coef_array(years, base_coef_by_year)
 
     rules_coef, rule_meta, _rule_masks, _rule_effective, mask_timings = (
@@ -186,31 +238,36 @@ def compute_kpi_totals(
     has_rules = bool(rule_meta)
 
     global_totals = GlobalTotals()
-    global_totals.baseline_total = _to_decimal(float(initial.sum(dtype=np.float64)))
+    baseline = initial * turnover_coef[:, 0]
+    global_totals.baseline_total = _to_decimal(float(baseline.sum(dtype=np.float64)))
     global_totals.charge_by_year[years[0]] = global_totals.baseline_total
 
-    prev = initial.copy()
-    current = np.empty_like(prev)
+    tariff_prev = initial.copy()
     t_years = time.perf_counter()
     for year_index, year in enumerate(years):
         if year_index == 0:
             continue
 
         base_coef = base_coef_arr[year_index]
+        turnover_column = turnover_coef[:, year_index]
         if not has_rules:
-            np.multiply(prev, base_coef, out=current)
-            np.round(current, 2, out=current)
-            base_inc = np.round(prev * (base_coef - 1.0), 2)
+            tariff_current = np.round(tariff_prev * base_coef, 2)
+            base_inc = np.round(tariff_prev * (base_coef - 1.0) * turnover_column, 2)
             rules_inc_sum = 0.0
         else:
             rules_column = rules_coef[:, year_index]
-            np.multiply(prev, base_coef + rules_column - 1.0, out=current)
-            np.round(current, 2, out=current)
-            base_inc = np.round(prev * (base_coef - 1.0), 2)
+            tariff_current = np.round(
+                tariff_prev * (base_coef + rules_column - 1.0),
+                2,
+            )
+            base_inc = np.round(tariff_prev * (base_coef - 1.0) * turnover_column, 2)
             rules_inc_sum = float(
-                np.round(prev * (rules_column - 1.0), 2).sum(dtype=np.float64),
+                np.round(tariff_prev * (rules_column - 1.0) * turnover_column, 2).sum(
+                    dtype=np.float64,
+                ),
             )
 
+        current = np.round(tariff_current * turnover_column, 2)
         global_totals.charge_by_year[year] = _to_decimal(
             float(current.sum(dtype=np.float64)),
         )
@@ -218,7 +275,7 @@ def compute_kpi_totals(
         if has_rules:
             global_totals.rules_by_year[year] = _to_decimal(rules_inc_sum)
 
-        prev, current = current, prev
+        tariff_prev = tariff_current
 
     timings["years_loop_ms"] = int((time.perf_counter() - t_years) * 1000)
     timings["rule_by_year_ms"] = 0
@@ -236,6 +293,7 @@ def compute_arrays_full(
     mart_meta: MartMeta | None,
     mask_cache_dir: Path | None = None,
     include_rule_by_year: bool = True,
+    consider_turnover_changes: bool = False,
 ) -> tuple[GlobalTotals, dict[str, int], FullComputeArrays | None]:
     import time
 
@@ -249,6 +307,11 @@ def compute_arrays_full(
     n_routes = len(sidecar)
     n_years = len(years)
     initial = _sidecar_charge_array(sidecar)
+    turnover_coef = build_turnover_coef_matrix(
+        sidecar,
+        years,
+        enabled=consider_turnover_changes,
+    )
     base_coef_arr = _base_coef_array(years, base_coef_by_year)
 
     rules_coef, rule_meta, rule_masks, rule_effective_by_year, mask_timings = (
@@ -275,23 +338,27 @@ def compute_arrays_full(
     base_by_year = np.zeros((n_routes, n_years), dtype=_COMPUTE_DTYPE)
     rules_by_year_arr = np.zeros((n_routes, n_years), dtype=_COMPUTE_DTYPE)
 
-    prev = initial.copy()
+    tariff_prev = initial.copy()
     t_years = time.perf_counter()
     rule_by_year_ms = 0
     for year_index, _year in enumerate(years):
+        turnover_column = turnover_coef[:, year_index]
         if year_index == 0:
-            charge_by_year[:, year_index] = prev
+            charge_by_year[:, year_index] = np.round(initial * turnover_column, 2)
             continue
 
         base_coef = base_coef_arr[year_index]
         if not has_rules:
-            current = np.round(prev * base_coef, 2)
-            base_inc = np.round(prev * (base_coef - 1.0), 2)
+            tariff_current = np.round(tariff_prev * base_coef, 2)
+            base_inc = np.round(tariff_prev * (base_coef - 1.0) * turnover_column, 2)
         else:
             rules_column = rules_coef[:, year_index]
-            current = np.round(prev * (base_coef + rules_column - 1.0), 2)
-            base_inc = np.round(prev * (base_coef - 1.0), 2)
-            rules_inc = np.round(prev * (rules_column - 1.0), 2)
+            tariff_current = np.round(
+                tariff_prev * (base_coef + rules_column - 1.0),
+                2,
+            )
+            base_inc = np.round(tariff_prev * (base_coef - 1.0) * turnover_column, 2)
+            rules_inc = np.round(tariff_prev * (rules_column - 1.0) * turnover_column, 2)
             rules_by_year_arr[:, year_index] = rules_inc
 
             if rule_by_year_arr is not None:
@@ -299,14 +366,14 @@ def compute_arrays_full(
                 for rule_index, mask in enumerate(rule_masks):
                     effective = rule_effective_by_year[rule_index][year_index]
                     rule_by_year_arr[rule_index, mask, year_index] = np.round(
-                        prev[mask] * (effective - 1.0),
+                        tariff_prev[mask] * (effective - 1.0) * turnover_column[mask],
                         2,
                     )
                 rule_by_year_ms += int((time.perf_counter() - t_rule_slice) * 1000)
 
-        charge_by_year[:, year_index] = current
+        charge_by_year[:, year_index] = np.round(tariff_current * turnover_column, 2)
         base_by_year[:, year_index] = base_inc
-        prev = current
+        tariff_prev = tariff_current
 
     timings["years_loop_ms"] = int((time.perf_counter() - t_years) * 1000)
     timings["rule_by_year_ms"] = rule_by_year_ms
@@ -316,7 +383,8 @@ def compute_arrays_full(
     base_sums = base_by_year.sum(axis=0, dtype=np.float64)
     rules_sums = rules_by_year_arr.sum(axis=0, dtype=np.float64)
     global_totals = GlobalTotals()
-    global_totals.baseline_total = _to_decimal(float(initial.sum(dtype=np.float64)))
+    baseline = initial * turnover_coef[:, 0]
+    global_totals.baseline_total = _to_decimal(float(baseline.sum(dtype=np.float64)))
     for year_index, year in enumerate(years):
         global_totals.charge_by_year[year] = _to_decimal(
             float(charge_sums[year_index]),
@@ -334,5 +402,6 @@ def compute_arrays_full(
         charge_by_year=charge_by_year,
         rule_meta=rule_meta,
         rule_by_year=rule_by_year_arr,
+        turnover_coef=turnover_coef if consider_turnover_changes else None,
     )
     return global_totals, timings, arrays

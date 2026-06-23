@@ -18,6 +18,7 @@ from core.domain.cargo.ordering import normalize_filter_options
 
 BASELINE_RUB_FILENAME = "baseline_rub.npy"
 VOLUME_TONS_FILENAME = "volume_tons.npy"
+VOLUME_BY_YEAR_FILENAME = "volume_by_year.npy"
 BASE_BY_YEAR_FILENAME = "base_by_year.npy"
 RULES_BY_YEAR_FILENAME = "rules_by_year.npy"
 CHARGE_BY_YEAR_FILENAME = "charge_by_year.npy"
@@ -74,6 +75,11 @@ def _compact_arrays_for_store(compact: CompactRouteEffects) -> dict[str, np.ndar
         RULES_BY_YEAR_FILENAME: compact.rules_by_year.astype(np.float32, copy=False),
         CHARGE_BY_YEAR_FILENAME: compact.charge_by_year.astype(np.float32, copy=False),
     }
+    if compact.volume_by_year is not None:
+        arrays[VOLUME_BY_YEAR_FILENAME] = compact.volume_by_year.astype(
+            np.float32,
+            copy=False,
+        )
     for column in _DIMENSION_COLUMNS:
         arrays[_dimension_filename(column)] = compact.dimensions[column].astype(
             np.int32,
@@ -345,6 +351,12 @@ def try_load_scenario_compute(
     compact_arrays = _compact_array_paths(cache_dir)
     baseline_rub = _load_npy_mmap(compact_arrays["baseline_rub"], dtype=np.float32)
     volume_tons = _load_npy_mmap(compact_arrays["volume_tons"], dtype=np.float32)
+    volume_by_year_path = cache_dir / VOLUME_BY_YEAR_FILENAME
+    volume_by_year = (
+        _load_npy_mmap(volume_by_year_path, dtype=np.float32)
+        if volume_by_year_path.is_file()
+        else None
+    )
     base_by_year = _load_npy_mmap(compact_arrays["base_by_year"], dtype=np.float32)
     rules_by_year = _load_npy_mmap(compact_arrays["rules_by_year"], dtype=np.float32)
     charge_by_year = _load_npy_mmap(compact_arrays["charge_by_year"], dtype=np.float32)
@@ -372,6 +384,7 @@ def try_load_scenario_compute(
         charge_by_year=charge_by_year,
         rule_meta=[(int(item[0]), str(item[1])) for item in metadata.get("rule_meta", [])],
         rule_by_year=_load_rule_by_year(cache_dir, None),
+        volume_by_year=volume_by_year,
     )
 
     return ScenarioComputeBundle(

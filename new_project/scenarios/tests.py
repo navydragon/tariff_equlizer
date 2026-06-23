@@ -639,6 +639,31 @@ class PriceChangeSettingServiceTests(TestCase):
         self.scenario.refresh_from_db()
         self.assertFalse(self.scenario.consider_enterprise_load)
 
+    def test_update_scenario_saves_consider_turnover_changes(self):
+        scenario_service = ScenarioService()
+        from scenarios.domain.dto import UpdateScenarioDTO
+
+        dto = UpdateScenarioDTO(consider_turnover_changes=True)
+        updated, errors = scenario_service.update_scenario(self.scenario.id, dto, self.user)
+        self.assertFalse(errors)
+        self.assertIsNotNone(updated)
+        self.assertTrue(updated.consider_turnover_changes)
+
+        self.scenario.refresh_from_db()
+        self.assertTrue(self.scenario.consider_turnover_changes)
+
+    def test_copy_scenario_copies_consider_turnover_changes(self):
+        self.scenario.consider_turnover_changes = True
+        self.scenario.save(update_fields=["consider_turnover_changes"])
+
+        copied = self.scenario_repository.copy_scenario(
+            source_id=self.scenario.id,
+            new_name="Копия грузооборота",
+            new_author=self.user,
+        )
+        self.assertIsNotNone(copied)
+        self.assertTrue(copied.consider_turnover_changes)
+
     def test_copy_scenario_copies_consider_enterprise_load(self):
         self.scenario.consider_enterprise_load = False
         self.scenario.save(update_fields=["consider_enterprise_load"])

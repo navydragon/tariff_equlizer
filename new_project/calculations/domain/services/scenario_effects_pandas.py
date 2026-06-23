@@ -149,6 +149,7 @@ class ScenarioEffectsPandasService:
                 rule_specs=rule_specs,
                 route_set_id=scenario.route_set_id,
                 mart_meta=mart_meta,
+                consider_turnover_changes=bool(scenario.consider_turnover_changes),
             )
             compact = None
             compact_ready = False
@@ -235,6 +236,7 @@ class ScenarioEffectsPandasService:
                     skipped_charge=deferred_job.skipped_charge,
                     routes_without_volume=deferred_job.routes_without_volume,
                     include_rule_breakdown=deferred_job.include_rule_breakdown,
+                    consider_turnover_changes=deferred_job.consider_turnover_changes,
                 ),
             )
 
@@ -339,6 +341,7 @@ class ScenarioEffectsPandasService:
             skipped_charge=skipped_charge,
             routes_without_volume=routes_without_volume,
             include_rule_breakdown=include_rule_breakdown,
+            consider_turnover_changes=bool(scenario.consider_turnover_changes),
         )
 
     def _compute_arrays(
@@ -359,6 +362,7 @@ class ScenarioEffectsPandasService:
             rule_specs=rule_specs,
             route_set_id=scenario.route_set_id,
             mart_meta=mart_meta,
+            consider_turnover_changes=bool(scenario.consider_turnover_changes),
         )
 
     @staticmethod
@@ -438,6 +442,7 @@ class ScenarioEffectsPandasService:
             dimensions=dimensions,
             dimension_labels=dimension_labels,
             volume=volume,
+            turnover_coef=arrays.turnover_coef,
         )
         timings["compact_build_ms"] = int((time.perf_counter() - t_build) * 1000)
         return compact, global_totals, timings
@@ -459,4 +464,5 @@ class ScenarioEffectsPandasService:
             rule_specs=rule_specs,
             route_set_id=scenario.route_set_id,
             mart_meta=mart_meta,
+            consider_turnover_changes=bool(scenario.consider_turnover_changes),
         )

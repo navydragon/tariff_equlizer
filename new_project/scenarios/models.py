@@ -63,6 +63,10 @@ class Scenario(models.Model):
         "Учитывать базовые тарифные решения",
         default=True,
     )
+    consider_turnover_changes = models.BooleanField(
+        "Учитывать изменения грузооборота",
+        default=False,
+    )
     consider_enterprise_load = models.BooleanField(
         "Учитывать загрузку предприятия",
         default=True,

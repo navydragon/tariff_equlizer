@@ -98,6 +98,7 @@ def scenario_list_api(request):
                 "author_id": s.author_id,
                 "author_name": s.author_name,
                 "include_base_tariff_decisions": s.include_base_tariff_decisions,
+                "consider_turnover_changes": s.consider_turnover_changes,
                 "consider_enterprise_load": s.consider_enterprise_load,
                 "retention_coefficient_mode": s.retention_coefficient_mode,
             }
@@ -194,6 +195,7 @@ def scenario_update_api(request, scenario_id):
         price_change_settings=data.get("price_change_settings"),
         export_price_mode=data.get("export_price_mode"),
         include_base_tariff_decisions=data.get("include_base_tariff_decisions"),
+        consider_turnover_changes=data.get("consider_turnover_changes"),
         consider_enterprise_load=data.get("consider_enterprise_load"),
         retention_coefficient_mode=data.get("retention_coefficient_mode"),
     )
@@ -221,6 +223,7 @@ def scenario_update_api(request, scenario_id):
             "price_change_settings": scenario.price_change_settings,
             "export_price_mode": scenario.export_price_mode,
             "include_base_tariff_decisions": scenario.include_base_tariff_decisions,
+            "consider_turnover_changes": scenario.consider_turnover_changes,
             "consider_enterprise_load": scenario.consider_enterprise_load,
             "retention_coefficient_mode": scenario.retention_coefficient_mode,
             "author_id": scenario.author_id,

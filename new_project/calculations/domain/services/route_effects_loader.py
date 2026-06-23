@@ -13,6 +13,10 @@ from calculations.domain.services.route_mart_store import (
     save_route_mart,
     try_load_route_mart,
 )
+from core.domain.route.turnover_coefficients import (
+    TURNOVER_COEF_YEARS,
+    route_field_for_year,
+)
 from core.models import (
     Cargo,
     CargoGroup,
@@ -65,6 +69,12 @@ def _build_routes_sql(*, route_set_id: int | None = None, parameterized: bool = 
             r.id,
             r.freight_charge_rub,
             r.transport_volume_tons,
+            r.turnover_change_coef_2025,
+            r.turnover_change_coef_2026,
+            r.turnover_change_coef_2027,
+            r.turnover_change_coef_2028,
+            r.turnover_change_coef_2029,
+            r.turnover_change_coef_2030,
             r.shipper_id,
             COALESCE(NULLIF(TRIM(s.holding), ''), 'Прочие') AS shipper_holding,
             r.cargo_id,
@@ -114,6 +124,10 @@ def _coerce_route_mart_numeric_columns(df: pd.DataFrame) -> None:
         "transport_volume_tons",
         "distance_loaded_km",
         "distance_belt_midpoint_km",
+        *(
+            route_field_for_year(year)
+            for year in TURNOVER_COEF_YEARS
+        ),
     ):
         if column in df.columns:
             df[column] = pd.to_numeric(df[column], errors="coerce")

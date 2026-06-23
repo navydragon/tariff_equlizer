@@ -84,18 +84,28 @@ class ScenarioAbsoluteService:
             return None, errors
 
         if payload.compact is not None:
-            volume_buckets = aggregate_compact_value(
-                payload.compact,
-                values=payload.compact.volume_tons,
-                group_by=request.group_by,
-                group_by_inner=request.group_by_inner,
-                cargo_groups=[],
-                holdings=[],
-            )
-            year_values = {
-                key: {year: volume for year in payload.years}
-                for key, volume in volume_buckets.items()
-            }
+            if payload.compact.volume_by_year is not None:
+                year_values = aggregate_compact_year_values(
+                    payload.compact,
+                    group_by=request.group_by,
+                    group_by_inner=request.group_by_inner,
+                    cargo_groups=[],
+                    holdings=[],
+                    values_by_year=payload.compact.volume_by_year,
+                )
+            else:
+                volume_buckets = aggregate_compact_value(
+                    payload.compact,
+                    values=payload.compact.volume_tons,
+                    group_by=request.group_by,
+                    group_by_inner=request.group_by_inner,
+                    cargo_groups=[],
+                    holdings=[],
+                )
+                year_values = {
+                    key: {year: volume for year in payload.years}
+                    for key, volume in volume_buckets.items()
+                }
         else:
             volume_buckets = aggregate_by_groups(
                 payload.facts,

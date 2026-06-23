@@ -54,6 +54,7 @@ class DeferredFullComputeJob:
     skipped_charge: int
     routes_without_volume: int
     include_rule_breakdown: bool = False
+    consider_turnover_changes: bool = False
 
 
 def _job_data_version_stale(job: DeferredFullComputeJob) -> bool:
@@ -108,6 +109,7 @@ def _run_deferred_full_compute(job: DeferredFullComputeJob) -> None:
             mart_meta=mart_meta,
             mask_cache_dir=Path(job.mask_cache_dir_path),
             include_rule_by_year=job.include_rule_breakdown,
+            consider_turnover_changes=job.consider_turnover_changes,
         )
         if arrays is None:
             return
@@ -155,6 +157,7 @@ def _run_deferred_full_compute(job: DeferredFullComputeJob) -> None:
             dimensions=dimensions,
             dimension_labels=dimension_labels,
             volume=volume,
+            turnover_coef=arrays.turnover_coef,
         )
         if _job_data_version_stale(job):
             return
