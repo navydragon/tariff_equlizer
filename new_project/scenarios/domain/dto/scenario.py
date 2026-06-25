@@ -25,6 +25,7 @@ class ScenarioDTO:
     export_price_mode: str = "fixed"
     include_base_tariff_decisions: bool = True
     consider_turnover_changes: bool = False
+    consider_demand_elasticity: bool = False
     consider_enterprise_load: bool = True
     retention_coefficient_mode: str = "relative_to_base"
 
@@ -63,6 +64,7 @@ class ScenarioDTO:
                 scenario.include_base_tariff_decisions,
             ),
             consider_turnover_changes=bool(scenario.consider_turnover_changes),
+            consider_demand_elasticity=bool(scenario.consider_demand_elasticity),
             consider_enterprise_load=bool(scenario.consider_enterprise_load),
             retention_coefficient_mode=scenario.retention_coefficient_mode,
         )
@@ -105,6 +107,7 @@ class UpdateScenarioDTO:
     export_price_mode: Optional[str] = None
     include_base_tariff_decisions: Optional[bool] = None
     consider_turnover_changes: Optional[bool] = None
+    consider_demand_elasticity: Optional[bool] = None
     consider_enterprise_load: Optional[bool] = None
     retention_coefficient_mode: Optional[str] = None
 
@@ -143,6 +146,11 @@ class UpdateScenarioDTO:
             bool,
         ):
             errors.append("Некорректное значение флага учета изменений грузооборота")
+        if self.consider_demand_elasticity is not None and not isinstance(
+            self.consider_demand_elasticity,
+            bool,
+        ):
+            errors.append("Некорректное значение флага учета эластичности спроса")
         if self.consider_enterprise_load is not None and not isinstance(
             self.consider_enterprise_load,
             bool,
@@ -182,6 +190,7 @@ class ScenarioListDTO:
     author_name: str
     include_base_tariff_decisions: bool = True
     consider_turnover_changes: bool = False
+    consider_demand_elasticity: bool = False
     consider_enterprise_load: bool = True
     retention_coefficient_mode: str = "relative_to_base"
 
@@ -213,6 +222,7 @@ class ScenarioListDTO:
                 scenario.include_base_tariff_decisions,
             ),
             consider_turnover_changes=bool(scenario.consider_turnover_changes),
+            consider_demand_elasticity=bool(scenario.consider_demand_elasticity),
             consider_enterprise_load=bool(scenario.consider_enterprise_load),
             retention_coefficient_mode=scenario.retention_coefficient_mode,
         )

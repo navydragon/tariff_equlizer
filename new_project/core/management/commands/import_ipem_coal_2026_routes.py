@@ -84,6 +84,10 @@ class Command(BaseCommand):
             )
 
         with transaction.atomic():
+            def progress(message: str) -> None:
+                self.stdout.write(message)
+                self.stdout.flush()
+
             if use_bundle:
                 try:
                     scenario = Scenario.objects.select_related("author").get(
@@ -100,6 +104,7 @@ class Command(BaseCommand):
                     route_set,
                     dry_run=dry_run,
                     attach_elasticity=True,
+                    progress=progress,
                 )
                 routes_result = result.routes
                 if dry_run:
@@ -109,6 +114,7 @@ class Command(BaseCommand):
                     xlsx_path,
                     route_set,
                     dry_run=dry_run,
+                    progress=progress,
                 )
                 result = None
                 if dry_run:
@@ -146,6 +152,13 @@ class Command(BaseCommand):
             self.stdout.write(
                 f"Связано operational-маршрутов: "
                 f"{routes_result.linked_operational_routes}"
+            )
+            self.stdout.write(
+                "Разметка эластичности (итого): "
+                f"direct_model={routes_result.elasticity_direct_model}, "
+                f"holding_aggregate={routes_result.elasticity_holding_aggregate}, "
+                f"cargo_group_aggregate={routes_result.elasticity_cargo_group_aggregate}, "
+                f"skip={routes_result.elasticity_skipped}"
             )
         self.stdout.write(f"Пропущено строк: {routes_result.skipped_rows}")
 

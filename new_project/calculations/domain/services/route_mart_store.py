@@ -25,6 +25,9 @@ META_SUFFIX = ".meta.json"
 CHARGE_NPY_SUFFIX = ".charge.npy"
 VOLUME_NPY_SUFFIX = ".volume.npy"
 TURNOVER_COEF_NPY_SUFFIX = ".turnover_coef.npy"
+ROUTE_ID_NPY_SUFFIX = ".route_id.npy"
+ELASTICITY_NPZ_SUFFIX = ".elasticity.npz"  # legacy, только для миграции
+ELASTICITY_NPY_PREFIX = ".elasticity_"
 DIMS_NPZ_SUFFIX = ".dims.npz"  # legacy, только для миграции
 MASKS_NPZ_SUFFIX = ".masks.npz"  # legacy, только для миграции
 DIM_NPY_SUFFIX = ".dim_"
@@ -67,12 +70,29 @@ MART_RULE_MASK_SIDECAR_COLUMNS = (
     "message_type_id",
 )
 
+MART_ELASTICITY_SIDECAR_COLUMNS = (
+    "skip_elasticity",
+    "elasticity_source",
+    "cargo_group_id",
+    "message_type_id",
+    "mr_cargo_id",
+    "mr_cargo_group_id",
+    "mr_message_type_id",
+    "mr_market_price_per_ton",
+    "mr_production_cost_per_ton",
+    "mr_total_cost_per_ton",
+    "mr_rzd_cost_total_per_ton",
+    "mr_operators_cost_per_ton",
+    "mr_transshipment_cost_per_ton",
+    "mr_enterprise_load_coefficient",
+)
+
 _MASK_SIDECAR_INT_COLUMNS = frozenset(
     {"shipper_id", "shipment_type_id", "message_type_id"},
 )
 
 # Версия sidecar на диске (отдельные .npy + mmap); bump при смене dtype/колонок.
-SIDECAR_SCHEMA_VERSION = 5
+SIDECAR_SCHEMA_VERSION = 7
 # Legacy npz (до v4).
 MASKS_NPZ_SCHEMA_VERSION = 3
 MASKS_NPZ_META_KEYS = frozenset({"__schema_version__"})
@@ -239,6 +259,10 @@ def turnover_coef_npy_path(parquet_path: Path) -> Path:
     return parquet_path.with_name(parquet_path.stem + TURNOVER_COEF_NPY_SUFFIX)
 
 
+def route_id_npy_path(parquet_path: Path) -> Path:
+    return parquet_path.with_name(parquet_path.stem + ROUTE_ID_NPY_SUFFIX)
+
+
 def dims_npz_path(parquet_path: Path) -> Path:
     return parquet_path.with_name(parquet_path.stem + DIMS_NPZ_SUFFIX)
 
@@ -253,6 +277,14 @@ def dim_npy_path(parquet_path: Path, dim_column: str) -> Path:
 
 def mask_npy_path(parquet_path: Path, column: str) -> Path:
     return parquet_path.with_name(f"{parquet_path.stem}{MASK_NPY_SUFFIX}{column}.npy")
+
+
+def elasticity_npy_path(parquet_path: Path, column: str) -> Path:
+    return parquet_path.with_name(f"{parquet_path.stem}{ELASTICITY_NPY_PREFIX}{column}.npy")
+
+
+def elasticity_npz_path(parquet_path: Path) -> Path:
+    return parquet_path.with_name(f"{parquet_path.stem}{ELASTICITY_NPZ_SUFFIX}")
 
 
 def is_rules_light_mart_columns(columns: list[str] | None) -> bool:
@@ -575,6 +607,160 @@ def load_turnover_coef_npy(parquet_path: Path) -> np.ndarray | None:
     return np.asarray(loaded, dtype=np.float32)
 
 
+def save_route_id_npy(df: pd.DataFrame, parquet_path: Path) -> None:
+    if "id" not in df.columns:
+        return
+    out_path = route_id_npy_path(parquet_path)
+    tmp_base = out_path.parent / (out_path.stem + ".tmp")
+    route_ids = (
+        pd.to_numeric(df["id"], errors="coerce")
+        .fillna(0)
+        .to_numpy(dtype=np.int32, copy=False)
+    )
+    np.save(tmp_base, route_ids)
+    _atomic_replace(Path(f"{tmp_base}.npy"), out_path)
+
+
+def load_route_id_npy(parquet_path: Path) -> np.ndarray | None:
+    path = route_id_npy_path(parquet_path)
+    if not path.is_file():
+        return None
+    loaded = np.load(path, mmap_mode="r")
+    return np.asarray(loaded, dtype=np.int32)
+
+
+_ELASTICITY_SOURCE_CODES: dict[str, int] = {
+    "none": 0,
+    "direct_model": 1,
+    "holding_aggregate": 2,
+    "cargo_group_aggregate": 3,
+}
+
+
+def _list_elasticity_npy_columns(parquet_path: Path) -> set[str]:
+    prefix = f"{parquet_path.stem}{ELASTICITY_NPY_PREFIX}"
+    suffix = ".npy"
+    columns: set[str] = set()
+    for entry in parquet_path.parent.glob(f"{prefix}*{suffix}"):
+        if not entry.name.startswith(prefix):
+            continue
+        columns.add(entry.name[len(prefix) : -len(suffix)])
+    return columns
+
+
+def _elasticity_arrays_from_df(df: pd.DataFrame) -> dict[str, np.ndarray]:
+    skip_raw = df["skip_elasticity"]
+    # В Postgres COPY булевы поля часто приходят как строки 't'/'f'.
+    # astype(bool) на строках даст True для любого непустого значения, что ломает skip_elasticity.
+    if pd.api.types.is_bool_dtype(skip_raw):
+        skip_bool = skip_raw.fillna(True)
+    elif pd.api.types.is_numeric_dtype(skip_raw):
+        skip_bool = pd.to_numeric(skip_raw, errors="coerce").fillna(1).astype(int) != 0
+    else:
+        s = skip_raw.fillna("t").astype(str).str.strip().str.lower()
+        skip_bool = s.isin({"1", "true", "t", "yes", "y", "on"})
+    skip = skip_bool.to_numpy(dtype=np.uint8, copy=False)
+    source_raw = df["elasticity_source"].fillna("none").astype(str)
+    source = np.array(
+        [_ELASTICITY_SOURCE_CODES.get(value, 0) for value in source_raw],
+        dtype=np.uint8,
+    )
+    arrays: dict[str, np.ndarray] = {
+        "skip_elasticity": skip,
+        "elasticity_source": source,
+        "cargo_group_id": (
+            pd.to_numeric(df.get("cargo_group_id"), errors="coerce")
+            .fillna(0)
+            .to_numpy(dtype=np.int32, copy=False)
+        ),
+        "message_type_id": (
+            pd.to_numeric(df.get("message_type_id"), errors="coerce")
+            .fillna(0)
+            .to_numpy(dtype=np.uint16, copy=False)
+        ),
+    }
+    for column in MART_ELASTICITY_SIDECAR_COLUMNS:
+        if column in arrays:
+            continue
+        if column not in df.columns:
+            arrays[column] = np.zeros(len(df), dtype=np.float64)
+            continue
+        arrays[column] = (
+            pd.to_numeric(df[column], errors="coerce")
+            .fillna(0)
+            .to_numpy(dtype=np.float64, copy=False)
+        )
+    return arrays
+
+
+def save_elasticity_npy_from_arrays(
+    arrays: dict[str, np.ndarray],
+    parquet_path: Path,
+) -> None:
+    allowed = frozenset(MART_ELASTICITY_SIDECAR_COLUMNS)
+    for column, array in arrays.items():
+        if column not in allowed:
+            continue
+        _save_npy_array(np.asarray(array), elasticity_npy_path(parquet_path, column))
+    _remove_legacy_elasticity_npz(parquet_path)
+
+
+def save_elasticity_npy(df: pd.DataFrame, parquet_path: Path) -> None:
+    if "skip_elasticity" not in df.columns:
+        return
+    save_elasticity_npy_from_arrays(_elasticity_arrays_from_df(df), parquet_path)
+
+
+def load_elasticity_npy_mmap(parquet_path: Path) -> dict[str, np.ndarray]:
+    allowed = frozenset(MART_ELASTICITY_SIDECAR_COLUMNS)
+    columns: dict[str, np.ndarray] = {}
+    for column in _list_elasticity_npy_columns(parquet_path):
+        if column not in allowed:
+            continue
+        array = _load_npy_mmap(elasticity_npy_path(parquet_path, column))
+        if array is not None:
+            columns[column] = array
+    return columns
+
+
+def _load_elasticity_npz_legacy(parquet_path: Path) -> dict[str, np.ndarray]:
+    path = elasticity_npz_path(parquet_path)
+    if not path.is_file():
+        return {}
+    with np.load(path, allow_pickle=False) as data:
+        return {key: np.asarray(data[key]) for key in data.files}
+
+
+def _remove_legacy_elasticity_npz(parquet_path: Path) -> None:
+    path = elasticity_npz_path(parquet_path)
+    if path.is_file():
+        try:
+            path.unlink()
+        except OSError:
+            pass
+
+
+def _elasticity_npy_needs_rebuild(parquet_path: Path) -> bool:
+    if elasticity_npz_path(parquet_path).is_file():
+        return True
+    meta = load_mart_meta(parquet_path)
+    if meta is None or meta.sidecar_schema_version < SIDECAR_SCHEMA_VERSION:
+        present = _list_elasticity_npy_columns(parquet_path)
+        if present:
+            required = set(MART_ELASTICITY_SIDECAR_COLUMNS)
+            return bool(required - present) or bool(present - required)
+        return elasticity_npz_path(parquet_path).is_file()
+    present = _list_elasticity_npy_columns(parquet_path)
+    if not present:
+        return False
+    required = set(MART_ELASTICITY_SIDECAR_COLUMNS)
+    return bool(required - present) or bool(present - required)
+
+
+def _elasticity_needs_rebuild(parquet_path: Path) -> bool:
+    return _elasticity_npy_needs_rebuild(parquet_path)
+
+
 def _turnover_coef_needs_rebuild(parquet_path: Path) -> bool:
     meta = load_mart_meta(parquet_path)
     if meta is None or meta.sidecar_schema_version < SIDECAR_SCHEMA_VERSION:
@@ -677,11 +863,20 @@ def _remove_stale_sidecar_npy_files(
     removed = 0
     dim_prefix = f"{keep_stem}{DIM_NPY_SUFFIX}"
     mask_prefix = f"{keep_stem}{MASK_NPY_SUFFIX}"
+    elasticity_prefix = f"{keep_stem}{ELASTICITY_NPY_PREFIX}"
     for entry in cache_dir.glob("*.npy"):
         name = entry.name
-        if name.startswith(dim_prefix) or name.startswith(mask_prefix):
+        if (
+            name.startswith(dim_prefix)
+            or name.startswith(mask_prefix)
+            or name.startswith(elasticity_prefix)
+        ):
             continue
-        if f"{DIM_NPY_SUFFIX}" in name or f"{MASK_NPY_SUFFIX}" in name:
+        if (
+            f"{DIM_NPY_SUFFIX}" in name
+            or f"{MASK_NPY_SUFFIX}" in name
+            or f"{ELASTICITY_NPY_PREFIX}" in name
+        ):
             try:
                 entry.unlink()
                 removed += 1
@@ -781,6 +976,17 @@ def save_dims_npy(df: pd.DataFrame, parquet_path: Path) -> None:
     _remove_legacy_npz_sidecars(parquet_path)
 
 
+def _prune_disallowed_mask_npy_columns(parquet_path: Path) -> None:
+    allowed = frozenset(MART_RULE_MASK_SIDECAR_COLUMNS)
+    for column in _list_mask_npy_columns(parquet_path):
+        if column in allowed:
+            continue
+        try:
+            mask_npy_path(parquet_path, column).unlink()
+        except OSError:
+            pass
+
+
 def save_masks_npy(df: pd.DataFrame, parquet_path: Path) -> None:
     for column in _mask_sidecar_columns_in_df(df):
         array = _mask_sidecar_array(df[column], column)
@@ -788,6 +994,7 @@ def save_masks_npy(df: pd.DataFrame, parquet_path: Path) -> None:
             continue
         _save_npy_array(array, mask_npy_path(parquet_path, column))
     _remove_legacy_npz_sidecars(parquet_path)
+    _prune_disallowed_mask_npy_columns(parquet_path)
 
 
 def save_dims_npy_from_arrays(
@@ -820,8 +1027,11 @@ def load_dims_npy_mmap(parquet_path: Path) -> dict[str, np.ndarray]:
 
 
 def load_masks_npy_mmap(parquet_path: Path) -> dict[str, np.ndarray]:
+    allowed = frozenset(MART_RULE_MASK_SIDECAR_COLUMNS)
     columns: dict[str, np.ndarray] = {}
     for column in _list_mask_npy_columns(parquet_path):
+        if column not in allowed:
+            continue
         array = _load_npy_mmap(mask_npy_path(parquet_path, column))
         if array is not None:
             columns[column] = array
@@ -877,6 +1087,11 @@ def _try_migrate_npz_sidecars_to_npy(parquet_path: Path) -> bool:
         arrays = _load_masks_npz_legacy(parquet_path)
         if arrays:
             save_masks_npy_from_arrays(arrays, parquet_path)
+            migrated = True
+    if elasticity_npz_path(parquet_path).is_file():
+        arrays = _load_elasticity_npz_legacy(parquet_path)
+        if arrays:
+            save_elasticity_npy_from_arrays(arrays, parquet_path)
             migrated = True
     if migrated:
         meta = load_mart_meta(parquet_path)
@@ -984,6 +1199,7 @@ def ensure_compute_sidecars(parquet_path: Path) -> bool:
 
     need_charge = not charge_npy_path(parquet_path).is_file()
     need_volume = not volume_npy_path(parquet_path).is_file()
+    need_route_ids = not route_id_npy_path(parquet_path).is_file()
     need_turnover = _turnover_coef_needs_rebuild(parquet_path)
     need_dims = _dims_npy_needs_rebuild(parquet_path)
     need_masks = _masks_npy_needs_rebuild(parquet_path)
@@ -995,6 +1211,12 @@ def ensure_compute_sidecars(parquet_path: Path) -> bool:
         return False
 
     columns_to_read: list[str] = list(MART_COMPUTE_BASE_COLUMNS)
+    # route_id можно вычислить только при наличии исходной колонки id в parquet;
+    # для старых slim-паркетов просто оставляем route_id отсутствующим.
+    if need_route_ids and _parquet_has_sidecar_source_columns(parquet_path, {"id"}):
+        columns_to_read.append("id")
+    else:
+        need_route_ids = False
     if need_volume:
         columns_to_read.append("transport_volume_tons")
     if need_dims:
@@ -1026,6 +1248,11 @@ def ensure_compute_sidecars(parquet_path: Path) -> bool:
         if "transport_volume_tons" in df.columns:
             save_volume_npy(df, parquet_path)
         elif not ensure_volume_npy(parquet_path):
+            return False
+    if need_route_ids:
+        if "id" in df.columns:
+            save_route_id_npy(df, parquet_path)
+        else:
             return False
     if need_dims:
         meta = _encode_mask_dims_into_df(df, meta=meta) or meta
@@ -1082,6 +1309,12 @@ def load_mart_sidecar(
             columns["transport_volume_tons"] = volume
         timings["volume_npy_read_ms"] = int((time.perf_counter() - t_volume) * 1000)
 
+    t_route_ids = time.perf_counter()
+    route_ids = load_route_id_npy(parquet_path)
+    if route_ids is not None:
+        columns["route_id"] = route_ids
+    timings["route_id_npy_read_ms"] = int((time.perf_counter() - t_route_ids) * 1000)
+
     # turnover_coef (2D) нужен для расчёта эффектов, но ломает to_dataframe() в местах,
     # где sidecar превращают в pandas (deferred volume path). Поэтому включаем его
     # только когда запрашивается charge (compute path).
@@ -1089,6 +1322,7 @@ def load_mart_sidecar(
         turnover_coef = load_turnover_coef_npy(parquet_path)
         if turnover_coef is not None:
             columns["turnover_coef"] = turnover_coef
+        columns.update(load_elasticity_npy_mmap(parquet_path))
 
     t_dims = time.perf_counter()
     columns.update(load_dims_npy_mmap(parquet_path))
@@ -1278,7 +1512,9 @@ def save_route_mart(
     )
     save_charge_npy(df, path)
     save_volume_npy(df, path)
+    save_route_id_npy(df, path)
     save_turnover_coef_npy(df, path)
+    save_elasticity_npy(df, path)
     save_dims_npy(df, path)
     save_masks_npy(df, path)
     t_sidecars = time.perf_counter()
@@ -1294,7 +1530,14 @@ def save_route_mart(
         keep_path=path,
     )
     keep_stem = path.stem
-    for suffix in (CHARGE_NPY_SUFFIX, VOLUME_NPY_SUFFIX, DIMS_NPZ_SUFFIX, MASKS_NPZ_SUFFIX):
+    for suffix in (
+        CHARGE_NPY_SUFFIX,
+        VOLUME_NPY_SUFFIX,
+        TURNOVER_COEF_NPY_SUFFIX,
+        ELASTICITY_NPZ_SUFFIX,
+        DIMS_NPZ_SUFFIX,
+        MASKS_NPZ_SUFFIX,
+    ):
         removed += _cleanup_stale_sidecar_files(
             cache_dir=path.parent,
             keep_stem=keep_stem,

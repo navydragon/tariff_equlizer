@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-from decimal import Decimal
 from pathlib import Path
 from typing import Literal
 
@@ -25,7 +24,6 @@ from calculations.domain.services.scenario_effects_compute import (
     rule_specs_from_context,
 )
 from calculations.domain.services.scenario_effects_deferred import (
-    DeferredFullComputeJob,
     schedule_deferred_full_compute,
 )
 from calculations.domain.services.scenario_effects_pandas import ScenarioEffectsPandasService
@@ -184,27 +182,21 @@ def warm_scenario_after_rule_change(
 
         update_warm_status(scenario_id=scenario_id, phase="compact")
 
-        base_coef_by_year: dict[int, Decimal] = context.base_coef_by_year
-        schedule_deferred_full_compute(
-            DeferredFullComputeJob(
-                cache_key="",
-                scenario_id=scenario.id,
-                route_set_id=scenario.route_set_id,
-                data_version=data_version,
-                years=years,
-                base_coef_by_year=base_coef_by_year,
-                rule_specs=rule_specs,
-                parquet_path=str(parquet_path),
-                mask_cache_dir_path=str(resolved_mask_dir),
-                mart_meta=mart_meta,
-                global_totals=global_totals,
-                filter_options=filter_options,
-                skipped_charge=skipped_charge,
-                routes_without_volume=skipped_volume,
-                include_rule_breakdown=False,
-                consider_turnover_changes=bool(scenario.consider_turnover_changes),
-            ),
+        deferred_job = ScenarioEffectsPandasService._build_deferred_job(
+            scenario=scenario,
+            context=context,
+            years=years,
+            rule_specs=rule_specs,
+            data_version=data_version,
+            global_totals=global_totals,
+            filter_options=filter_options,
+            skipped_charge=skipped_charge,
+            routes_without_volume=skipped_volume,
+            parquet_path=parquet_path,
+            mart_meta=mart_meta,
+            include_rule_breakdown=False,
         )
+        schedule_deferred_full_compute(deferred_job)
     except Exception as exc:
         logger.exception(
             "Scenario warm failed scenario_id=%s change=%s rule_id=%s",

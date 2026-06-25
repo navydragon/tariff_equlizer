@@ -15,6 +15,7 @@ from calculations.domain.services.route_mart_store import MartMeta, MartSidecarV
 from calculations.domain.services.scenario_effects_compact import _COMPUTE_DTYPE
 from calculations.domain.services.scenario_effects_formatting import GlobalTotals
 from calculations.domain.services.tariff_load import ScenarioTariffContext, TariffLoadService
+from scenarios.models import Scenario
 from core.domain.route.turnover_coefficients import TURNOVER_COEF_YEARS
 
 
@@ -44,6 +45,8 @@ class FullComputeArrays:
     rule_meta: list[tuple[int, str]]
     rule_by_year: np.ndarray | None
     turnover_coef: np.ndarray | None = None
+    volume_fallout_by_year: np.ndarray | None = None
+    money_fallout_by_year: np.ndarray | None = None
 
 
 def rule_specs_from_context(
@@ -294,6 +297,9 @@ def compute_arrays_full(
     mask_cache_dir: Path | None = None,
     include_rule_by_year: bool = True,
     consider_turnover_changes: bool = False,
+    scenario: Scenario | None = None,
+    model_rows: list | None = None,
+    dimension_labels: dict[str, list[str]] | None = None,
 ) -> tuple[GlobalTotals, dict[str, int], FullComputeArrays | None]:
     import time
 
@@ -395,6 +401,26 @@ def compute_arrays_full(
         global_totals.rules_by_year[year] = _to_decimal(float(rules_sums[year_index]))
     timings["totals_ms"] = int((time.perf_counter() - t_totals) * 1000)
 
+    volume_fallout_by_year: np.ndarray | None = None
+    money_fallout_by_year: np.ndarray | None = None
+    if scenario is not None and model_rows is not None:
+        from calculations.domain.services.elasticity_fallout_compute import (
+            compute_fallout_arrays,
+        )
+
+        t_fallout = time.perf_counter()
+        volume_fallout_by_year, money_fallout_by_year = compute_fallout_arrays(
+            sidecar,
+            scenario=scenario,
+            years=years,
+            initial_charge=initial,
+            charge_by_year=charge_by_year,
+            turnover_coef=turnover_coef,
+            model_rows=model_rows,
+            dimension_labels=dimension_labels,
+        )
+        timings["elasticity_fallout_ms"] = int((time.perf_counter() - t_fallout) * 1000)
+
     arrays = FullComputeArrays(
         initial=initial,
         base_by_year=base_by_year,
@@ -403,5 +429,7 @@ def compute_arrays_full(
         rule_meta=rule_meta,
         rule_by_year=rule_by_year_arr,
         turnover_coef=turnover_coef if consider_turnover_changes else None,
+        volume_fallout_by_year=volume_fallout_by_year,
+        money_fallout_by_year=money_fallout_by_year,
     )
     return global_totals, timings, arrays

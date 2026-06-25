@@ -1796,9 +1796,19 @@ def route_set_list_api(request):
         page_size = 50
 
     search = (request.GET.get("search") or "").strip() or None
+    include_routes_count = request.GET.get("include_routes_count", "1") not in {
+        "0",
+        "false",
+        "False",
+    }
 
     service = RouteSetService()
-    result, errors = service.list_sets(page=page, page_size=page_size, search=search)
+    result, errors = service.list_sets(
+        page=page,
+        page_size=page_size,
+        search=search,
+        include_routes_count=include_routes_count,
+    )
     if errors:
         return JsonResponse({"success": False, "errors": errors}, status=400)
 

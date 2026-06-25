@@ -47,8 +47,16 @@
           required
           data-scenario-edit-target="routeSetSelect"
           data-scenario-edit-current-route-set-id-value="{{ scenario.route_set_id }}"
+          data-scenario-edit-route-sets-preloaded-value="true"
         >
-          <option value="">Загрузка...</option>
+          {% for route_set in route_sets %}
+          <option
+            value="{{ route_set.id }}"
+            {% if route_set.id == scenario.route_set_id %}selected{% endif %}
+          >{{ route_set.code }} — {{ route_set.name }}</option>
+          {% empty %}
+          <option value="">Нет наборов маршрутов</option>
+          {% endfor %}
         </select>
         <div class="form-text">
           Выберите набор маршрутов, к которому относится сценарий
@@ -101,6 +109,24 @@
         <div class="form-text">
           Если включить — в расчётах эффектов провозная плата и объём перевозок
           умножаются на коэффициенты изменения грузооборота (2025–2030) из набора маршрутов.
+        </div>
+      </div>
+
+      <div class="mb-3">
+        <label class="form-check">
+          <input
+            type="checkbox"
+            class="form-check-input"
+            id="editScenarioConsiderDemandElasticity"
+            name="consider_demand_elasticity"
+            {% if scenario.consider_demand_elasticity %}checked{% endif %}
+          />
+          <span class="form-check-label">Учитывать эластичность спроса</span>
+        </label>
+        <div class="form-text">
+          Влияет на расчёт выпадения объёмов и провозной платы на страницах
+          «Эффект от решений» и «Куб эффектов». Требует набора эластичности
+          и разметки маршрутов при импорте модельных данных.
         </div>
       </div>
 

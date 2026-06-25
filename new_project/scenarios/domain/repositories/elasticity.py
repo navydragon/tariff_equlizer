@@ -117,6 +117,23 @@ class ElasticityRulePointRepository:
             ),
         )
 
+    def list_by_rules(self, rule_ids: list[int]) -> dict[int, list[ElasticityRulePoint]]:
+        """
+        Возвращает точки для набора правил одним запросом, сгруппированные по rule_id.
+
+        Важно: точки в каждой группе отсортированы по (marginality, id).
+        """
+        if not rule_ids:
+            return {}
+        rows = (
+            ElasticityRulePoint.objects.filter(rule_id__in=rule_ids)
+            .order_by("rule_id", "marginality", "id")
+        )
+        grouped: dict[int, list[ElasticityRulePoint]] = {}
+        for point in rows:
+            grouped.setdefault(point.rule_id, []).append(point)
+        return grouped
+
     def get_by_marginality(
         self,
         rule_id: int,

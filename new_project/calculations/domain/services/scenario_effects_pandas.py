@@ -4,6 +4,7 @@ import time
 from decimal import Decimal
 from pathlib import Path
 import pandas as pd
+import numpy as np
 
 from calculations.domain.dto.scenario_effects import ScenarioEffectsComputeResponseDTO
 from calculations.domain.services.scenario_effects_cache import (
@@ -43,6 +44,7 @@ from calculations.domain.services.route_mart_store import (
     MartMeta,
     MartSidecarView,
     load_mart_meta,
+    load_mart_sidecar,
     resolve_light_mart_columns,
     resolve_mart_parquet_path,
 )
@@ -135,15 +137,24 @@ class ScenarioEffectsPandasService:
                     include_rule_breakdown=include_rule_breakdown,
                 )
         else:
-            light_columns = resolve_light_mart_columns(has_rules=bool(context.rules))
-            df, mart_meta, load_timings = self._load_routes_df(
-                scenario,
-                columns=light_columns,
+            parquet_path = resolve_mart_parquet_path(route_set_id=scenario.route_set_id)
+            mart_meta = (
+                load_mart_meta(parquet_path)
+                if parquet_path.is_file()
+                else None
             )
+            # Для корректного применения тарифных правил нужны dim_* и masks из sidecar.
+            # Лёгкий DataFrame (light mart) может не содержать этих колонок → rules_inc становится 0.
+            sidecar, sidecar_timings = load_mart_sidecar(
+                parquet_path,
+                include_charge=True,
+                include_volume=False,
+            )
+            load_timings = dict(sidecar_timings)
             t_load = time.perf_counter()
 
             global_totals, compute_timings = compute_kpi_totals(
-                df,
+                sidecar,
                 years=years,
                 base_coef_by_year=context.base_coef_by_year,
                 rule_specs=rule_specs,
@@ -155,7 +166,7 @@ class ScenarioEffectsPandasService:
             compact_ready = False
             t_compute = time.perf_counter()
 
-            filter_options = self._collect_filter_options(df, mart_meta)
+            filter_options = self._collect_filter_options(sidecar, mart_meta)
             skipped_charge, skipped_volume = self._resolve_route_stats(
                 scenario,
                 mart_meta,
@@ -191,7 +202,7 @@ class ScenarioEffectsPandasService:
                 filter_options=filter_options,
                 skipped_charge=skipped_charge,
                 routes_without_volume=skipped_volume,
-                parquet_path=Path(str(load_timings.get("mart_cache_path") or "")),
+                parquet_path=parquet_path,
                 mart_meta=mart_meta,
                 include_rule_breakdown=include_rule_breakdown,
             )
@@ -325,6 +336,16 @@ class ScenarioEffectsPandasService:
         mart_meta: MartMeta | None,
         include_rule_breakdown: bool = False,
     ) -> DeferredFullComputeJob:
+        from scenarios.domain.repositories.operational_elasticity import (
+            OperationalElasticityRepository,
+        )
+
+        model_rows = []
+        if scenario.consider_demand_elasticity and scenario.elasticity_set_id:
+            model_rows = OperationalElasticityRepository().list_model_routes(
+                scenario.route_set_id,
+            )
+
         return DeferredFullComputeJob(
             cache_key="",
             scenario_id=scenario.id,
@@ -342,6 +363,11 @@ class ScenarioEffectsPandasService:
             routes_without_volume=routes_without_volume,
             include_rule_breakdown=include_rule_breakdown,
             consider_turnover_changes=bool(scenario.consider_turnover_changes),
+            consider_demand_elasticity=bool(scenario.consider_demand_elasticity),
+            elasticity_set_id=scenario.elasticity_set_id,
+            retention_coefficient_mode=scenario.retention_coefficient_mode,
+            consider_enterprise_load=bool(scenario.consider_enterprise_load),
+            model_rows=model_rows,
         )
 
     def _compute_arrays(
@@ -355,6 +381,15 @@ class ScenarioEffectsPandasService:
         data_version: str,
     ) -> tuple[GlobalTotals, dict[str, int], FullComputeArrays | None]:
         rule_specs = rule_specs_from_context(self._tariff_load, context)
+        model_rows = []
+        if scenario.consider_demand_elasticity and scenario.elasticity_set_id:
+            from scenarios.domain.repositories.operational_elasticity import (
+                OperationalElasticityRepository,
+            )
+
+            model_rows = OperationalElasticityRepository().list_model_routes(
+                scenario.route_set_id,
+            )
         return compute_arrays_full(
             sidecar,
             years=years,
@@ -363,6 +398,11 @@ class ScenarioEffectsPandasService:
             route_set_id=scenario.route_set_id,
             mart_meta=mart_meta,
             consider_turnover_changes=bool(scenario.consider_turnover_changes),
+            scenario=scenario,
+            model_rows=model_rows,
+            dimension_labels=(
+                mart_meta.dimension_labels if mart_meta is not None else None
+            ),
         )
 
     @staticmethod
@@ -408,9 +448,20 @@ class ScenarioEffectsPandasService:
         from calculations.domain.services.scenario_effects_compact import (
             build_compact_from_arrays,
         )
+        from calculations.domain.services.route_mart_store import (
+            load_mart_sidecar,
+            resolve_mart_parquet_path,
+        )
+
+        parquet_path = resolve_mart_parquet_path(route_set_id=scenario.route_set_id)
+        mart_sidecar, _ = load_mart_sidecar(
+            parquet_path,
+            include_charge=True,
+            include_volume=True,
+        )
 
         global_totals, timings, arrays = self._compute_arrays(
-            df,
+            mart_sidecar,
             context,
             years,
             scenario=scenario,
@@ -431,6 +482,13 @@ class ScenarioEffectsPandasService:
         )
         timings["compact_prep_ms"] = int((time.perf_counter() - t_compact) * 1000)
         t_build = time.perf_counter()
+        route_ids = None
+        if "id" in df.columns:
+            route_ids = (
+                pd.to_numeric(df["id"], errors="coerce")
+                .fillna(0)
+                .to_numpy(dtype=np.int32, copy=False)
+            )
         compact = build_compact_from_arrays(
             years=years,
             initial=arrays.initial,
@@ -442,7 +500,10 @@ class ScenarioEffectsPandasService:
             dimensions=dimensions,
             dimension_labels=dimension_labels,
             volume=volume,
+            route_ids=route_ids,
             turnover_coef=arrays.turnover_coef,
+            volume_fallout_by_year=arrays.volume_fallout_by_year,
+            money_fallout_by_year=arrays.money_fallout_by_year,
         )
         timings["compact_build_ms"] = int((time.perf_counter() - t_build) * 1000)
         return compact, global_totals, timings

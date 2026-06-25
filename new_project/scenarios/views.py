@@ -11,6 +11,7 @@ from django.shortcuts import render
 from django.urls import reverse
 from django.views.decorators.http import require_http_methods
 
+from core.domain.route.services import RouteSetService
 from core.domain.services.app_settings import AppSettingsService
 from core.domain.cargo.formatting import format_etsng_code
 from core.models import Route
@@ -99,6 +100,7 @@ def scenario_list_api(request):
                 "author_name": s.author_name,
                 "include_base_tariff_decisions": s.include_base_tariff_decisions,
                 "consider_turnover_changes": s.consider_turnover_changes,
+                "consider_demand_elasticity": s.consider_demand_elasticity,
                 "consider_enterprise_load": s.consider_enterprise_load,
                 "retention_coefficient_mode": s.retention_coefficient_mode,
             }
@@ -196,6 +198,7 @@ def scenario_update_api(request, scenario_id):
         export_price_mode=data.get("export_price_mode"),
         include_base_tariff_decisions=data.get("include_base_tariff_decisions"),
         consider_turnover_changes=data.get("consider_turnover_changes"),
+        consider_demand_elasticity=data.get("consider_demand_elasticity"),
         consider_enterprise_load=data.get("consider_enterprise_load"),
         retention_coefficient_mode=data.get("retention_coefficient_mode"),
     )
@@ -224,6 +227,7 @@ def scenario_update_api(request, scenario_id):
             "export_price_mode": scenario.export_price_mode,
             "include_base_tariff_decisions": scenario.include_base_tariff_decisions,
             "consider_turnover_changes": scenario.consider_turnover_changes,
+            "consider_demand_elasticity": scenario.consider_demand_elasticity,
             "consider_enterprise_load": scenario.consider_enterprise_load,
             "retention_coefficient_mode": scenario.retention_coefficient_mode,
             "author_id": scenario.author_id,
@@ -329,6 +333,13 @@ def scenario_edit_view(request, scenario_id):
     export_price_modes = list(Scenario.ExportPriceMode.choices)
     retention_coefficient_modes = list(Scenario.RetentionCoefficientMode.choices)
 
+    route_sets_result, _ = RouteSetService().list_sets(
+        page=1,
+        page_size=1000,
+        include_routes_count=False,
+    )
+    route_sets = route_sets_result.items if route_sets_result else []
+
     return render(
         request,
         "scenarios/edit_scenario.html",
@@ -339,6 +350,7 @@ def scenario_edit_view(request, scenario_id):
             "price_change_modes": PRICE_CHANGE_MODES,
             "export_price_modes": export_price_modes,
             "retention_coefficient_modes": retention_coefficient_modes,
+            "route_sets": route_sets,
         },
     )
 

@@ -769,6 +769,20 @@ class RouteWriteDTOTests(TestCase):
 
 
 class RouteSetServiceTests(TestCase):
+    def test_list_sets_without_routes_count(self) -> None:
+        RouteSet.objects.create(name="Alpha", code="A_TEST")
+        RouteSet.objects.create(name="Beta", code="B_TEST")
+        service = RouteSetService()
+
+        result, errors = service.list_sets(include_routes_count=False)
+        self.assertEqual(errors, [])
+        self.assertIsNotNone(result)
+        assert result is not None
+        codes = {item.code for item in result.items}
+        self.assertIn("A_TEST", codes)
+        self.assertIn("B_TEST", codes)
+        self.assertTrue(all(item.routes_count == 0 for item in result.items))
+
     def test_create_set_rejects_duplicate_code(self) -> None:
         RouteSet.objects.create(name="Existing", code="DUP_CODE")
         service = RouteSetService()

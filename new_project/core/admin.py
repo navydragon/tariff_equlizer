@@ -180,6 +180,11 @@ class RouteSetAdmin(admin.ModelAdmin):
 
 @admin.register(Route)
 class RouteAdmin(admin.ModelAdmin):
+    # На больших таблицах админка обычно тормозит из-за полного COUNT(*) и
+    # построения списков значений для связанных list_filter.
+    show_full_result_count = False
+    list_per_page = 50
+    ordering = ("route_set", "id")
     list_display = (
         "route_set",
         "route_code",
@@ -190,18 +195,35 @@ class RouteAdmin(admin.ModelAdmin):
         "freight_turnover_tkm",
         "freight_charge_rub",
     )
-    list_filter = (
+    list_select_related = (
         "route_set",
         "cargo",
-        "shipper",
-        "origin_station__railroad",
-        "destination_station__railroad",
+        "origin_station",
+        "destination_station",
         "wagon_kind",
         "shipment_type",
+        "message_type",
+        "shipper",
+    )
+    list_filter = (
+        "route_set",
+        "is_model",
+        # Остальные связанные фильтры (cargo/станции/и т.д.) на больших объёмах
+        # резко замедляют рендер списка — их лучше искать через search/autocomplete.
         "shipment_category",
         "park_type",
     )
-    autocomplete_fields = ("shipper",)
+    autocomplete_fields = (
+        "route_set",
+        "cargo",
+        "origin_station",
+        "destination_station",
+        "wagon_kind",
+        "shipment_type",
+        "message_type",
+        "shipper",
+        "model_route",
+    )
     search_fields = (
         "route_code",
         "cargo__name",

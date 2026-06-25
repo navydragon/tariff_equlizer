@@ -93,7 +93,10 @@ def build_compact_from_arrays(
     dimensions: dict[str, np.ndarray] | None = None,
     dimension_labels: dict[str, list[str]] | None = None,
     volume: np.ndarray | None = None,
+    route_ids: np.ndarray | None = None,
     turnover_coef: np.ndarray | None = None,
+    volume_fallout_by_year: np.ndarray | None = None,
+    money_fallout_by_year: np.ndarray | None = None,
 ) -> CompactRouteEffects:
     resolved_dimensions: dict[str, np.ndarray] = {}
     resolved_labels: dict[str, list[str]] = {}
@@ -123,6 +126,12 @@ def build_compact_from_arrays(
             raise ValueError("volume or df is required")
         volume = extract_volume_array(df)
 
+    if route_ids is None and df is not None:
+        if "route_id" in df.columns:
+            route_ids = df["route_id"].to_numpy(dtype=np.int32, copy=False)
+        elif "id" in df.columns:
+            route_ids = df["id"].to_numpy(dtype=np.int32, copy=False)
+
     volume_by_year: np.ndarray | None = None
     if turnover_coef is not None:
         volume_by_year = _as_float32(volume[:, None] * turnover_coef)
@@ -131,6 +140,7 @@ def build_compact_from_arrays(
         years=years,
         dimensions=resolved_dimensions,
         dimension_labels=resolved_labels,
+        route_ids=route_ids,
         baseline_rub=_as_float32(initial),
         volume_tons=_as_float32(volume),
         base_by_year=_as_float32(base_by_year),
@@ -143,6 +153,16 @@ def build_compact_from_arrays(
             else None
         ),
         volume_by_year=volume_by_year,
+        volume_fallout_by_year=(
+            _as_float32(volume_fallout_by_year)
+            if volume_fallout_by_year is not None
+            else None
+        ),
+        money_fallout_by_year=(
+            _as_float32(money_fallout_by_year)
+            if money_fallout_by_year is not None
+            else None
+        ),
     )
 
 
@@ -248,6 +268,82 @@ def aggregate_compact_buckets(
         )
 
     return buckets
+
+
+def aggregate_compact_fallout_totals(
+    compact: CompactRouteEffects,
+    *,
+    year: int,
+    prev_year: int,
+    cargo_groups: list[str],
+    holdings: list[str],
+) -> tuple[Decimal, Decimal, Decimal, Decimal]:
+    if (
+        compact.volume_fallout_by_year is None
+        or compact.money_fallout_by_year is None
+    ):
+        return Decimal("0"), Decimal("0"), Decimal("0"), Decimal("0")
+
+    year_index = compact.years.index(year)
+    prev_year_index = compact.years.index(prev_year)
+    mask = _build_mask(
+        compact,
+        cargo_filter=set(cargo_groups) if cargo_groups else None,
+        holding_filter=set(holdings) if holdings else None,
+    )
+    volume_fallout = Decimal(
+        str(float(compact.volume_fallout_by_year[mask, year_index].sum())),
+    )
+    money_fallout = Decimal(
+        str(float(compact.money_fallout_by_year[mask, year_index].sum())),
+    )
+    baseline_volume = Decimal(str(float(compact.volume_tons[mask].sum())))
+    prev_charge = Decimal(
+        str(float(compact.charge_by_year[mask, prev_year_index].sum())),
+    )
+    return volume_fallout, money_fallout, baseline_volume, prev_charge
+
+
+def aggregate_compact_fallout_by_group(
+    compact: CompactRouteEffects,
+    *,
+    year: int,
+    group_by: str,
+    group_by_inner: str,
+    cargo_groups: list[str],
+    holdings: list[str],
+) -> dict[tuple[str, ...], tuple[Decimal, Decimal]]:
+    if (
+        compact.volume_fallout_by_year is None
+        or compact.money_fallout_by_year is None
+    ):
+        return {}
+
+    year_index = compact.years.index(year)
+    volume_buckets = aggregate_compact_value(
+        compact,
+        values=compact.volume_fallout_by_year[:, year_index],
+        group_by=group_by,
+        group_by_inner=group_by_inner,
+        cargo_groups=cargo_groups,
+        holdings=holdings,
+    )
+    money_buckets = aggregate_compact_value(
+        compact,
+        values=compact.money_fallout_by_year[:, year_index],
+        group_by=group_by,
+        group_by_inner=group_by_inner,
+        cargo_groups=cargo_groups,
+        holdings=holdings,
+    )
+    keys = set(volume_buckets) | set(money_buckets)
+    return {
+        key: (
+            volume_buckets.get(key, Decimal("0")),
+            money_buckets.get(key, Decimal("0")),
+        )
+        for key in keys
+    }
 
 
 def aggregate_compact_value(

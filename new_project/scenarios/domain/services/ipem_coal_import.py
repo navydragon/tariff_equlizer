@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from collections.abc import Callable
 from pathlib import Path
 
 from core.management.ipem_economics import (
@@ -85,6 +86,7 @@ def import_ipem_coal_2026_bundle(
     *,
     dry_run: bool = False,
     attach_elasticity: bool = True,
+    progress: Callable[[str], None] | None = None,
 ) -> IpemCoal2026BundleResult:
     seed_result: ElasticitySeedResult | None = None
     if attach_elasticity:
@@ -100,6 +102,7 @@ def import_ipem_coal_2026_bundle(
         xlsx_path,
         route_set,
         dry_run=dry_run,
+        progress=progress,
     )
 
     matching = ElasticityMatchingStats()

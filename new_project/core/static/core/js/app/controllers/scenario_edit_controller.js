@@ -23,12 +23,15 @@ import { renderErrors } from "../lib/errors.js";
       scenarioId: Number,
       updateUrl: String,
       routeSetListUrl: String,
+      routeSetsPreloaded: Boolean,
       tabs: Array,
     };
 
     connect() {
       this.initTabs();
-      this.loadRouteSets();
+      if (!this.routeSetsPreloadedValue) {
+        this.loadRouteSets();
+      }
     }
 
     // === Tabs (hash sync) ===
@@ -90,7 +93,9 @@ import { renderErrors } from "../lib/errors.js";
       const url = this.routeSetListUrlValue;
       if (!url) return;
 
-      const { data } = await fetchJson(url + "?page=1&page_size=1000", {
+      const { data } = await fetchJson(
+        url + "?page=1&page_size=1000&include_routes_count=0",
+        {
         method: "GET",
       });
 
@@ -146,6 +151,13 @@ import { renderErrors } from "../lib/errors.js";
       return checkbox ? !!checkbox.checked : false;
     }
 
+    collectConsiderDemandElasticity() {
+      const checkbox = this.element.querySelector(
+        "#editScenarioConsiderDemandElasticity",
+      );
+      return checkbox ? !!checkbox.checked : false;
+    }
+
     collectRetentionCoefficientMode() {
       const checked = this.element.querySelector(
         'input.btn-check[name="retention_coefficient_mode"]:checked',
@@ -193,6 +205,7 @@ import { renderErrors } from "../lib/errors.js";
         price_change_settings: this.collectPriceChangeSettings(),
         export_price_mode: this.collectExportPriceMode(),
         consider_turnover_changes: this.collectConsiderTurnoverChanges(),
+        consider_demand_elasticity: this.collectConsiderDemandElasticity(),
         consider_enterprise_load: this.collectConsiderEnterpriseLoad(),
         retention_coefficient_mode: this.collectRetentionCoefficientMode(),
       };

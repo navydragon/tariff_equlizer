@@ -29,13 +29,18 @@ class RouteSetService:
         page: int = 1,
         page_size: int = 50,
         search: Optional[str] = None,
+        *,
+        include_routes_count: bool = True,
     ) -> tuple[Optional[RouteSetListResultDTO], list[str]]:
         if page <= 0:
             page = 1
         if page_size <= 0:
             page_size = 50
 
-        qs = self.repository.list_queryset(search)
+        qs = self.repository.list_queryset(
+            search,
+            include_routes_count=include_routes_count,
+        )
         paginator = Paginator(qs, page_size)
         try:
             page_obj = paginator.page(page)
@@ -45,9 +50,11 @@ class RouteSetService:
         items = [
             RouteSetDTO.from_model(
                 rs,
-                routes_count=getattr(rs, "_routes_count", None)
-                if getattr(rs, "_routes_count", None) is not None
-                else self.repository.routes_count(rs.id),
+                routes_count=(
+                    getattr(rs, "_routes_count", 0)
+                    if include_routes_count
+                    else 0
+                ),
             )
             for rs in page_obj.object_list
         ]

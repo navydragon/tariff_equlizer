@@ -113,9 +113,14 @@ class EffectTableRowDTO:
     rules_pct: str
     total_rub: str
     total_pct: str
+    row_kind: str = "tariff"
+    volume_mln_t: str | None = None
+    volume_pct: str | None = None
+    fallout_bln: str | None = None
+    fallout_volume_mln_t: str | None = None
 
     def to_api_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "label": self.label,
             "is_subtotal": self.is_subtotal,
             "base_rub": self.base_rub,
@@ -124,7 +129,17 @@ class EffectTableRowDTO:
             "rules_pct": self.rules_pct,
             "total_rub": self.total_rub,
             "total_pct": self.total_pct,
+            "row_kind": self.row_kind,
         }
+        if self.volume_mln_t is not None:
+            payload["volume_mln_t"] = self.volume_mln_t
+        if self.volume_pct is not None:
+            payload["volume_pct"] = self.volume_pct
+        if self.fallout_bln is not None:
+            payload["fallout_bln"] = self.fallout_bln
+        if self.fallout_volume_mln_t is not None:
+            payload["fallout_volume_mln_t"] = self.fallout_volume_mln_t
+        return payload
 
 
 @dataclass(frozen=True)
@@ -169,12 +184,17 @@ class ScenarioEffectsComputeResponseDTO:
 class ScenarioEffectsAggregateResponseDTO:
     table_rows: list[EffectTableRowDTO]
     chart: EffectChartDTO
+    show_fallout_column: bool = False
 
     def to_api_dict(self) -> dict[str, Any]:
-        return {
-            "table": {"rows": [row.to_api_dict() for row in self.table_rows]},
+        payload = {
+            "table": {
+                "rows": [row.to_api_dict() for row in self.table_rows],
+                "show_fallout": self.show_fallout_column,
+            },
             "chart": self.chart.to_api_dict(),
         }
+        return payload
 
 
 @dataclass(frozen=True)

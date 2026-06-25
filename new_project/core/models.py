@@ -707,6 +707,23 @@ class Route(models.Model):
         related_name="linked_operational_routes",
     )
 
+    class ElasticitySource(models.TextChoices):
+        NONE = "none", "Не рассчитывается"
+        DIRECT_MODEL = "direct_model", "Модельный маршрут"
+        HOLDING_AGGREGATE = "holding_aggregate", "Среднее по холдингу"
+        CARGO_GROUP_AGGREGATE = "cargo_group_aggregate", "Среднее по группе груза"
+
+    skip_elasticity = models.BooleanField(
+        "Не учитывать эластичность",
+        default=True,
+    )
+    elasticity_source = models.CharField(
+        "Источник эластичности",
+        max_length=32,
+        choices=ElasticitySource.choices,
+        default=ElasticitySource.NONE,
+    )
+
     objects = RouteManager()
 
     class Meta:

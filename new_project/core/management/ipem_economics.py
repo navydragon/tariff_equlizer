@@ -5,7 +5,7 @@ import csv
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any, Iterable, Optional
+from typing import Any, Callable, Iterable, Optional
 
 from core.domain.cargo.formatting import format_etsng_code, parse_etsng_code
 from core.models import Cargo, MessageType, Route, RouteSet, ShipmentType, Shipper, Station, WagonKind
@@ -206,6 +206,10 @@ class IpemCoal2026ImportResult:
     total_rows: int = 0
     created_model_routes: int = 0
     linked_operational_routes: int = 0
+    elasticity_direct_model: int = 0
+    elasticity_holding_aggregate: int = 0
+    elasticity_cargo_group_aggregate: int = 0
+    elasticity_skipped: int = 0
     skipped_rows: int = 0
     skip_reasons: list[str] = field(default_factory=list)
     duplicate_link_key_warnings: list[str] = field(default_factory=list)
@@ -877,6 +881,7 @@ def import_ipem_coal_2026_model_routes(
     route_set: RouteSet,
     *,
     dry_run: bool = False,
+    progress: Callable[[str], None] | None = None,
 ) -> IpemCoal2026ImportResult:
     result = IpemCoal2026ImportResult()
     ipem_rows = load_ipem_coal_2026_xlsx(xlsx_path)
@@ -942,6 +947,18 @@ def import_ipem_coal_2026_model_routes(
         created,
     )
     sync_model_routes_cargo_izpod_from_operational(route_set, created)
+    from scenarios.domain.services.operational_elasticity import (
+        assign_operational_elasticity_sources,
+    )
+
+    elasticity_stats = assign_operational_elasticity_sources(
+        route_set,
+        progress=progress,
+    )
+    result.elasticity_direct_model = elasticity_stats.direct_model
+    result.elasticity_holding_aggregate = elasticity_stats.holding_aggregate
+    result.elasticity_cargo_group_aggregate = elasticity_stats.cargo_group_aggregate
+    result.elasticity_skipped = elasticity_stats.skipped
     return result
 
 

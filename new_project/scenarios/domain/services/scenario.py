@@ -137,6 +137,8 @@ class ScenarioService:
             update_data["include_base_tariff_decisions"] = dto.include_base_tariff_decisions
         if dto.consider_turnover_changes is not None:
             update_data["consider_turnover_changes"] = dto.consider_turnover_changes
+        if dto.consider_demand_elasticity is not None:
+            update_data["consider_demand_elasticity"] = dto.consider_demand_elasticity
         if dto.consider_enterprise_load is not None:
             update_data["consider_enterprise_load"] = dto.consider_enterprise_load
         if dto.retention_coefficient_mode is not None:

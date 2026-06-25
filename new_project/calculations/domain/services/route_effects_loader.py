@@ -29,6 +29,8 @@ from core.models import (
     WagonKind,
 )
 
+_POSTGRES_COPY_CSV_PARSE_OPTIONS = pacsv.ParseOptions(newlines_in_values=True)
+
 
 def _read_sql(sql: str, params: list | tuple | None = None) -> pd.DataFrame:
     """read_sql через DB-API соединение Django (без предупреждения pandas)."""
@@ -69,6 +71,9 @@ def _build_routes_sql(*, route_set_id: int | None = None, parameterized: bool = 
             r.id,
             r.freight_charge_rub,
             r.transport_volume_tons,
+            r.skip_elasticity,
+            r.elasticity_source,
+            r.model_route_id,
             r.turnover_change_coef_2025,
             r.turnover_change_coef_2026,
             r.turnover_change_coef_2027,
@@ -89,6 +94,17 @@ def _build_routes_sql(*, route_set_id: int | None = None, parameterized: bool = 
             CAST(c.code AS TEXT) AS cargo_code,
             cg.name AS cargo_group,
             CAST(cg.code AS TEXT) AS cargo_group_code,
+            c.cargo_group_id AS cargo_group_id,
+            mr.cargo_id AS mr_cargo_id,
+            mr_c.cargo_group_id AS mr_cargo_group_id,
+            mr.message_type_id AS mr_message_type_id,
+            mr.market_price_per_ton AS mr_market_price_per_ton,
+            mr.production_cost_per_ton AS mr_production_cost_per_ton,
+            mr.total_cost_per_ton AS mr_total_cost_per_ton,
+            mr.rzd_cost_total_per_ton AS mr_rzd_cost_total_per_ton,
+            mr.operators_cost_per_ton AS mr_operators_cost_per_ton,
+            mr.transshipment_cost_per_ton AS mr_transshipment_cost_per_ton,
+            mr.enterprise_load_coefficient AS mr_enterprise_load_coefficient,
             origin_rr.code AS origin_railroad_code,
             origin_rr.direction AS direction_raw,
             dest_rr.code AS destination_railroad_code,
@@ -111,6 +127,8 @@ def _build_routes_sql(*, route_set_id: int | None = None, parameterized: bool = 
         LEFT JOIN {wagon_kind_table} wk ON r.wagon_kind_id = wk.id
         LEFT JOIN {shipment_type_table} st ON r.shipment_type_id = st.id
         LEFT JOIN {message_type_table} mt ON r.message_type_id = mt.id
+        LEFT JOIN {route_table} mr ON r.model_route_id = mr.id
+        LEFT JOIN {cargo_table} mr_c ON mr.cargo_id = mr_c.code
         WHERE r.route_set_id = {route_set_filter}
           AND r.is_model = false
           AND r.freight_charge_rub IS NOT NULL
@@ -122,6 +140,17 @@ def _coerce_route_mart_numeric_columns(df: pd.DataFrame) -> None:
     for column in (
         "freight_charge_rub",
         "transport_volume_tons",
+        "cargo_group_id",
+        "mr_cargo_id",
+        "mr_cargo_group_id",
+        "mr_message_type_id",
+        "mr_market_price_per_ton",
+        "mr_production_cost_per_ton",
+        "mr_total_cost_per_ton",
+        "mr_rzd_cost_total_per_ton",
+        "mr_operators_cost_per_ton",
+        "mr_transshipment_cost_per_ton",
+        "mr_enterprise_load_coefficient",
         "distance_loaded_km",
         "distance_belt_midpoint_km",
         *(
@@ -205,7 +234,7 @@ def _fetch_routes_dataframe_postgres_copy(
         return pd.DataFrame(), timings
 
     buffer.seek(0)
-    table = pacsv.read_csv(buffer)
+    table = pacsv.read_csv(buffer, parse_options=_POSTGRES_COPY_CSV_PARSE_OPTIONS)
     df = table.to_pandas(
         timestamp_as_object=True,
         strings_to_categorical=False,

@@ -423,6 +423,25 @@ class ScenarioEffectsServiceTests(TariffLoadServiceTestMixin, TestCase):
         _df, timings = fetch_routes_dataframe_timed(self.route_set.id)
         self.assertEqual(timings.get("routes_load_mode"), "legacy")
 
+    def test_fetch_routes_postgres_copy_csv_allows_embedded_newlines(self) -> None:
+        import io
+
+        import pyarrow.csv as pacsv
+
+        from calculations.domain.services.route_effects_loader import (
+            _POSTGRES_COPY_CSV_PARSE_OPTIONS,
+        )
+
+        buffer = io.BytesIO(
+            (
+                "id,shipper_holding\n"
+                '1,"АО ""Металлургический"" \r\n(ООО ""УГМК-Холдинг"")"\n'
+            ).encode("utf-8"),
+        )
+        table = pacsv.read_csv(buffer, parse_options=_POSTGRES_COPY_CSV_PARSE_OPTIONS)
+        self.assertEqual(table.num_rows, 1)
+        self.assertEqual(table.num_columns, 2)
+
     def test_fetch_routes_postgres_copy_matches_legacy(self) -> None:
         from django.db import connection
 
@@ -1411,6 +1430,35 @@ class ScenarioEffectsPandasParityTests(TariffLoadServiceTestMixin, TestCase):
         rebuilt_keys = set(load_masks_npz(parquet_path))
         self.assertNotIn("cargo_code", rebuilt_keys)
         self.assertTrue(rebuilt_keys.issubset(set(MART_RULE_MASK_SIDECAR_COLUMNS)))
+
+    def test_elasticity_sidecar_uses_npy_columns(self) -> None:
+        import shutil
+
+        from calculations.domain.services.route_mart_store import (
+            MART_ELASTICITY_SIDECAR_COLUMNS,
+            _list_elasticity_npy_columns,
+            elasticity_npz_path,
+            resolve_mart_parquet_path,
+            route_mart_cache_dir,
+        )
+
+        self._setup_btd("1.1000")
+        scenario = Scenario.objects.select_related("route_set").get(
+            pk=self.scenario.pk,
+        )
+        shutil.rmtree(
+            route_mart_cache_dir(route_set_id=scenario.route_set_id),
+            ignore_errors=True,
+        )
+        self.pandas_service.compute_pandas(
+            scenario=scenario,
+            user_id=self.user.id,
+        )
+        parquet_path = resolve_mart_parquet_path(route_set_id=scenario.route_set_id)
+        elasticity_keys = _list_elasticity_npy_columns(parquet_path)
+        self.assertTrue(elasticity_keys)
+        self.assertTrue(elasticity_keys.issubset(set(MART_ELASTICITY_SIDECAR_COLUMNS)))
+        self.assertFalse(elasticity_npz_path(parquet_path).is_file())
 
     def test_prewarm_rule_mask_on_create(self) -> None:
         from calculations.domain.services.route_effects_loader import (
@@ -3637,6 +3685,61 @@ class TariffRulesCacheAuditTests(TariffLoadServiceTestMixin, TestCase):
             Decimal("0"),
         )
 
+    def test_warm_after_rule_change_passes_elasticity_to_deferred_job(self) -> None:
+        from unittest.mock import patch
+
+        from calculations.domain.services.scenario_effects_warm import (
+            warm_scenario_after_rule_change,
+        )
+        from calculations.domain.services.route_effects_loader import (
+            fetch_routes_dataframe_cached_timed,
+        )
+
+        category = BTDCategory.objects.create(
+            name="BTD elastic warm",
+            scenario=self.scenario,
+            position=1,
+        )
+        BTDCategoryValue.objects.create(
+            scenario=self.scenario,
+            category=category,
+            year=2025,
+            value=Decimal("1.0000"),
+        )
+        BTDCategoryValue.objects.create(
+            scenario=self.scenario,
+            category=category,
+            year=2026,
+            value=Decimal("1.1000"),
+        )
+        self.route.freight_charge_rub = Decimal("1000000.00")
+        self.route.save(update_fields=["freight_charge_rub"])
+        fetch_routes_dataframe_cached_timed(self.route_set.id)
+
+        self.scenario.consider_demand_elasticity = True
+        self.scenario.retention_coefficient_mode = "relative_to_base"
+        self.scenario.save(
+            update_fields=[
+                "consider_demand_elasticity",
+                "retention_coefficient_mode",
+            ],
+        )
+
+        with patch(
+            "calculations.domain.services.scenario_effects_warm.schedule_deferred_full_compute",
+        ) as schedule_mock:
+            warm_scenario_after_rule_change(
+                scenario_id=self.scenario.id,
+                change="update",
+                rule_id=None,
+                mask_changed=False,
+            )
+
+        schedule_mock.assert_called_once()
+        job = schedule_mock.call_args.args[0]
+        self.assertTrue(job.consider_demand_elasticity)
+        self.assertEqual(job.retention_coefficient_mode, "relative_to_base")
+
     def test_ten_rules_mask_cache_hit(self) -> None:
         from calculations.domain.services.route_effects_loader import (
             fetch_routes_dataframe_cached_timed,
@@ -3810,3 +3913,125 @@ class TurnoverEffectsComputeTests(TestCase):
             rules=[],
         )
         self.assertNotEqual(version_off, version_on)
+
+
+class DemandElasticityEffectsTests(TariffLoadServiceTestMixin, TestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.client = Client()
+        self.client.force_login(self.user)
+        category = BTDCategory.objects.create(
+            name="Индексация",
+            scenario=self.scenario,
+            position=1,
+        )
+        BTDCategoryValue.objects.create(
+            scenario=self.scenario,
+            category=category,
+            year=2025,
+            value=Decimal("1.0000"),
+        )
+        BTDCategoryValue.objects.create(
+            scenario=self.scenario,
+            category=category,
+            year=2026,
+            value=Decimal("1.1000"),
+        )
+        self.route.freight_charge_rub = Decimal("1000000000.00")
+        self.route.transport_volume_tons = Decimal("1000000")
+        self.route.save(
+            update_fields=["freight_charge_rub", "transport_volume_tons"],
+        )
+
+    def test_compute_scenario_data_version_depends_on_elasticity_flag(self) -> None:
+        from calculations.domain.services.scenario_effects_cache import (
+            compute_scenario_data_version,
+        )
+
+        base_coef = {2025: Decimal("1"), 2026: Decimal("1")}
+        version_off = compute_scenario_data_version(
+            scenario=self.scenario,
+            base_coef_by_year=base_coef,
+            rules=[],
+        )
+        self.scenario.consider_demand_elasticity = True
+        self.scenario.save(update_fields=["consider_demand_elasticity"])
+        version_on = compute_scenario_data_version(
+            scenario=self.scenario,
+            base_coef_by_year=base_coef,
+            rules=[],
+        )
+        self.assertNotEqual(version_off, version_on)
+
+    def test_aggregate_exposes_fallout_rows_when_flag_enabled(self) -> None:
+        self.scenario.consider_demand_elasticity = True
+        self.scenario.save(update_fields=["consider_demand_elasticity"])
+
+        compute_response = self.client.post(
+            reverse("calculations:scenario_effects_compute_pandas_api"),
+            data=json.dumps({"scenario_id": self.scenario.id}),
+            content_type="application/json",
+        )
+        cache_key = compute_response.json()["cache_key"]
+        get_payload_ready(cache_key)
+
+        aggregate_response = self.client.post(
+            reverse("calculations:scenario_effects_aggregate_api"),
+            data=json.dumps(
+                {
+                    "scenario_id": self.scenario.id,
+                    "cache_key": cache_key,
+                    "year": 2026,
+                    "group_by": "cargo_group",
+                    "group_by_inner": "none",
+                },
+            ),
+            content_type="application/json",
+        )
+        payload = aggregate_response.json()
+        self.assertTrue(payload["success"])
+        self.assertTrue(payload["table"]["show_fallout"])
+        tariff_rows = [
+            row for row in payload["table"]["rows"] if row.get("row_kind", "tariff") == "tariff"
+        ]
+        self.assertGreater(len(tariff_rows), 1)
+        self.assertIn("fallout_bln", tariff_rows[0])
+        self.assertIn("fallout_volume_mln_t", tariff_rows[0])
+        row_kinds = {row["row_kind"] for row in payload["table"]["rows"]}
+        self.assertNotIn("volume_fallout", row_kinds)
+        self.assertNotIn("money_fallout", row_kinds)
+
+    def test_cube_includes_fallout_slices_when_flag_enabled(self) -> None:
+        self.scenario.consider_demand_elasticity = True
+        self.scenario.save(update_fields=["consider_demand_elasticity"])
+
+        compute_response = self.client.post(
+            reverse("calculations:scenario_effects_compute_pandas_api"),
+            data=json.dumps(
+                {
+                    "scenario_id": self.scenario.id,
+                    "include_rule_breakdown": True,
+                },
+            ),
+            content_type="application/json",
+        )
+        cache_key = compute_response.json()["cache_key"]
+        get_payload_ready(cache_key)
+
+        cube_response = self.client.post(
+            reverse("calculations:scenario_effects_cube_api"),
+            data=json.dumps(
+                {
+                    "scenario_id": self.scenario.id,
+                    "cache_key": cache_key,
+                    "group_by": "cargo_group",
+                    "group_by_inner": "none",
+                },
+            ),
+            content_type="application/json",
+        )
+        payload = cube_response.json()
+        self.assertTrue(payload["success"])
+        effect_labels = {row["effect_label"] for row in payload["table"]["rows"]}
+        self.assertIn("Выпадение объёмов (млн т)", effect_labels)
+        self.assertIn("Выпадение доходов", effect_labels)

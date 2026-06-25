@@ -67,6 +67,10 @@ class Scenario(models.Model):
         "Учитывать изменения грузооборота",
         default=False,
     )
+    consider_demand_elasticity = models.BooleanField(
+        "Учитывать эластичность спроса",
+        default=False,
+    )
     consider_enterprise_load = models.BooleanField(
         "Учитывать загрузку предприятия",
         default=True,

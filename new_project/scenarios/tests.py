@@ -118,6 +118,66 @@ class BTDCategoryServiceTests(TestCase):
         self.assertEqual(positions, [("Категория 1", 1), ("Категория 3", 2)])
 
 
+class ElasticityMatchingPointsIndexTests(TestCase):
+    def test_lookup_coefficient_for_marginality_uses_floor_point(self):
+        from dataclasses import dataclass
+
+        from scenarios.domain.utils.elasticity_matching import (
+            build_points_index,
+            lookup_coefficient_for_marginality,
+        )
+
+        @dataclass(frozen=True)
+        class _Point:
+            marginality: Decimal
+            coefficient: Decimal
+
+        class _Rule:
+            def __init__(self, rule_id: int):
+                self.id = rule_id
+
+        rule = _Rule(10)  # type: ignore[assignment]
+        points = [
+            _Point(Decimal("0.10"), Decimal("0.90")),
+            _Point(Decimal("0.20"), Decimal("0.80")),
+            _Point(Decimal("0.50"), Decimal("0.70")),
+        ]
+        points_index = build_points_index({10: points})
+
+        self.assertEqual(
+            lookup_coefficient_for_marginality(
+                rule,  # type: ignore[arg-type]
+                Decimal("0.05"),
+                points_index=points_index,
+            ),
+            Decimal("0.90"),
+        )
+        self.assertEqual(
+            lookup_coefficient_for_marginality(
+                rule,  # type: ignore[arg-type]
+                Decimal("0.20"),
+                points_index=points_index,
+            ),
+            Decimal("0.80"),
+        )
+        self.assertEqual(
+            lookup_coefficient_for_marginality(
+                rule,  # type: ignore[arg-type]
+                Decimal("0.49"),
+                points_index=points_index,
+            ),
+            Decimal("0.80"),
+        )
+        self.assertEqual(
+            lookup_coefficient_for_marginality(
+                rule,  # type: ignore[arg-type]
+                Decimal("0.99"),
+                points_index=points_index,
+            ),
+            Decimal("0.70"),
+        )
+
+
 class BTDCategoryValueServiceTests(TestCase):
     def setUp(self) -> None:
         self.user = User.objects.create_user(
@@ -651,6 +711,19 @@ class PriceChangeSettingServiceTests(TestCase):
 
         self.scenario.refresh_from_db()
         self.assertTrue(self.scenario.consider_turnover_changes)
+
+    def test_update_scenario_saves_consider_demand_elasticity(self):
+        scenario_service = ScenarioService()
+        from scenarios.domain.dto import UpdateScenarioDTO
+
+        dto = UpdateScenarioDTO(consider_demand_elasticity=True)
+        updated, errors = scenario_service.update_scenario(self.scenario.id, dto, self.user)
+        self.assertFalse(errors)
+        self.assertIsNotNone(updated)
+        self.assertTrue(updated.consider_demand_elasticity)
+
+        self.scenario.refresh_from_db()
+        self.assertTrue(self.scenario.consider_demand_elasticity)
 
     def test_copy_scenario_copies_consider_turnover_changes(self):
         self.scenario.consider_turnover_changes = True

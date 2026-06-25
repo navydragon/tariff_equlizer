@@ -17,8 +17,11 @@ from calculations.domain.services.scenario_effects_formatting import GlobalTotal
 from core.domain.cargo.ordering import normalize_filter_options
 
 BASELINE_RUB_FILENAME = "baseline_rub.npy"
+ROUTE_IDS_FILENAME = "route_ids.npy"
 VOLUME_TONS_FILENAME = "volume_tons.npy"
 VOLUME_BY_YEAR_FILENAME = "volume_by_year.npy"
+VOLUME_FALLOUT_BY_YEAR_FILENAME = "volume_fallout_by_year.npy"
+MONEY_FALLOUT_BY_YEAR_FILENAME = "money_fallout_by_year.npy"
 BASE_BY_YEAR_FILENAME = "base_by_year.npy"
 RULES_BY_YEAR_FILENAME = "rules_by_year.npy"
 CHARGE_BY_YEAR_FILENAME = "charge_by_year.npy"
@@ -75,8 +78,20 @@ def _compact_arrays_for_store(compact: CompactRouteEffects) -> dict[str, np.ndar
         RULES_BY_YEAR_FILENAME: compact.rules_by_year.astype(np.float32, copy=False),
         CHARGE_BY_YEAR_FILENAME: compact.charge_by_year.astype(np.float32, copy=False),
     }
+    if compact.route_ids is not None:
+        arrays[ROUTE_IDS_FILENAME] = compact.route_ids.astype(np.int32, copy=False)
     if compact.volume_by_year is not None:
         arrays[VOLUME_BY_YEAR_FILENAME] = compact.volume_by_year.astype(
+            np.float32,
+            copy=False,
+        )
+    if compact.volume_fallout_by_year is not None:
+        arrays[VOLUME_FALLOUT_BY_YEAR_FILENAME] = compact.volume_fallout_by_year.astype(
+            np.float32,
+            copy=False,
+        )
+    if compact.money_fallout_by_year is not None:
+        arrays[MONEY_FALLOUT_BY_YEAR_FILENAME] = compact.money_fallout_by_year.astype(
             np.float32,
             copy=False,
         )
@@ -204,7 +219,15 @@ def _remove_compact_sidecars(
     if skip_compact:
         return
 
-    for path in _compact_required_paths(cache_dir) + [cache_dir / RULE_BY_YEAR_FILENAME]:
+    for path in (
+        _compact_required_paths(cache_dir)
+        + [
+            cache_dir / RULE_BY_YEAR_FILENAME,
+            cache_dir / VOLUME_BY_YEAR_FILENAME,
+            cache_dir / VOLUME_FALLOUT_BY_YEAR_FILENAME,
+            cache_dir / MONEY_FALLOUT_BY_YEAR_FILENAME,
+        ]
+    ):
         if path.is_file():
             path.unlink()
 
@@ -350,11 +373,29 @@ def try_load_scenario_compute(
 
     compact_arrays = _compact_array_paths(cache_dir)
     baseline_rub = _load_npy_mmap(compact_arrays["baseline_rub"], dtype=np.float32)
+    route_ids_path = cache_dir / ROUTE_IDS_FILENAME
+    route_ids = (
+        _load_npy_mmap(route_ids_path, dtype=np.int32)
+        if route_ids_path.is_file()
+        else None
+    )
     volume_tons = _load_npy_mmap(compact_arrays["volume_tons"], dtype=np.float32)
     volume_by_year_path = cache_dir / VOLUME_BY_YEAR_FILENAME
     volume_by_year = (
         _load_npy_mmap(volume_by_year_path, dtype=np.float32)
         if volume_by_year_path.is_file()
+        else None
+    )
+    volume_fallout_path = cache_dir / VOLUME_FALLOUT_BY_YEAR_FILENAME
+    volume_fallout_by_year = (
+        _load_npy_mmap(volume_fallout_path, dtype=np.float32)
+        if volume_fallout_path.is_file()
+        else None
+    )
+    money_fallout_path = cache_dir / MONEY_FALLOUT_BY_YEAR_FILENAME
+    money_fallout_by_year = (
+        _load_npy_mmap(money_fallout_path, dtype=np.float32)
+        if money_fallout_path.is_file()
         else None
     )
     base_by_year = _load_npy_mmap(compact_arrays["base_by_year"], dtype=np.float32)
@@ -377,6 +418,7 @@ def try_load_scenario_compute(
         years=[int(year) for year in metadata["years"]],
         dimensions={column: value for column, value in dimensions.items() if value is not None},
         dimension_labels=metadata.get("dimension_labels") or {},
+        route_ids=route_ids,
         baseline_rub=baseline_rub,
         volume_tons=volume_tons,
         base_by_year=base_by_year,
@@ -385,6 +427,8 @@ def try_load_scenario_compute(
         rule_meta=[(int(item[0]), str(item[1])) for item in metadata.get("rule_meta", [])],
         rule_by_year=_load_rule_by_year(cache_dir, None),
         volume_by_year=volume_by_year,
+        volume_fallout_by_year=volume_fallout_by_year,
+        money_fallout_by_year=money_fallout_by_year,
     )
 
     return ScenarioComputeBundle(

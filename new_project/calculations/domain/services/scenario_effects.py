@@ -16,7 +16,11 @@ from calculations.domain.dto.scenario_effects import (
     ScenarioEffectsResponseDTO,
 )
 from calculations.domain.services.grouping import build_group_keys
-from calculations.domain.services.scenario_effects_compact import aggregate_compact_buckets
+from calculations.domain.services.scenario_effects_compact import (
+    aggregate_compact_buckets,
+    aggregate_compact_fallout_by_group,
+    aggregate_compact_fallout_totals,
+)
 from calculations.domain.services.scenario_effects_cache import (
     COMPACT_API_WAIT_TIMEOUT_SECONDS,
     RouteEffectFact,
@@ -193,11 +197,40 @@ class ScenarioEffectsService:
                 ),
             )
 
+        show_fallout_column = False
+        fallout_by_group = None
+        grand_fallout = None
+        if (
+            scenario.consider_demand_elasticity
+            and payload.compact is not None
+            and payload.compact.volume_fallout_by_year is not None
+            and payload.compact.money_fallout_by_year is not None
+        ):
+            show_fallout_column = True
+            fallout_by_group = aggregate_compact_fallout_by_group(
+                payload.compact,
+                year=request.year,
+                group_by=request.group_by,
+                group_by_inner=request.group_by_inner,
+                cargo_groups=request.cargo_groups,
+                holdings=request.holdings,
+            )
+            volume_fallout, money_fallout, _, _ = aggregate_compact_fallout_totals(
+                payload.compact,
+                year=request.year,
+                prev_year=prev_year,
+                cargo_groups=request.cargo_groups,
+                holdings=request.holdings,
+            )
+            grand_fallout = (volume_fallout, money_fallout)
+
         table_rows = self._format_table_rows(
             buckets,
             grand,
             group_by=request.group_by,
             group_by_inner=request.group_by_inner,
+            fallout_by_group=fallout_by_group,
+            grand_fallout=grand_fallout,
         )
         chart = self._build_chart(buckets, group_by_inner=request.group_by_inner)
 
@@ -205,6 +238,7 @@ class ScenarioEffectsService:
             ScenarioEffectsAggregateResponseDTO(
                 table_rows=table_rows,
                 chart=chart,
+                show_fallout_column=show_fallout_column,
             ),
             [],
         )
@@ -430,10 +464,20 @@ class ScenarioEffectsService:
         *,
         group_by: str,
         group_by_inner: str,
+        fallout_by_group: dict[tuple[str, ...], tuple[Decimal, Decimal]] | None = None,
+        grand_fallout: tuple[Decimal, Decimal] | None = None,
     ) -> list[EffectTableRowDTO]:
         rows: list[EffectTableRowDTO] = []
 
-        rows.append(_bucket_to_row("ИТОГО", grand, is_subtotal=True))
+        rows.append(
+            _bucket_to_row(
+                "ИТОГО",
+                grand,
+                is_subtotal=True,
+                fallout_volume=grand_fallout[0] if grand_fallout else None,
+                fallout_money=grand_fallout[1] if grand_fallout else None,
+            ),
+        )
 
         if group_by_inner == "none":
             keys = list(key for key in buckets if len(key) == 1)
@@ -442,8 +486,19 @@ class ScenarioEffectsService:
             else:
                 keys.sort(key=lambda k: buckets[k].total, reverse=True)
             for key in keys:
+                volume, money = (
+                    fallout_by_group.get(key, (Decimal("0"), Decimal("0")))
+                    if fallout_by_group is not None
+                    else (None, None)
+                )
                 rows.append(
-                    _bucket_to_row(key[0], buckets[key], is_subtotal=False),
+                    _bucket_to_row(
+                        key[0],
+                        buckets[key],
+                        is_subtotal=False,
+                        fallout_volume=volume,
+                        fallout_money=money,
+                    ),
                 )
             return rows
 
@@ -454,8 +509,19 @@ class ScenarioEffectsService:
         for outer in outers:
             subtotal_key = (outer, "ИТОГО")
             if subtotal_key in buckets:
+                volume, money = (
+                    fallout_by_group.get(subtotal_key, (Decimal("0"), Decimal("0")))
+                    if fallout_by_group is not None
+                    else (None, None)
+                )
                 rows.append(
-                    _bucket_to_row(outer, buckets[subtotal_key], is_subtotal=True),
+                    _bucket_to_row(
+                        outer,
+                        buckets[subtotal_key],
+                        is_subtotal=True,
+                        fallout_volume=volume,
+                        fallout_money=money,
+                    ),
                 )
 
             inner_keys = [
@@ -468,11 +534,18 @@ class ScenarioEffectsService:
             else:
                 inner_keys.sort(key=lambda k: buckets[k].total, reverse=True)
             for key in inner_keys:
+                volume, money = (
+                    fallout_by_group.get(key, (Decimal("0"), Decimal("0")))
+                    if fallout_by_group is not None
+                    else (None, None)
+                )
                 rows.append(
                     _bucket_to_row(
                         f"  {key[1]}",
                         buckets[key],
                         is_subtotal=False,
+                        fallout_volume=volume,
+                        fallout_money=money,
                     ),
                 )
 
@@ -570,8 +643,15 @@ def _bucket_to_row(
     bucket: _AggBucket,
     *,
     is_subtotal: bool,
+    fallout_volume: Decimal | None = None,
+    fallout_money: Decimal | None = None,
 ) -> EffectTableRowDTO:
     prev = bucket.prev_charge if bucket.prev_charge > 0 else Decimal("1")
+    fallout_bln: str | None = None
+    fallout_volume_mln_t: str | None = None
+    if fallout_volume is not None and fallout_money is not None:
+        fallout_volume_mln_t = _format_mln(fallout_volume / Decimal("1000000"))
+        fallout_bln = _format_bln(fallout_money)
     return EffectTableRowDTO(
         label=label,
         is_subtotal=is_subtotal,
@@ -581,4 +661,10 @@ def _bucket_to_row(
         rules_pct=_pct(bucket.rules, prev),
         total_rub=_format_rub(bucket.total),
         total_pct=_pct(bucket.total, prev),
+        fallout_bln=fallout_bln,
+        fallout_volume_mln_t=fallout_volume_mln_t,
     )
+
+
+def _format_mln(value: Decimal) -> str:
+    return format(value.quantize(Decimal("0.1")), "f")

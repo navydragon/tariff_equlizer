@@ -123,6 +123,37 @@ class IpemCoal2026ImportTests(TestCase):
             2,
         )
 
+    def test_assign_elasticity_sources_after_model_link(self) -> None:
+        from scenarios.domain.services.operational_elasticity import (
+            assign_operational_elasticity_sources,
+        )
+
+        model_route = Route.objects.create(
+            route_set=self.route_set,
+            is_model=True,
+            route_code="MODEL-ELASTICITY",
+            cargo=self.cargo,
+            origin_station=self.origin,
+            destination_station=self.destination,
+            wagon_kind=self.wagon_kind,
+            shipment_type=self.shipment_type,
+            message_type=self.message_type,
+            transport_volume_tons=Decimal("10000"),
+        )
+        link_operational_routes_to_models(self.route_set, [model_route])
+        stats = assign_operational_elasticity_sources(self.route_set)
+
+        self.assertEqual(stats.direct_model, 2)
+        self.assertEqual(
+            Route.objects.operational()
+            .filter(
+                skip_elasticity=False,
+                elasticity_source=Route.ElasticitySource.DIRECT_MODEL,
+            )
+            .count(),
+            2,
+        )
+
     def test_parse_cargo_izpod_fields_from_ipem_row(self) -> None:
         fields = parse_cargo_izpod_fields_from_ipem_row(
             {

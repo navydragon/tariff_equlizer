@@ -32,6 +32,13 @@ _BLN_QUANT = Decimal("0.001")
 
 _EFFECT_BASE = "Базовая индексация"
 _EFFECT_RULES_TOTAL = "Отдельные тарифные решения"
+_EFFECT_VOLUME_FALLOUT = "Выпадение объёмов (млн т)"
+_EFFECT_MONEY_FALLOUT = "Выпадение доходов"
+
+
+def _format_mln_tons(value: Decimal) -> str:
+    mln = (value / Decimal("1000000")).quantize(_BLN_QUANT, rounding=ROUND_HALF_UP)
+    return format(mln, "f")
 
 
 def _format_bln(value: Decimal) -> str:
@@ -177,6 +184,13 @@ class ScenarioEffectsCubeService:
             if payload.compact.rule_by_year is not None:
                 for rule_id, rule_name in payload.compact.rule_meta:
                     slices.append((f"rule:{rule_id}", rule_name))
+            if (
+                scenario.consider_demand_elasticity
+                and payload.compact.volume_fallout_by_year is not None
+                and payload.compact.money_fallout_by_year is not None
+            ):
+                slices.append(("volume_fallout", _EFFECT_VOLUME_FALLOUT))
+                slices.append(("money_fallout", _EFFECT_MONEY_FALLOUT))
         else:
             rules = TariffRule.objects.filter(scenario_id=scenario.id).order_by(
                 "position",
@@ -248,6 +262,14 @@ class ScenarioEffectsCubeService:
             return compact.base_by_year
         if effect_key == "rules_total":
             return compact.rules_by_year
+        if effect_key == "volume_fallout":
+            if compact.volume_fallout_by_year is None:
+                raise ValueError("volume_fallout_by_year missing in compact payload")
+            return compact.volume_fallout_by_year
+        if effect_key == "money_fallout":
+            if compact.money_fallout_by_year is None:
+                raise ValueError("money_fallout_by_year missing in compact payload")
+            return compact.money_fallout_by_year
 
         rule_id = int(effect_key.split(":", 1)[1])
         rule_index = next(
@@ -339,8 +361,13 @@ class ScenarioEffectsCubeService:
 
             for effect_key, effect_label in effect_slices:
                 year_values = group_buckets.get(effect_key, {}).get(group_key, {})
+                formatter = (
+                    _format_mln_tons
+                    if effect_key == "volume_fallout"
+                    else _format_bln
+                )
                 formatted_years = {
-                    year: _format_bln(year_values.get(year, Decimal("0")))
+                    year: formatter(year_values.get(year, Decimal("0")))
                     for year in years
                 }
                 total = sum(
@@ -353,7 +380,7 @@ class ScenarioEffectsCubeService:
                         group_inner_label=group_inner_label,
                         effect_label=effect_label or effect_key,
                         years=formatted_years,
-                        total=_format_bln(total),
+                        total=formatter(total),
                     ),
                 )
 

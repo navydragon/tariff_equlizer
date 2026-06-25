@@ -16,8 +16,15 @@ from core.models import Route, RouteSet
 
 
 class RouteSetRepository:
-    def list_queryset(self, search: Optional[str] = None) -> QuerySet[RouteSet]:
-        qs = RouteSet.objects.annotate(_routes_count=Count("routes"))
+    def list_queryset(
+        self,
+        search: Optional[str] = None,
+        *,
+        include_routes_count: bool = True,
+    ) -> QuerySet[RouteSet]:
+        qs = RouteSet.objects.all()
+        if include_routes_count:
+            qs = qs.annotate(_routes_count=Count("routes"))
         if search:
             search = search.strip()
             if search:

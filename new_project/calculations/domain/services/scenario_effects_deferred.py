@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
 
+import numpy as np
+
 from calculations.domain.services.route_mart_store import (
     MartMeta,
     load_mart_meta,
@@ -37,6 +39,27 @@ _deferred_locks: dict[tuple[int, str], threading.Lock] = {}
 _pending_jobs: dict[tuple[int, str], DeferredFullComputeJob] = {}
 
 
+@dataclass(frozen=True)
+class _ElasticityScenarioStub:
+    consider_demand_elasticity: bool
+    elasticity_set_id: int | None
+    retention_coefficient_mode: str
+    consider_enterprise_load: bool
+
+    class RetentionCoefficientMode:
+        RELATIVE_TO_BASE = "relative_to_base"
+        ABSOLUTE = "absolute"
+
+
+def _elasticity_scenario_stub(job: DeferredFullComputeJob) -> _ElasticityScenarioStub:
+    return _ElasticityScenarioStub(
+        consider_demand_elasticity=bool(job.consider_demand_elasticity),
+        elasticity_set_id=job.elasticity_set_id,
+        retention_coefficient_mode=job.retention_coefficient_mode,
+        consider_enterprise_load=bool(job.consider_enterprise_load),
+    )
+
+
 @dataclass
 class DeferredFullComputeJob:
     cache_key: str
@@ -55,6 +78,15 @@ class DeferredFullComputeJob:
     routes_without_volume: int
     include_rule_breakdown: bool = False
     consider_turnover_changes: bool = False
+    consider_demand_elasticity: bool = False
+    elasticity_set_id: int | None = None
+    retention_coefficient_mode: str = "relative_to_base"
+    consider_enterprise_load: bool = True
+    model_rows: list = None
+
+    def __post_init__(self) -> None:
+        if self.model_rows is None:
+            self.model_rows = []
 
 
 def _job_data_version_stale(job: DeferredFullComputeJob) -> bool:
@@ -91,6 +123,7 @@ def _run_deferred_full_compute(job: DeferredFullComputeJob) -> None:
         sidecar, _sidecar_timings = load_mart_sidecar(
             parquet_path,
             include_charge=True,
+            include_volume=True,
         )
         if sidecar.empty or "freight_charge_rub" not in sidecar:
             logger.error(
@@ -99,6 +132,8 @@ def _run_deferred_full_compute(job: DeferredFullComputeJob) -> None:
             )
             return
         mart_meta = job.mart_meta or load_mart_meta(parquet_path)
+
+        scenario_stub = _elasticity_scenario_stub(job)
 
         _global_totals, _timings, arrays = compute_arrays_full(
             sidecar,
@@ -110,6 +145,11 @@ def _run_deferred_full_compute(job: DeferredFullComputeJob) -> None:
             mask_cache_dir=Path(job.mask_cache_dir_path),
             include_rule_by_year=job.include_rule_breakdown,
             consider_turnover_changes=job.consider_turnover_changes,
+            scenario=scenario_stub,
+            model_rows=job.model_rows,
+            dimension_labels=(
+                mart_meta.dimension_labels if mart_meta is not None else None
+            ),
         )
         if arrays is None:
             return
@@ -146,6 +186,9 @@ def _run_deferred_full_compute(job: DeferredFullComputeJob) -> None:
             compact_df,
             mart_meta,
         )
+        route_ids = None
+        if "route_id" in compact_df.columns:
+            route_ids = compact_df["route_id"].to_numpy(dtype=np.int32, copy=False)
         compact = build_compact_from_arrays(
             years=job.years,
             initial=arrays.initial,
@@ -157,7 +200,10 @@ def _run_deferred_full_compute(job: DeferredFullComputeJob) -> None:
             dimensions=dimensions,
             dimension_labels=dimension_labels,
             volume=volume,
+            route_ids=route_ids,
             turnover_coef=arrays.turnover_coef,
+            volume_fallout_by_year=arrays.volume_fallout_by_year,
+            money_fallout_by_year=arrays.money_fallout_by_year,
         )
         if _job_data_version_stale(job):
             return

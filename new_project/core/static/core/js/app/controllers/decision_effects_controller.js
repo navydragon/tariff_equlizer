@@ -390,7 +390,10 @@ import { clearToasts, showToast } from "../lib/toast.js";
 
         this.state.compactPending = false;
         this._setCompactPendingIndicator(false);
-        this._renderTable(data.table && data.table.rows ? data.table.rows : []);
+        this._renderTable(
+          data.table && data.table.rows ? data.table.rows : [],
+          Boolean(data.table && data.table.show_fallout),
+        );
         this._renderChart(data.chart || null);
         if (showTableLoading) {
           this._setTableLoading(false);
@@ -944,7 +947,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
         .join("");
     }
 
-    _renderTable(rows) {
+    _renderTable(rows, showFallout = false) {
       if (!this.hasTableWrapTarget) return;
 
       if (!rows.length) {
@@ -953,9 +956,23 @@ import { clearToasts, showToast } from "../lib/toast.js";
         return;
       }
 
+      const falloutHeader = showFallout
+        ? '<th class="text-end">Выпадение</th>'
+        : "";
+
       const body = rows
         .map((row) => {
           const rowClass = row.is_subtotal ? "fw-subtotal fw-bold" : "";
+          const falloutCell =
+            showFallout && row.fallout_bln != null
+              ? `<td class="text-end">
+                ${escapeHtml(row.fallout_bln)} млрд<br />
+                <span class="cell-pct">(${escapeHtml(row.fallout_volume_mln_t || "0.0")} млн т)</span>
+              </td>`
+              : showFallout
+                ? '<td class="text-end text-muted">—</td>'
+                : "";
+
           return `
             <tr class="${rowClass}">
               <td>${escapeHtml(row.label || "")}</td>
@@ -971,6 +988,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
                 ${escapeHtml(this._formatBlnFromRub(row.total_rub))}<br />
                 <span class="cell-pct">(+${escapeHtml(this._formatPct(row.total_pct))}%)</span>
               </td>
+              ${falloutCell}
             </tr>
           `;
         })
@@ -985,6 +1003,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
                 <th class="text-end">Базовые решения</th>
                 <th class="text-end">Отдельные решения</th>
                 <th class="text-end">Увеличение нагрузки</th>
+                ${falloutHeader}
               </tr>
             </thead>
             <tbody>${body}</tbody>

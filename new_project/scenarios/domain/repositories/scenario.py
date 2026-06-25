@@ -68,6 +68,7 @@ class ScenarioRepository:
             export_price_mode=source.export_price_mode,
             include_base_tariff_decisions=source.include_base_tariff_decisions,
             consider_turnover_changes=source.consider_turnover_changes,
+            consider_demand_elasticity=source.consider_demand_elasticity,
             consider_enterprise_load=source.consider_enterprise_load,
             retention_coefficient_mode=source.retention_coefficient_mode,
             author=new_author,

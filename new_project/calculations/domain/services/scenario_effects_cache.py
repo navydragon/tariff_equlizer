@@ -34,6 +34,9 @@ class CompactRouteEffects:
     rule_meta: list[tuple[int, str]] = field(default_factory=list)
     rule_by_year: np.ndarray | None = None
     volume_by_year: np.ndarray | None = None
+    volume_fallout_by_year: np.ndarray | None = None
+    money_fallout_by_year: np.ndarray | None = None
+    route_ids: np.ndarray | None = None
 
 
 @dataclass
@@ -51,6 +54,8 @@ class RouteEffectFact:
     base_by_year: dict[int, Decimal] = field(default_factory=dict)
     rules_by_year: dict[int, Decimal] = field(default_factory=dict)
     charge_by_year: dict[int, Decimal] = field(default_factory=dict)
+    volume_fallout_by_year: dict[int, Decimal] = field(default_factory=dict)
+    money_fallout_by_year: dict[int, Decimal] = field(default_factory=dict)
     rule_by_year: dict[int, dict[int, Decimal]] = field(default_factory=dict)
 
 
@@ -99,6 +104,9 @@ def compute_scenario_data_version(
         str(route_set.id),
         route_set.updated_at.isoformat() if route_set.updated_at else "",
         f"consider_turnover_changes:{bool(getattr(scenario, 'consider_turnover_changes', False))}",
+        f"consider_demand_elasticity:{bool(getattr(scenario, 'consider_demand_elasticity', False))}",
+        f"elasticity_set:{getattr(scenario, 'elasticity_set_id', None)}",
+        f"retention_mode:{getattr(scenario, 'retention_coefficient_mode', '')}",
     ]
     for year in sorted(base_coef_by_year):
         parts.append(f"base:{year}:{base_coef_by_year[year]}")
