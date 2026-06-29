@@ -12,7 +12,11 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.utils import timezone
 
-from core.domain.cargo.formatting import parse_etsng_code
+from core.domain.cargo.formatting import (
+    cargo_code_3_from_etsng,
+    format_cargo_code_3,
+    format_etsng_code,
+)
 from core.domain.route.turnover_coefficients import (
     TURNOVER_COEF_YEARS,
     coefs_from_row,
@@ -141,12 +145,6 @@ def _is_missing_ref(value: str) -> bool:
     return not v or v in ("-", "0")
 
 
-def _first_three_chars(value: Any) -> str:
-    if value is None:
-        return ""
-    return str(value).strip()[:3]
-
-
 def _strip_text(value: Any) -> str:
     if value is None:
         return ""
@@ -160,8 +158,8 @@ def _resolve_cargo_code_3(
     fallback_value: Any,
 ) -> str:
     if source_col in row.keys():
-        return _strip_text(row[source_col])
-    return _first_three_chars(fallback_value)
+        return format_cargo_code_3(row[source_col])
+    return cargo_code_3_from_etsng(fallback_value)
 
 
 def _parse_decimal(value: Any) -> Optional[Decimal]:
@@ -623,8 +621,8 @@ class Command(BaseCommand):
             bump_skip("empty_index")
             return None
 
-        cargo_code = parse_etsng_code(row[COL_CARGO_CODE])
-        if cargo_code is None:
+        cargo_code = format_etsng_code(row[COL_CARGO_CODE])
+        if not cargo_code:
             bump_skip("invalid_cargo_code")
             return None
         cargo = caches["cargo_by_code"].get(cargo_code)

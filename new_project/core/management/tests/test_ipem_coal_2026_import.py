@@ -162,7 +162,7 @@ class IpemCoal2026ImportTests(TestCase):
             },
             self.cargo,
         )
-        self.assertEqual(fields["cargo_code_3"], "161")
+        self.assertEqual(fields["cargo_code_3"], "016")
         self.assertEqual(fields["cargo_group_izpod"], "Уголь каменный")
         self.assertEqual(fields["cargo_code_izpod"], "")
         self.assertEqual(fields["cargo_code_izpod_3"], "")

@@ -7,7 +7,11 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
 
-from core.domain.cargo.formatting import format_etsng_code, parse_etsng_code
+from core.domain.cargo.formatting import (
+    cargo_code_3_from_etsng,
+    format_etsng_code,
+    parse_etsng_code,
+)
 from core.models import Cargo, MessageType, Route, RouteSet, ShipmentType, Shipper, Station, WagonKind
 
 try:
@@ -219,12 +223,6 @@ def normalize_name(value: str) -> str:
     return (value or "").strip().casefold()
 
 
-def _first_three_chars(value: Any) -> str:
-    if value is None:
-        return ""
-    return str(value).strip()[:3]
-
-
 def parse_cargo_izpod_fields_from_ipem_row(
     row: dict[str, str],
     cargo: Cargo,
@@ -236,7 +234,7 @@ def parse_cargo_izpod_fields_from_ipem_row(
     return {
         "cargo_code_izpod": "",
         "cargo_group_izpod": cargo_group,
-        "cargo_code_3": _first_three_chars(cargo_code_raw),
+        "cargo_code_3": cargo_code_3_from_etsng(cargo_code_raw),
         "cargo_code_izpod_3": "",
     }
 
