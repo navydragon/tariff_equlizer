@@ -90,6 +90,8 @@ DIMENSIONS: dict[str, DimensionSpec] = {
 
 VALID_METRICS = frozenset({"count", "money", "volume", "turnover"})
 
+RZD_2026_ROUTE_SET_CODE = "RZD_2026"
+
 
 def get_dimension(code: str) -> DimensionSpec | None:
     return DIMENSIONS.get(code)

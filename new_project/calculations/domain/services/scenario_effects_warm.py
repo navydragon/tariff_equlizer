@@ -130,7 +130,7 @@ def warm_scenario_after_rule_change(
             return
 
         mart_meta = load_mart_meta(parquet_path)
-        global_totals, _compute_timings = compute_kpi_totals(
+        global_totals, early_group_snapshot, _compute_timings = compute_kpi_totals(
             df,
             years=years,
             base_coef_by_year=context.base_coef_by_year,
@@ -138,6 +138,7 @@ def warm_scenario_after_rule_change(
             route_set_id=scenario.route_set_id,
             mart_meta=mart_meta,
             consider_turnover_changes=bool(scenario.consider_turnover_changes),
+            early_group_dim="cargo_group",
         )
         filter_options = ScenarioEffectsPandasService._collect_filter_options(
             df,
@@ -157,6 +158,7 @@ def warm_scenario_after_rule_change(
             filter_options=filter_options,
             skipped_charge=skipped_charge,
             routes_without_volume=skipped_volume,
+            early_group_snapshot=early_group_snapshot,
         )
         from calculations.domain.services.scenario_effects_cache import (
             set_scenario_effects_revision,

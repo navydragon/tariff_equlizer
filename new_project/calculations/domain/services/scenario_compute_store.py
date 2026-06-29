@@ -11,7 +11,10 @@ from pathlib import Path
 import numpy as np
 from django.conf import settings
 
-from calculations.domain.services.scenario_effects_cache import CompactRouteEffects
+from calculations.domain.services.scenario_effects_cache import (
+    CompactRouteEffects,
+    EarlyGroupSnapshot,
+)
 from calculations.domain.services.scenario_effects_compact import _DIMENSION_COLUMNS
 from calculations.domain.services.scenario_effects_formatting import GlobalTotals
 from core.domain.cargo.ordering import normalize_filter_options
@@ -56,6 +59,34 @@ def _global_totals_to_json(totals: GlobalTotals) -> dict:
         "rules_by_year": {str(k): str(v) for k, v in totals.rules_by_year.items()},
         "charge_by_year": {str(k): str(v) for k, v in totals.charge_by_year.items()},
     }
+
+
+def _early_group_snapshot_from_metadata(metadata: dict) -> EarlyGroupSnapshot | None:
+    if not metadata.get("early_group_ready"):
+        return None
+    return EarlyGroupSnapshot.from_json(metadata.get("early_group_snapshot") or {})
+
+
+def is_early_group_ready_on_disk(*, scenario_id: int, data_version: str) -> bool:
+    cache_dir = scenario_compute_dir(scenario_id=scenario_id, data_version=data_version)
+    meta_path = cache_dir / METADATA_FILENAME
+    if not meta_path.is_file():
+        return False
+    metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+    return bool(metadata.get("early_group_ready"))
+
+
+def load_early_group_snapshot(
+    *,
+    scenario_id: int,
+    data_version: str,
+) -> EarlyGroupSnapshot | None:
+    cache_dir = scenario_compute_dir(scenario_id=scenario_id, data_version=data_version)
+    meta_path = cache_dir / METADATA_FILENAME
+    if not meta_path.is_file():
+        return None
+    metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+    return _early_group_snapshot_from_metadata(metadata)
 
 
 def _global_totals_from_json(payload: dict) -> GlobalTotals:
@@ -241,6 +272,7 @@ def save_scenario_compute_kpi_only(
     filter_options: dict[str, list[str]],
     skipped_charge: int,
     routes_without_volume: int,
+    early_group_snapshot: EarlyGroupSnapshot | None = None,
 ) -> Path:
     cache_dir = scenario_compute_dir(scenario_id=scenario_id, data_version=data_version)
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -252,12 +284,15 @@ def save_scenario_compute_kpi_only(
 
     metadata = {
         "kpi_only": True,
+        "early_group_ready": early_group_snapshot is not None,
         "years": years,
         "filter_options": filter_options,
         "global_totals": _global_totals_to_json(global_totals),
         "skipped_charge": skipped_charge,
         "routes_without_volume": routes_without_volume,
     }
+    if early_group_snapshot is not None:
+        metadata["early_group_snapshot"] = early_group_snapshot.to_json()
     _write_metadata(cache_dir, metadata)
     from calculations.domain.services.scenario_effects_cache import (
         set_scenario_effects_revision,

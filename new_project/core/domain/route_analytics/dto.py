@@ -62,3 +62,47 @@ class RouteAnalyticsResultDTO:
             "dimension": self.dimension,
             "dimension_label": self.dimension_label,
         }
+
+
+METRIC_LABELS: dict[str, str] = {
+    "count": "Количество",
+    "money": "Экономика",
+    "volume": "Погрузка",
+    "turnover": "Грузооборот",
+}
+
+
+@dataclass(frozen=True)
+class RouteSetTotalCardDTO:
+    metric: str
+    label: str
+    value: Decimal
+    value_display: str
+    unit: str
+
+    def to_api_dict(self) -> dict[str, Any]:
+        return {
+            "metric": self.metric,
+            "label": self.label,
+            "value": float(self.value),
+            "value_display": self.value_display,
+            "unit": self.unit,
+        }
+
+
+@dataclass(frozen=True)
+class RouteSetTotalsDTO:
+    route_set_id: int
+    route_set_code: str
+    route_set_name: str
+    cards: list[RouteSetTotalCardDTO]
+
+    def to_api_dict(self) -> dict[str, Any]:
+        return {
+            "route_set": {
+                "id": self.route_set_id,
+                "code": self.route_set_code,
+                "name": self.route_set_name,
+            },
+            "cards": [card.to_api_dict() for card in self.cards],
+        }

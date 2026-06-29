@@ -13,6 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 from calculations.domain.services.route_mask_cache import build_or_load_rule_mask
 from calculations.domain.services.route_mart_store import MartMeta, MartSidecarView
 from calculations.domain.services.scenario_effects_compact import _COMPUTE_DTYPE
+from calculations.domain.services.scenario_effects_cache import EarlyGroupSnapshot
 from calculations.domain.services.scenario_effects_formatting import GlobalTotals
 from calculations.domain.services.tariff_load import ScenarioTariffContext, TariffLoadService
 from scenarios.models import Scenario
@@ -84,6 +85,72 @@ def _sidecar_charge_array(sidecar: MartSidecarView | pd.DataFrame) -> np.ndarray
     if isinstance(sidecar, MartSidecarView):
         return np.asarray(sidecar["freight_charge_rub"], dtype=_COMPUTE_DTYPE)
     return sidecar["freight_charge_rub"].to_numpy(dtype=_COMPUTE_DTYPE, copy=False)
+
+
+def _sidecar_volume_array(sidecar: MartSidecarView | pd.DataFrame) -> np.ndarray:
+    if isinstance(sidecar, MartSidecarView):
+        if "transport_volume_tons" not in sidecar.column_names:
+            return np.zeros(len(sidecar), dtype=_COMPUTE_DTYPE)
+        return np.asarray(sidecar["transport_volume_tons"], dtype=_COMPUTE_DTYPE)
+    if "transport_volume_tons" not in sidecar.columns:
+        return np.zeros(len(sidecar), dtype=_COMPUTE_DTYPE)
+    return (
+        pd.to_numeric(sidecar["transport_volume_tons"], errors="coerce")
+        .fillna(0)
+        .to_numpy(dtype=_COMPUTE_DTYPE, copy=False)
+    )
+
+
+def _resolve_group_codes_and_labels(
+    sidecar: MartSidecarView | pd.DataFrame,
+    group_dim: str,
+    mart_meta: MartMeta | None,
+) -> tuple[np.ndarray, list[str]] | None:
+    dim_column = f"dim_{group_dim}"
+    if isinstance(sidecar, MartSidecarView):
+        if dim_column in sidecar.column_names:
+            codes = np.asarray(sidecar[dim_column], dtype=np.int32)
+            labels = (
+                list(mart_meta.dimension_labels.get(group_dim, []))
+                if mart_meta is not None and mart_meta.dimension_labels
+                else []
+            )
+            if not labels:
+                labels = [str(code) for code in range(int(codes.max()) + 1)]
+            return codes, labels
+        if group_dim not in sidecar.column_names:
+            return None
+        series = pd.Series(sidecar[group_dim]).astype(str)
+    else:
+        if dim_column in sidecar.columns:
+            codes = sidecar[dim_column].to_numpy(dtype=np.int32, copy=False)
+            labels = (
+                list(mart_meta.dimension_labels.get(group_dim, []))
+                if mart_meta is not None and mart_meta.dimension_labels
+                else []
+            )
+            if not labels:
+                labels = [str(code) for code in range(int(codes.max()) + 1)]
+            return codes, labels
+        if group_dim not in sidecar.columns:
+            return None
+        series = sidecar[group_dim].astype(str)
+
+    codes, uniques = pd.factorize(series, sort=False)
+    return codes.astype(np.int32, copy=False), uniques.tolist()
+
+
+def _bincount_by_group(
+    group_codes: np.ndarray,
+    weights: np.ndarray,
+    *,
+    n_groups: int,
+) -> np.ndarray:
+    return np.bincount(
+        group_codes,
+        weights=weights,
+        minlength=n_groups,
+    ).astype(np.float64, copy=False)
 
 
 def _stored_turnover_coef_matrix(
@@ -210,17 +277,19 @@ def compute_kpi_totals(
     route_set_id: int,
     mart_meta: MartMeta | None,
     consider_turnover_changes: bool = False,
-) -> tuple[GlobalTotals, dict[str, int]]:
+    early_group_dim: str | None = None,
+) -> tuple[GlobalTotals, EarlyGroupSnapshot | None, dict[str, int]]:
     import time
 
     timings: dict[str, int] = {}
     if isinstance(sidecar, MartSidecarView):
         if sidecar.empty:
-            return GlobalTotals(), timings
+            return GlobalTotals(), None, timings
     elif sidecar.empty:
-        return GlobalTotals(), timings
+        return GlobalTotals(), None, timings
 
     initial = _sidecar_charge_array(sidecar)
+    volume = _sidecar_volume_array(sidecar)
     turnover_coef = build_turnover_coef_matrix(
         sidecar,
         years,
@@ -240,6 +309,23 @@ def compute_kpi_totals(
     timings.update(mask_timings)
     has_rules = bool(rule_meta)
 
+    group_codes: np.ndarray | None = None
+    group_labels: list[str] = []
+    n_groups = 0
+    charge_group_sums: dict[int, list[Decimal]] | None = None
+    volume_group_sums: dict[int, list[Decimal]] | None = None
+    if early_group_dim:
+        resolved = _resolve_group_codes_and_labels(
+            sidecar,
+            early_group_dim,
+            mart_meta,
+        )
+        if resolved is not None:
+            group_codes, group_labels = resolved
+            n_groups = len(group_labels)
+            charge_group_sums = {year: [] for year in years}
+            volume_group_sums = {year: [] for year in years}
+
     global_totals = GlobalTotals()
     baseline = initial * turnover_coef[:, 0]
     global_totals.baseline_total = _to_decimal(float(baseline.sum(dtype=np.float64)))
@@ -248,11 +334,30 @@ def compute_kpi_totals(
     tariff_prev = initial.copy()
     t_years = time.perf_counter()
     for year_index, year in enumerate(years):
+        turnover_column = turnover_coef[:, year_index]
         if year_index == 0:
+            charge_per_route = np.round(initial * turnover_column, 2)
+            if charge_group_sums is not None and group_codes is not None:
+                charge_group_sums[year] = [
+                    _to_decimal(value)
+                    for value in _bincount_by_group(
+                        group_codes,
+                        charge_per_route,
+                        n_groups=n_groups,
+                    )
+                ]
+                volume_per_route = np.round(volume * turnover_column, 2)
+                volume_group_sums[year] = [
+                    _to_decimal(value)
+                    for value in _bincount_by_group(
+                        group_codes,
+                        volume_per_route,
+                        n_groups=n_groups,
+                    )
+                ]
             continue
 
         base_coef = base_coef_arr[year_index]
-        turnover_column = turnover_coef[:, year_index]
         if not has_rules:
             tariff_current = np.round(tariff_prev * base_coef, 2)
             base_inc = np.round(tariff_prev * (base_coef - 1.0) * turnover_column, 2)
@@ -278,12 +383,46 @@ def compute_kpi_totals(
         if has_rules:
             global_totals.rules_by_year[year] = _to_decimal(rules_inc_sum)
 
+        if charge_group_sums is not None and group_codes is not None:
+            charge_group_sums[year] = [
+                _to_decimal(value)
+                for value in _bincount_by_group(
+                    group_codes,
+                    current,
+                    n_groups=n_groups,
+                )
+            ]
+            volume_per_route = np.round(volume * turnover_column, 2)
+            volume_group_sums[year] = [
+                _to_decimal(value)
+                for value in _bincount_by_group(
+                    group_codes,
+                    volume_per_route,
+                    n_groups=n_groups,
+                )
+            ]
+
         tariff_prev = tariff_current
 
     timings["years_loop_ms"] = int((time.perf_counter() - t_years) * 1000)
     timings["rule_by_year_ms"] = 0
     timings["totals_ms"] = 0
-    return global_totals, timings
+
+    early_snapshot: EarlyGroupSnapshot | None = None
+    if (
+        early_group_dim
+        and charge_group_sums is not None
+        and volume_group_sums is not None
+        and group_labels
+    ):
+        early_snapshot = EarlyGroupSnapshot(
+            group_dim=early_group_dim,
+            dimension_labels=group_labels,
+            charge_by_year=charge_group_sums,
+            volume_by_year=volume_group_sums,
+        )
+
+    return global_totals, early_snapshot, timings
 
 
 def compute_arrays_full(

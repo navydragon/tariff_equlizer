@@ -37,6 +37,12 @@ class RouteSetRepository:
         except RouteSet.DoesNotExist:
             return None
 
+    def get_by_code(self, code: str) -> Optional[RouteSet]:
+        try:
+            return RouteSet.objects.get(code=code)
+        except RouteSet.DoesNotExist:
+            return None
+
     def exists_by_name(self, name: str, *, exclude_pk: Optional[int] = None) -> bool:
         qs = RouteSet.objects.filter(name=name)
         if exclude_pk is not None:

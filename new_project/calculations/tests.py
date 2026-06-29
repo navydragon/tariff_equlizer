@@ -1144,7 +1144,7 @@ class ScenarioEffectsPandasParityTests(TariffLoadServiceTestMixin, TestCase):
             scenario.route_set_id,
         )
 
-        kpi_totals, _kpi_timings = compute_kpi_totals(
+        kpi_totals, _, _kpi_timings = compute_kpi_totals(
             df,
             years=context.years,
             base_coef_by_year=context.base_coef_by_year,
@@ -1180,6 +1180,146 @@ class ScenarioEffectsPandasParityTests(TariffLoadServiceTestMixin, TestCase):
                 full_totals.rules_by_year[year],
                 year,
             )
+
+    def test_early_group_snapshot_matches_full_compact_absolute(self) -> None:
+        from calculations.domain.services.scenario_effects_cache import (
+            ScenarioEffectsCachePayload,
+            make_cache_key,
+            store_payload,
+        )
+        from calculations.domain.services.scenario_effects_compute import (
+            compute_kpi_totals,
+            rule_specs_from_context,
+        )
+        from calculations.domain.services.scenario_absolute import (
+            ScenarioAbsoluteService,
+        )
+        from calculations.domain.services.route_effects_loader import (
+            fetch_routes_dataframe_cached_timed,
+        )
+
+        self._setup_btd("1.1000")
+        scenario = Scenario.objects.select_related("route_set").get(
+            pk=self.scenario.pk,
+        )
+        context = self.pandas_service._tariff_load.build_scenario_context(scenario)
+        rule_specs = rule_specs_from_context(self.pandas_service._tariff_load, context)
+        df, mart_meta, _timings = fetch_routes_dataframe_cached_timed(
+            scenario.route_set_id,
+        )
+        source_df = df.to_dataframe() if hasattr(df, "to_dataframe") else df
+
+        _, early_snapshot, _ = compute_kpi_totals(
+            df,
+            years=context.years,
+            base_coef_by_year=context.base_coef_by_year,
+            rule_specs=rule_specs,
+            route_set_id=scenario.route_set_id,
+            mart_meta=mart_meta,
+            early_group_dim="cargo_group",
+        )
+        self.assertIsNotNone(early_snapshot)
+
+        compact, global_totals, _ = self.pandas_service._compute_compact(
+            source_df,
+            context,
+            context.years,
+            scenario=scenario,
+            mart_meta=mart_meta,
+        )
+        self.assertIsNotNone(compact)
+
+        absolute_service = ScenarioAbsoluteService()
+
+        full_cache_key = make_cache_key(user_id=self.user.id, scenario_id=scenario.id)
+        store_payload(
+            cache_key=full_cache_key,
+            payload=ScenarioEffectsCachePayload(
+                user_id=self.user.id,
+                scenario_id=scenario.id,
+                years=context.years,
+                routes_without_charge=0,
+                routes_without_volume=0,
+                baseline_total=global_totals.baseline_total,
+                facts=[],
+                compact=compact,
+                compact_pending=False,
+            ),
+        )
+        early_cache_key = make_cache_key(user_id=self.user.id, scenario_id=scenario.id)
+        store_payload(
+            cache_key=early_cache_key,
+            payload=ScenarioEffectsCachePayload(
+                user_id=self.user.id,
+                scenario_id=scenario.id,
+                years=context.years,
+                routes_without_charge=0,
+                routes_without_volume=0,
+                baseline_total=global_totals.baseline_total,
+                facts=[],
+                compact=None,
+                compact_pending=True,
+                early_group_snapshot=early_snapshot,
+            ),
+        )
+
+        full_revenues, full_errors = absolute_service.aggregate_revenues(
+            scenario=scenario,
+            user_id=self.user.id,
+            request=ScenarioAbsoluteRequestDTO(
+                cache_key=full_cache_key,
+                group_by="cargo_group",
+                group_by_inner="none",
+            ),
+        )
+        early_revenues, early_errors = absolute_service.aggregate_revenues(
+            scenario=scenario,
+            user_id=self.user.id,
+            request=ScenarioAbsoluteRequestDTO(
+                cache_key=early_cache_key,
+                group_by="cargo_group",
+                group_by_inner="none",
+            ),
+        )
+        full_volumes, volume_errors = absolute_service.aggregate_volumes(
+            scenario=scenario,
+            user_id=self.user.id,
+            request=ScenarioAbsoluteRequestDTO(
+                cache_key=full_cache_key,
+                group_by="cargo_group",
+                group_by_inner="none",
+            ),
+        )
+        early_volumes, early_volume_errors = absolute_service.aggregate_volumes(
+            scenario=scenario,
+            user_id=self.user.id,
+            request=ScenarioAbsoluteRequestDTO(
+                cache_key=early_cache_key,
+                group_by="cargo_group",
+                group_by_inner="none",
+            ),
+        )
+
+        self.assertEqual(full_errors, [])
+        self.assertEqual(early_errors, [])
+        self.assertEqual(volume_errors, [])
+        self.assertEqual(early_volume_errors, [])
+        assert full_revenues is not None
+        assert early_revenues is not None
+        assert full_volumes is not None
+        assert early_volumes is not None
+
+        self.assertEqual(len(early_revenues.rows), len(full_revenues.rows))
+        for early_row, full_row in zip(early_revenues.rows, full_revenues.rows):
+            self.assertEqual(early_row.label, full_row.label)
+            self.assertEqual(early_row.years, full_row.years)
+            self.assertEqual(early_row.total, full_row.total)
+
+        self.assertEqual(len(early_volumes.rows), len(full_volumes.rows))
+        for early_row, full_row in zip(early_volumes.rows, full_volumes.rows):
+            self.assertEqual(early_row.label, full_row.label)
+            self.assertEqual(early_row.years, full_row.years)
+            self.assertEqual(early_row.total, full_row.total)
 
     def test_deferred_full_compute_builds_rule_by_year(self) -> None:
         self._setup_btd("1.1000")
@@ -3814,7 +3954,7 @@ class TariffRulesCacheAuditTests(TariffLoadServiceTestMixin, TestCase):
         df, _ = load_mart_sidecar_dataframe(parquet, include_charge=True)
         meta = load_mart_meta(parquet)
 
-        _totals1, timings1 = compute_kpi_totals(
+        _totals1, _, timings1 = compute_kpi_totals(
             df,
             years=context.years,
             base_coef_by_year=context.base_coef_by_year,
@@ -3825,7 +3965,7 @@ class TariffRulesCacheAuditTests(TariffLoadServiceTestMixin, TestCase):
         self.assertGreater(timings1.get("masks_ms", 0), 0)
 
         shutil.rmtree(scenario_compute_cache_root(), ignore_errors=True)
-        _totals2, timings2 = compute_kpi_totals(
+        _totals2, _, timings2 = compute_kpi_totals(
             df,
             years=context.years,
             base_coef_by_year=context.base_coef_by_year,
@@ -3873,7 +4013,7 @@ class TurnoverEffectsComputeTests(TestCase):
                 "turnover_coef": np.array([[1.0, 1.2, 1.0, 1.0, 1.0, 1.0]], dtype=np.float32),
             },
         )
-        totals, _ = compute_kpi_totals(
+        totals, _, _ = compute_kpi_totals(
             sidecar,
             years=[2025, 2026],
             base_coef_by_year={2025: Decimal("1"), 2026: Decimal("1")},

@@ -101,6 +101,7 @@ class ScenarioEffectsPandasService:
         compact_ready = True
         deferred_job: DeferredFullComputeJob | None = None
         mart_meta: MartMeta | None = None
+        early_group_snapshot = None
 
         if scenario_bundle is not None:
             compact = scenario_bundle.compact
@@ -111,6 +112,18 @@ class ScenarioEffectsPandasService:
             compact_ready = _compact_meets_request(
                 compact,
                 include_rule_breakdown=include_rule_breakdown,
+            )
+            from calculations.domain.services.scenario_compute_store import (
+                load_early_group_snapshot,
+            )
+
+            early_group_snapshot = (
+                None
+                if compact_ready
+                else load_early_group_snapshot(
+                    scenario_id=scenario.id,
+                    data_version=data_version,
+                )
             )
             t_load = t_compute = t_post_compute = time.perf_counter()
             if not compact_ready:
@@ -148,12 +161,12 @@ class ScenarioEffectsPandasService:
             sidecar, sidecar_timings = load_mart_sidecar(
                 parquet_path,
                 include_charge=True,
-                include_volume=False,
+                include_volume=True,
             )
             load_timings = dict(sidecar_timings)
             t_load = time.perf_counter()
 
-            global_totals, compute_timings = compute_kpi_totals(
+            global_totals, early_group_snapshot, compute_timings = compute_kpi_totals(
                 sidecar,
                 years=years,
                 base_coef_by_year=context.base_coef_by_year,
@@ -161,6 +174,7 @@ class ScenarioEffectsPandasService:
                 route_set_id=scenario.route_set_id,
                 mart_meta=mart_meta,
                 consider_turnover_changes=bool(scenario.consider_turnover_changes),
+                early_group_dim="cargo_group",
             )
             compact = None
             compact_ready = False
@@ -183,6 +197,7 @@ class ScenarioEffectsPandasService:
                 filter_options=filter_options,
                 skipped_charge=skipped_charge,
                 routes_without_volume=skipped_volume,
+                early_group_snapshot=early_group_snapshot,
             )
             purge_stale_scenario_compute(
                 scenario_id=scenario.id,
@@ -261,6 +276,9 @@ class ScenarioEffectsPandasService:
             "route_mart_cache_hit": route_mart_hit,
             "scenario_compute_cache_hit": scenario_compute_hit,
             "compact_ready": compact_ready,
+            "early_group_ready": (
+                early_group_snapshot is not None or compact_ready
+            ),
             "include_rule_breakdown": include_rule_breakdown,
             "mart_cache_path": load_timings.get("mart_cache_path"),
             "timings": {
@@ -518,7 +536,7 @@ class ScenarioEffectsPandasService:
         mart_meta: MartMeta | None,
     ) -> tuple[GlobalTotals, dict[str, int]]:
         rule_specs = rule_specs_from_context(self._tariff_load, context)
-        return compute_kpi_totals(
+        totals, _, timings = compute_kpi_totals(
             sidecar,
             years=years,
             base_coef_by_year=context.base_coef_by_year,
@@ -527,3 +545,4 @@ class ScenarioEffectsPandasService:
             mart_meta=mart_meta,
             consider_turnover_changes=bool(scenario.consider_turnover_changes),
         )
+        return totals, timings

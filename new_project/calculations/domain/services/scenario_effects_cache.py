@@ -60,6 +60,52 @@ class RouteEffectFact:
 
 
 @dataclass
+class EarlyGroupSnapshot:
+    """Предсуммированные absolute-значения по одному измерению (sync-фаза)."""
+
+    group_dim: str
+    dimension_labels: list[str]
+    charge_by_year: dict[int, list[Decimal]]
+    volume_by_year: dict[int, list[Decimal]]
+
+    def to_json(self) -> dict:
+        return {
+            "group_dim": self.group_dim,
+            "dimension_labels": self.dimension_labels,
+            "charge_by_year": {
+                str(year): [str(value) for value in values]
+                for year, values in self.charge_by_year.items()
+            },
+            "volume_by_year": {
+                str(year): [str(value) for value in values]
+                for year, values in self.volume_by_year.items()
+            },
+        }
+
+    @classmethod
+    def from_json(cls, payload: dict) -> EarlyGroupSnapshot | None:
+        if not payload:
+            return None
+        labels = payload.get("dimension_labels") or []
+        charge_raw = payload.get("charge_by_year") or {}
+        volume_raw = payload.get("volume_by_year") or {}
+        if not labels or not charge_raw:
+            return None
+        return cls(
+            group_dim=str(payload.get("group_dim") or "cargo_group"),
+            dimension_labels=[str(label) for label in labels],
+            charge_by_year={
+                int(year): [Decimal(value) for value in values]
+                for year, values in charge_raw.items()
+            },
+            volume_by_year={
+                int(year): [Decimal(value) for value in values]
+                for year, values in volume_raw.items()
+            },
+        )
+
+
+@dataclass
 class ScenarioEffectsCachePayload:
     user_id: int
     scenario_id: int
@@ -71,6 +117,7 @@ class ScenarioEffectsCachePayload:
     compact: CompactRouteEffects | None = None
     compact_pending: bool = False
     data_version: str | None = None
+    early_group_snapshot: EarlyGroupSnapshot | None = None
 
 
 @dataclass
@@ -198,6 +245,7 @@ def _hydrate_payload_from_disk(
         return payload
 
     from calculations.domain.services.scenario_compute_store import (
+        load_early_group_snapshot,
         try_load_scenario_compute,
     )
 
@@ -206,7 +254,25 @@ def _hydrate_payload_from_disk(
         data_version=payload.data_version,
     )
     if bundle is None:
-        return payload
+        early_group_snapshot = load_early_group_snapshot(
+            scenario_id=payload.scenario_id,
+            data_version=payload.data_version,
+        )
+        if early_group_snapshot is None:
+            return payload
+        return ScenarioEffectsCachePayload(
+            user_id=payload.user_id,
+            scenario_id=payload.scenario_id,
+            years=payload.years,
+            routes_without_charge=payload.routes_without_charge,
+            routes_without_volume=payload.routes_without_volume,
+            baseline_total=payload.baseline_total,
+            facts=payload.facts,
+            compact=None,
+            compact_pending=payload.compact_pending,
+            data_version=payload.data_version,
+            early_group_snapshot=early_group_snapshot,
+        )
 
     compact = bundle.compact
     compact_pending = payload.compact_pending
@@ -227,6 +293,12 @@ def _hydrate_payload_from_disk(
         compact=compact,
         compact_pending=compact_pending,
         data_version=payload.data_version,
+        early_group_snapshot=load_early_group_snapshot(
+            scenario_id=payload.scenario_id,
+            data_version=payload.data_version,
+        )
+        if compact is None
+        else None,
     )
 
 
@@ -305,22 +377,39 @@ def get_scenario_effects_revision(*, scenario_id: int) -> str | None:
 def get_compact_status(*, cache_key: str) -> dict[str, object]:
     payload = cache.get(cache_key)
     if not isinstance(payload, ScenarioEffectsCachePayload):
-        return {"compact_ready": False, "data_version": None}
+        return {
+            "compact_ready": False,
+            "early_group_ready": False,
+            "data_version": None,
+        }
 
     data_version = payload.data_version
-    if payload.compact_pending and data_version:
+    early_group_ready = False
+    if data_version:
         from calculations.domain.services.scenario_compute_store import (
+            is_early_group_ready_on_disk,
             is_scenario_compact_on_disk,
         )
 
+        early_group_ready = is_early_group_ready_on_disk(
+            scenario_id=payload.scenario_id,
+            data_version=data_version,
+        )
+
+    if payload.compact_pending and data_version:
         if is_scenario_compact_on_disk(
             scenario_id=payload.scenario_id,
             data_version=data_version,
         ):
-            return {"compact_ready": True, "data_version": data_version}
+            return {
+                "compact_ready": True,
+                "early_group_ready": True,
+                "data_version": data_version,
+            }
 
     compact_ready = not payload.compact_pending
     return {
         "compact_ready": compact_ready,
+        "early_group_ready": early_group_ready or compact_ready,
         "data_version": data_version,
     }

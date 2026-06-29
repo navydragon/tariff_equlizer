@@ -1,6 +1,18 @@
 ﻿{% extends "base.html" %}
+{% load static %}
 
 {% block title %}Меню · Цифровой тарифный инструментарий{% endblock %}
+
+{% block extra_css %}
+  {% if rzd_route_set_id %}
+    <link rel="stylesheet" href="{% static 'core/css/route-analytics.css' %}" />
+    <style>
+      .home-database-section-title {
+        margin-top: 2rem;
+      }
+    </style>
+  {% endif %}
+{% endblock %}
 
 {% block content %}
 <div class="page-header d-print-none">
@@ -48,4 +60,242 @@
     </div>
   {% endfor %}
 </div>
+
+{% if rzd_route_set_id %}
+<div
+  class="home-database-section"
+  data-controller="home-database"
+  data-home-database-totals-url-value="{% url 'route_analytics_totals_api' %}"
+  data-home-database-aggregate-url-value="{% url 'route_analytics_aggregate_api' %}"
+  data-home-database-route-set-id-value="{{ rzd_route_set_id }}"
+>
+  <div class="home-database-section-title">
+    <h3 class="mb-1">База {{ rzd_route_set_code }}</h3>
+    {% if rzd_route_set_name %}
+      <div class="text-muted">{{ rzd_route_set_name }}</div>
+    {% endif %}
+  </div>
+
+  <div class="row row-cards g-3 mt-2" data-home-database-target="kpiRow">
+    <div class="col-12 text-center text-muted py-3">
+      <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+      Загрузка показателей...
+    </div>
+  </div>
+
+  <div class="card mt-4">
+    <div class="card-header">
+      <div class="card-title mb-2">Разрез по группам грузов</div>
+      <ul class="nav nav-tabs card-header-tabs" role="tablist">
+        <li class="nav-item" role="presentation">
+          <button
+            class="nav-link active"
+            id="home-database-tab-count"
+            data-bs-toggle="tab"
+            data-bs-target="#home-database-pane-count"
+            type="button"
+            role="tab"
+            aria-controls="home-database-pane-count"
+            aria-selected="true"
+            data-home-database-metric-param="count"
+            data-action="shown.bs.tab->home-database#onTabShown"
+          >
+            Количество
+          </button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button
+            class="nav-link"
+            id="home-database-tab-money"
+            data-bs-toggle="tab"
+            data-bs-target="#home-database-pane-money"
+            type="button"
+            role="tab"
+            aria-controls="home-database-pane-money"
+            aria-selected="false"
+            data-home-database-metric-param="money"
+            data-action="shown.bs.tab->home-database#onTabShown"
+          >
+            Экономика
+          </button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button
+            class="nav-link"
+            id="home-database-tab-volume"
+            data-bs-toggle="tab"
+            data-bs-target="#home-database-pane-volume"
+            type="button"
+            role="tab"
+            aria-controls="home-database-pane-volume"
+            aria-selected="false"
+            data-home-database-metric-param="volume"
+            data-action="shown.bs.tab->home-database#onTabShown"
+          >
+            Погрузка
+          </button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button
+            class="nav-link"
+            id="home-database-tab-turnover"
+            data-bs-toggle="tab"
+            data-bs-target="#home-database-pane-turnover"
+            type="button"
+            role="tab"
+            aria-controls="home-database-pane-turnover"
+            aria-selected="false"
+            data-home-database-metric-param="turnover"
+            data-action="shown.bs.tab->home-database#onTabShown"
+          >
+            Грузооборот
+          </button>
+        </li>
+      </ul>
+    </div>
+    <div class="card-body">
+      <div class="tab-content">
+        <div
+          class="tab-pane fade show active"
+          id="home-database-pane-count"
+          role="tabpanel"
+          aria-labelledby="home-database-tab-count"
+          data-home-database-target="tabPanel"
+          data-metric="count"
+        >
+          <div class="route-analytics-pane-placeholder text-muted py-4 text-center d-none">
+            Загрузка...
+          </div>
+          <div class="row g-3 route-analytics-pane-content">
+            <div class="col-lg-6">
+              <div
+                class="route-analytics-table-wrap"
+                data-home-database-target="tableWrap"
+                data-metric="count"
+              ></div>
+            </div>
+            <div class="col-lg-6">
+              <div class="route-analytics-chart-wrap">
+                <canvas
+                  data-home-database-target="chartCanvas"
+                  data-metric="count"
+                  aria-label="Диаграмма: количество маршрутов"
+                ></canvas>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div
+          class="tab-pane fade"
+          id="home-database-pane-money"
+          role="tabpanel"
+          aria-labelledby="home-database-tab-money"
+          data-home-database-target="tabPanel"
+          data-metric="money"
+        >
+          <div class="route-analytics-pane-placeholder text-muted py-4 text-center d-none">
+            Загрузка...
+          </div>
+          <div class="row g-3 route-analytics-pane-content d-none">
+            <div class="col-lg-6">
+              <div
+                class="route-analytics-table-wrap"
+                data-home-database-target="tableWrap"
+                data-metric="money"
+              ></div>
+            </div>
+            <div class="col-lg-6">
+              <div class="route-analytics-chart-wrap">
+                <canvas
+                  data-home-database-target="chartCanvas"
+                  data-metric="money"
+                  aria-label="Диаграмма: сумма денег"
+                ></canvas>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div
+          class="tab-pane fade"
+          id="home-database-pane-volume"
+          role="tabpanel"
+          aria-labelledby="home-database-tab-volume"
+          data-home-database-target="tabPanel"
+          data-metric="volume"
+        >
+          <div class="route-analytics-pane-placeholder text-muted py-4 text-center d-none">
+            Загрузка...
+          </div>
+          <div class="row g-3 route-analytics-pane-content d-none">
+            <div class="col-lg-6">
+              <div
+                class="route-analytics-table-wrap"
+                data-home-database-target="tableWrap"
+                data-metric="volume"
+              ></div>
+            </div>
+            <div class="col-lg-6">
+              <div class="route-analytics-chart-wrap">
+                <canvas
+                  data-home-database-target="chartCanvas"
+                  data-metric="volume"
+                  aria-label="Диаграмма: погрузка"
+                ></canvas>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div
+          class="tab-pane fade"
+          id="home-database-pane-turnover"
+          role="tabpanel"
+          aria-labelledby="home-database-tab-turnover"
+          data-home-database-target="tabPanel"
+          data-metric="turnover"
+        >
+          <div class="route-analytics-pane-placeholder text-muted py-4 text-center d-none">
+            Загрузка...
+          </div>
+          <div class="row g-3 route-analytics-pane-content d-none">
+            <div class="col-lg-6">
+              <div
+                class="route-analytics-table-wrap"
+                data-home-database-target="tableWrap"
+                data-metric="turnover"
+              ></div>
+            </div>
+            <div class="col-lg-6">
+              <div class="route-analytics-chart-wrap">
+                <canvas
+                  data-home-database-target="chartCanvas"
+                  data-metric="turnover"
+                  aria-label="Диаграмма: грузооборот"
+                ></canvas>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% else %}
+<div class="alert alert-warning mt-4" role="alert">
+  Набор маршрутов {{ rzd_route_set_code }} не найден.
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+  {% if rzd_route_set_id %}
+    <script src="{% static 'core/vendor/chartjs/chart.umd.min.js' %}"></script>
+    <script src="{% static 'core/vendor/chartjs/chartjs-plugin-datalabels.min.js' %}"></script>
+    <script
+      type="module"
+      src="{% static 'core/js/app/controllers/home_database_controller.js' %}"
+    ></script>
+  {% endif %}
 {% endblock %}

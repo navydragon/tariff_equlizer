@@ -1,0 +1,18 @@
+{% extends "base_embed.html" %}
+
+{% block title %}Редактирование сценария · Цифровой тарифный инструментарий{% endblock %}
+
+{% block content %}
+<div class="page-header d-print-none mb-3">
+  <div class="row align-items-center">
+    <div class="col">
+      <h2 class="page-title mb-0">Редактирование сценария: {{ scenario.name }}</h2>
+      <div class="text-muted mt-1">
+        Управление параметрами сценария
+      </div>
+    </div>
+  </div>
+</div>
+
+{% include "scenarios/_edit_scenario_content.html" %}
+{% endblock %}

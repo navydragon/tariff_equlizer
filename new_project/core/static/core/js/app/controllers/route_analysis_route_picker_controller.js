@@ -27,6 +27,7 @@ import { persistActiveScenario } from "../lib/scenario_active.js";
 
     static targets = [
       "scenarioSelect",
+      "scenarioEditButton",
       "searchInput",
       "filtersCollapse",
       "searchCollapse",
@@ -62,6 +63,7 @@ import { persistActiveScenario } from "../lib/scenario_active.js";
       pickerOptionsUrl: String,
       routeAnalysisUrl: String,
       activeScenarioId: String,
+      scenarioEditUrl: String,
       pageSize: { type: Number, default: 20 },
       searchDebounceMs: { type: Number, default: 400 },
     };
@@ -119,6 +121,10 @@ import { persistActiveScenario } from "../lib/scenario_active.js";
         equalizerOverrides: {},
         equalizerDebounceTimer: null,
         equalizerRecalcInFlight: false,
+        scenarioEditModal: null,
+        scenarioEditModalEl: null,
+        scenarioEditFrame: null,
+        boundScenarioEditModalHiddenHandler: null,
       };
 
       this.state.modalEl = document.getElementById("routeAnalysisRouteModal");
@@ -126,6 +132,23 @@ import { persistActiveScenario } from "../lib/scenario_active.js";
         this.state.modal =
           bootstrap.Modal.getInstance(this.state.modalEl) ||
           bootstrap.Modal.getOrCreateInstance(this.state.modalEl);
+      }
+      this.state.scenarioEditModalEl = document.getElementById(
+        "routeAnalysisScenarioEditModal",
+      );
+      this.state.scenarioEditFrame = document.getElementById(
+        "routeAnalysisScenarioEditFrame",
+      );
+      if (this.state.scenarioEditModalEl && typeof bootstrap !== "undefined") {
+        this.state.scenarioEditModal =
+          bootstrap.Modal.getInstance(this.state.scenarioEditModalEl) ||
+          bootstrap.Modal.getOrCreateInstance(this.state.scenarioEditModalEl);
+        this.state.boundScenarioEditModalHiddenHandler =
+          this._onScenarioEditModalHidden.bind(this);
+        this.state.scenarioEditModalEl.addEventListener(
+          "hidden.bs.modal",
+          this.state.boundScenarioEditModalHiddenHandler,
+        );
       }
       this.state.boundSearchHandler = this.onSearchInput.bind(this);
       this.state.pickerMode = this._getPickerMode();
@@ -151,6 +174,15 @@ import { persistActiveScenario } from "../lib/scenario_active.js";
       clearTimeout(this.state.searchTimeout);
       clearTimeout(this.state.cascadeFilterTimeout);
       this._destroyCascadeTomSelects();
+      if (
+        this.state.scenarioEditModalEl &&
+        this.state.boundScenarioEditModalHiddenHandler
+      ) {
+        this.state.scenarioEditModalEl.removeEventListener(
+          "hidden.bs.modal",
+          this.state.boundScenarioEditModalHiddenHandler,
+        );
+      }
     }
 
     onFiltersShown() {
@@ -334,6 +366,48 @@ import { persistActiveScenario } from "../lib/scenario_active.js";
       this._renderDiagram();
     }
 
+    openScenarioEditModal() {
+      const scenarioId = this.state.selectedScenarioId;
+      if (!scenarioId || !this.state.scenarioEditFrame) return;
+
+      const url = this._buildScenarioEditUrl(scenarioId);
+      if (!url) return;
+
+      this.state.scenarioEditFrame.src = url;
+      if (this.state.scenarioEditModal) {
+        this.state.scenarioEditModal.show();
+      }
+    }
+
+    async _onScenarioEditModalHidden() {
+      if (this.state.scenarioEditFrame) {
+        this.state.scenarioEditFrame.src = "about:blank";
+      }
+
+      const prevId = this.state.selectedScenarioId;
+      try {
+        await this._loadScenarios();
+        if (prevId != null && this.state.scenarioById.has(prevId)) {
+          if (this.hasScenarioSelectTarget) {
+            this.scenarioSelectTarget.value = String(prevId);
+          }
+          this._setScenario(prevId);
+        } else {
+          this._selectDefaultScenario();
+        }
+        this._renderDiagram();
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.error("[route-analysis] scenario list refresh failed", e);
+      }
+    }
+
+    _buildScenarioEditUrl(scenarioId) {
+      const template = (this.scenarioEditUrlValue || "").trim();
+      if (!template || scenarioId == null) return null;
+      return `${template.replace("/0/", `/${scenarioId}/`)}?embed=1`;
+    }
+
     onSearchInput() {
       clearTimeout(this.state.searchTimeout);
       this.state.routesPage = 1;
@@ -458,6 +532,10 @@ import { persistActiveScenario } from "../lib/scenario_active.js";
       this.state.selectedScenarioId = scenarioId;
       this.state.pendingSelectedRoute = null;
       this._setConfirmEnabled(false);
+
+      if (this.hasScenarioEditButtonTarget) {
+        this.scenarioEditButtonTarget.disabled = scenarioId == null;
+      }
 
       const s =
         scenarioId != null ? this.state.scenarioById.get(scenarioId) : null;
@@ -2852,7 +2930,7 @@ import { persistActiveScenario } from "../lib/scenario_active.js";
             },
             title: {
               display: true,
-              text: 'Изменение тарифа ОАО "РЖД"',
+              text: "Эластичность грузовой базы по тарифу",
               align: "start",
               font: { size: 16, weight: "600" },
               padding: { bottom: 12 },

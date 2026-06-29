@@ -206,3 +206,20 @@ class RouteAnalyticsServiceTests(TestCase):
         )
         self.assertIsNone(result)
         self.assertIn("Набор маршрутов не найден", errors)
+
+    def test_aggregate_totals(self) -> None:
+        result, errors = self.service.aggregate_totals(self.route_set.id)
+        self.assertEqual(errors, [])
+        assert result is not None
+        self.assertEqual(result.route_set_code, "RS_ANALYTICS")
+        cards_by_metric = {card.metric: card for card in result.cards}
+        self.assertEqual(cards_by_metric["count"].value, Decimal("3"))
+        self.assertEqual(cards_by_metric["count"].value_display, "3")
+        self.assertEqual(cards_by_metric["money"].value, Decimal("6000000.00"))
+        self.assertEqual(cards_by_metric["volume"].value, Decimal("6000.00"))
+        self.assertEqual(cards_by_metric["turnover"].value, Decimal("30000000.00"))
+
+    def test_aggregate_totals_missing_route_set(self) -> None:
+        result, errors = self.service.aggregate_totals(999999)
+        self.assertIsNone(result)
+        self.assertIn("Набор маршрутов не найден", errors)

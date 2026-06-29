@@ -16,6 +16,7 @@ from core.domain.cargo.formatting import format_etsng_code
 from core.domain.cargo.services import CargoService
 from core.domain.route_analysis.dto import RouteAnalysisRequestDTO
 from core.domain.route_analysis.services import RouteAnalysisService
+from core.domain.route_analytics.dimensions import RZD_2026_ROUTE_SET_CODE
 from core.domain.route_analytics.dto import RouteAnalyticsRequestDTO
 from core.domain.route_analytics.services import RouteAnalyticsService
 from core.domain.services.app_settings import AppSettingsService
@@ -27,7 +28,7 @@ from core.domain.route.dto import (
     RoutePickerOptionsRequestDTO,
     UpdateRouteSetDTO,
 )
-from core.domain.route.repositories import RouteRepository
+from core.domain.route.repositories import RouteRepository, RouteSetRepository
 from core.domain.route.services import RouteService, RouteSetService
 from core.models import (
     Region,
@@ -71,7 +72,15 @@ def home(request):
         items = json.load(f)
 
     items = sorted(items, key=lambda x: x.get("position", 0))
-    return render(request, "core/home.html", {"menu_items": items})
+
+    rzd_route_set = RouteSetRepository().get_by_code(RZD_2026_ROUTE_SET_CODE)
+    context = {
+        "menu_items": items,
+        "rzd_route_set_id": rzd_route_set.id if rzd_route_set else None,
+        "rzd_route_set_code": rzd_route_set.code if rzd_route_set else RZD_2026_ROUTE_SET_CODE,
+        "rzd_route_set_name": rzd_route_set.name if rzd_route_set else "",
+    }
+    return render(request, "core/home.html", context)
 
 
 @login_required
@@ -2203,6 +2212,24 @@ def route_analytics_aggregate_api(request):
 
     service = RouteAnalyticsService()
     result, errors = service.aggregate(dto)
+    if errors:
+        status = 404 if "не найден" in errors[0] else 400
+        return JsonResponse({"success": False, "errors": errors}, status=status)
+
+    assert result is not None
+    return JsonResponse({"success": True, **result.to_api_dict()})
+
+
+@login_required
+@require_http_methods(["GET"])
+def route_analytics_totals_api(request):
+    try:
+        route_set_id = int(request.GET.get("route_set_id", "0"))
+    except (TypeError, ValueError):
+        route_set_id = 0
+
+    service = RouteAnalyticsService()
+    result, errors = service.aggregate_totals(route_set_id)
     if errors:
         status = 404 if "не найден" in errors[0] else 400
         return JsonResponse({"success": False, "errors": errors}, status=status)

@@ -172,6 +172,7 @@ def scenario_effects_compute_pandas_api(request):
             "route_mart_cache_hit": meta.get("route_mart_cache_hit", False),
             "scenario_compute_cache_hit": meta.get("scenario_compute_cache_hit", False),
             "compact_ready": meta.get("compact_ready", True),
+            "early_group_ready": meta.get("early_group_ready", meta.get("compact_ready", True)),
             "data_version": meta.get("data_version"),
             "timings": meta.get("timings"),
         },

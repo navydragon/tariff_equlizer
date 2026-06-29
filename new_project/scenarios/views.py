@@ -315,13 +315,27 @@ def scenario_edit_view(request, scenario_id):
     ):
         return HttpResponse("Нет прав на редактирование этого сценария", status=403)
 
-    breadcrumbs = [
-        {"title": "Главная", "url": reverse("home")},
-        {"title": "Сценарии", "url": reverse("scenarios:management")},
-        {"title": "Управление сценариями", "url": reverse("scenarios:management")},
-        {"title": f"Редактирование: {scenario.name}", "url": None},
-    ]
+    context = _build_scenario_edit_context(scenario)
+    template_name = (
+        "scenarios/edit_scenario_embed.html"
+        if request.GET.get("embed")
+        else "scenarios/edit_scenario.html"
+    )
+    if template_name == "scenarios/edit_scenario.html":
+        context["breadcrumbs"] = [
+            {"title": "Главная", "url": reverse("home")},
+            {"title": "Сценарии", "url": reverse("scenarios:management")},
+            {"title": "Управление сценариями", "url": reverse("scenarios:management")},
+            {"title": f"Редактирование: {scenario.name}", "url": None},
+        ]
 
+    response = render(request, template_name, context)
+    if request.GET.get("embed"):
+        response["X-Frame-Options"] = "SAMEORIGIN"
+    return response
+
+
+def _build_scenario_edit_context(scenario):
     price_change_rows = [
         {
             "key": key,
@@ -340,19 +354,14 @@ def scenario_edit_view(request, scenario_id):
     )
     route_sets = route_sets_result.items if route_sets_result else []
 
-    return render(
-        request,
-        "scenarios/edit_scenario.html",
-        {
-            "scenario": scenario,
-            "breadcrumbs": breadcrumbs,
-            "price_change_rows": price_change_rows,
-            "price_change_modes": PRICE_CHANGE_MODES,
-            "export_price_modes": export_price_modes,
-            "retention_coefficient_modes": retention_coefficient_modes,
-            "route_sets": route_sets,
-        },
-    )
+    return {
+        "scenario": scenario,
+        "price_change_rows": price_change_rows,
+        "price_change_modes": PRICE_CHANGE_MODES,
+        "export_price_modes": export_price_modes,
+        "retention_coefficient_modes": retention_coefficient_modes,
+        "route_sets": route_sets,
+    }
 
 
 # === Tariff rules API ===

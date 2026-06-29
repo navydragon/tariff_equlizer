@@ -10,7 +10,14 @@ from core.domain.route.repositories import RouteRepository
 from core.models import RouteSet
 
 from .dimensions import VALID_METRICS, DimensionSpec, get_dimension
-from .dto import RouteAnalyticsRequestDTO, RouteAnalyticsResultDTO, RouteAnalyticsRowDTO
+from .dto import (
+    METRIC_LABELS,
+    RouteAnalyticsRequestDTO,
+    RouteAnalyticsResultDTO,
+    RouteAnalyticsRowDTO,
+    RouteSetTotalCardDTO,
+    RouteSetTotalsDTO,
+)
 
 
 def _quantize(value: Decimal, places: int = 2) -> Decimal:
@@ -149,6 +156,51 @@ class RouteAnalyticsService:
                 unit=unit,
                 dimension=spec.code,
                 dimension_label=spec.label,
+            ),
+            [],
+        )
+
+    def aggregate_totals(
+        self,
+        route_set_id: int,
+    ) -> tuple[RouteSetTotalsDTO | None, list[str]]:
+        if not isinstance(route_set_id, int) or route_set_id <= 0:
+            return None, ["Некорректный route_set_id"]
+
+        try:
+            route_set = RouteSet.objects.get(pk=route_set_id)
+        except RouteSet.DoesNotExist:
+            return None, ["Набор маршрутов не найден"]
+
+        formatters = _metric_formatters()
+        agg_kwargs = {metric: expr for metric, (_fmt, expr) in formatters.items()}
+        qs = self.route_repository.list_queryset(route_set_id)
+        raw = qs.aggregate(**agg_kwargs)
+
+        cards: list[RouteSetTotalCardDTO] = []
+        for metric, (formatter, _expr) in formatters.items():
+            value = raw.get(metric)
+            if value is None:
+                value = Decimal("0")
+            elif not isinstance(value, Decimal):
+                value = Decimal(str(value))
+            value_display, unit = formatter(value)
+            cards.append(
+                RouteSetTotalCardDTO(
+                    metric=metric,
+                    label=METRIC_LABELS[metric],
+                    value=value,
+                    value_display=value_display,
+                    unit=unit,
+                )
+            )
+
+        return (
+            RouteSetTotalsDTO(
+                route_set_id=route_set.id,
+                route_set_code=route_set.code,
+                route_set_name=route_set.name,
+                cards=cards,
             ),
             [],
         )

@@ -13,6 +13,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
   class DecisionEffectsController extends Stimulus.Controller {
     static targets = [
       "scenarioSelect",
+      "scenarioEditButton",
       "kpiCards",
       "groupBySelect",
       "groupByInnerSelect",
@@ -43,6 +44,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
       revenuesExportUrl: String,
       volumesExportUrl: String,
       activeScenarioId: String,
+      scenarioEditUrl: String,
       debounceMs: { type: Number, default: 350 },
     };
 
@@ -62,9 +64,33 @@ import { clearToasts, showToast } from "../lib/toast.js";
         suppressFilterEvents: false,
         computing: false,
         compactPending: false,
+        awaitingCompact: false,
+        earlyGroupReady: false,
         lastDataVersion: null,
         revisionTimer: null,
+        scenarioEditModal: null,
+        scenarioEditModalEl: null,
+        scenarioEditFrame: null,
+        boundScenarioEditModalHiddenHandler: null,
       };
+
+      this.state.scenarioEditModalEl = document.getElementById(
+        "decisionEffectsScenarioEditModal",
+      );
+      this.state.scenarioEditFrame = document.getElementById(
+        "decisionEffectsScenarioEditFrame",
+      );
+      if (this.state.scenarioEditModalEl && typeof bootstrap !== "undefined") {
+        this.state.scenarioEditModal =
+          bootstrap.Modal.getInstance(this.state.scenarioEditModalEl) ||
+          bootstrap.Modal.getOrCreateInstance(this.state.scenarioEditModalEl);
+        this.state.boundScenarioEditModalHiddenHandler =
+          this._onScenarioEditModalHidden.bind(this);
+        this.state.scenarioEditModalEl.addEventListener(
+          "hidden.bs.modal",
+          this.state.boundScenarioEditModalHiddenHandler,
+        );
+      }
 
       this._onVisibilityChange = this._onVisibilityChange.bind(this);
       this._onTariffRulesChanged = this._onTariffRulesChanged.bind(this);
@@ -81,6 +107,15 @@ import { clearToasts, showToast } from "../lib/toast.js";
     disconnect() {
       document.removeEventListener("visibilitychange", this._onVisibilityChange);
       document.removeEventListener("tariff-rules-changed", this._onTariffRulesChanged);
+      if (
+        this.state?.scenarioEditModalEl &&
+        this.state?.boundScenarioEditModalHiddenHandler
+      ) {
+        this.state.scenarioEditModalEl.removeEventListener(
+          "hidden.bs.modal",
+          this.state.boundScenarioEditModalHiddenHandler,
+        );
+      }
       if (this.state?.revisionTimer) {
         clearInterval(this.state.revisionTimer);
         this.state.revisionTimer = null;
@@ -96,8 +131,54 @@ import { clearToasts, showToast } from "../lib/toast.js";
       const scenarioId = raw ? Number(raw) : null;
       this.state.selectedScenarioId = scenarioId;
       this.state.cacheKey = null;
+      this._updateScenarioEditButtonState();
       this._persistActiveScenario(scenarioId);
       this._computeEffects();
+    }
+
+    openScenarioEditModal() {
+      const scenarioId = this.state.selectedScenarioId;
+      if (!scenarioId || !this.state.scenarioEditFrame) return;
+
+      const url = this._buildScenarioEditUrl(scenarioId);
+      if (!url) return;
+
+      this.state.scenarioEditFrame.src = url;
+      if (this.state.scenarioEditModal) {
+        this.state.scenarioEditModal.show();
+      }
+    }
+
+    async _onScenarioEditModalHidden() {
+      if (this.state.scenarioEditFrame) {
+        this.state.scenarioEditFrame.src = "about:blank";
+      }
+
+      const prevId = this.state.selectedScenarioId;
+      try {
+        await this._loadScenarios();
+        if (prevId != null && this.state.scenarioById.has(prevId)) {
+          if (this.hasScenarioSelectTarget) {
+            this.scenarioSelectTarget.value = String(prevId);
+          }
+          this.state.selectedScenarioId = prevId;
+          this._updateScenarioEditButtonState();
+        }
+      } catch (e) {
+        console.error("[decision-effects] scenario list refresh failed", e);
+      }
+    }
+
+    _buildScenarioEditUrl(scenarioId) {
+      const template = (this.scenarioEditUrlValue || "").trim();
+      if (!template || scenarioId == null) return null;
+      return `${template.replace("/0/", `/${scenarioId}/`)}?embed=1`;
+    }
+
+    _updateScenarioEditButtonState() {
+      if (!this.hasScenarioEditButtonTarget) return;
+      this.scenarioEditButtonTarget.disabled =
+        this.state.selectedScenarioId == null;
     }
 
     onFilterChange() {
@@ -190,6 +271,8 @@ import { clearToasts, showToast } from "../lib/toast.js";
         opt.value = "";
         opt.textContent = "Нет доступных сценариев";
         this.scenarioSelectTarget.appendChild(opt);
+        this.state.selectedScenarioId = null;
+        this._updateScenarioEditButtonState();
         return;
       }
 
@@ -211,6 +294,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
       if (selectedId) {
         this.scenarioSelectTarget.value = String(selectedId);
         this.state.selectedScenarioId = selectedId;
+        this._updateScenarioEditButtonState();
         this._computeEffects();
       }
     }
@@ -260,6 +344,10 @@ import { clearToasts, showToast } from "../lib/toast.js";
 
         this.state.cacheKey = data.cache_key || null;
         this.state.compactPending = data.compact_ready === false;
+        this.state.awaitingCompact = data.compact_ready === false;
+        this.state.earlyGroupReady = Boolean(
+          data.early_group_ready ?? data.compact_ready,
+        );
         this.state.lastDataVersion = data.data_version || null;
         if (this.state.compactPending) {
           this._setCompactPendingIndicator(true);
@@ -280,11 +368,32 @@ import { clearToasts, showToast } from "../lib/toast.js";
         this._syncFilterOptions(data.filter_options || {});
         this._renderKpiCards(data.cards || []);
 
+        const useEarlyAbsolute = this._canUseEarlyAbsolute();
         await Promise.all([
           this._aggregateEffects({ showTableLoading: true }),
-          this._aggregateRevenues(),
-          this._aggregateVolumes(),
+          ...(useEarlyAbsolute
+            ? [this._aggregateRevenues(), this._aggregateVolumes()]
+            : []),
         ]);
+
+        if (this.state.awaitingCompact) {
+          if (useEarlyAbsolute) {
+            void this._refreshAbsoluteWhenCompactReady();
+          } else {
+            await this._ensureCompactReady();
+            await Promise.all([
+              this._aggregateRevenues(),
+              this._aggregateVolumes(),
+            ]);
+          }
+        } else if (!useEarlyAbsolute) {
+          await Promise.all([
+            this._aggregateRevenues(),
+            this._aggregateVolumes(),
+          ]);
+        }
+
+        this.state.awaitingCompact = false;
       } catch (error) {
         console.error("[decision-effects] compute failed", error);
         this.state.cacheKey = null;
@@ -388,8 +497,10 @@ import { clearToasts, showToast } from "../lib/toast.js";
           return;
         }
 
-        this.state.compactPending = false;
-        this._setCompactPendingIndicator(false);
+        if (!this.state.awaitingCompact) {
+          this.state.compactPending = false;
+          this._setCompactPendingIndicator(false);
+        }
         this._renderTable(
           data.table && data.table.rows ? data.table.rows : [],
           Boolean(data.table && data.table.show_fallout),
@@ -439,6 +550,12 @@ import { clearToasts, showToast } from "../lib/toast.js";
         });
         if (data && data.success) {
           this.state.compactPending = !data.compact_ready;
+          if (data.compact_ready) {
+            this.state.awaitingCompact = false;
+          }
+          if (data.early_group_ready) {
+            this.state.earlyGroupReady = true;
+          }
           if (data.data_version) {
             this.state.lastDataVersion = data.data_version;
           }
@@ -447,6 +564,46 @@ import { clearToasts, showToast } from "../lib/toast.js";
         console.error("[decision-effects] compact-status failed", error);
       }
       await this._sleep(2000);
+    }
+
+    async _ensureCompactReady() {
+      if (!this.state.awaitingCompact && !this.state.compactPending) {
+        return true;
+      }
+
+      const maxAttempts = 45;
+      for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+        if (!this.state.cacheKey) {
+          return false;
+        }
+
+        if (this.compactStatusUrlValue) {
+          try {
+            const { data } = await fetchJson(this.compactStatusUrlValue, {
+              method: "POST",
+              body: { cache_key: this.state.cacheKey },
+            });
+        if (data?.success && data.compact_ready) {
+          this.state.compactPending = false;
+          this.state.awaitingCompact = false;
+          this.state.earlyGroupReady = true;
+          this._setCompactPendingIndicator(false);
+          return true;
+        }
+        if (data?.success && data.early_group_ready) {
+          this.state.earlyGroupReady = true;
+        }
+          } catch (error) {
+            console.error("[decision-effects] compact-status failed", error);
+          }
+        }
+
+        this._setRevenuesTableLoading(true, "Обновление детализации…");
+        this._setVolumesTableLoading(true, "Обновление детализации…");
+        await this._sleep(2000);
+      }
+
+      return false;
     }
 
     _onVisibilityChange() {
@@ -570,6 +727,8 @@ import { clearToasts, showToast } from "../lib/toast.js";
           "Обновление детализации…",
         );
       }
+      this._setRevenuesTableLoading(true, "Обновление детализации…");
+      this._setVolumesTableLoading(true, "Обновление детализации…");
     }
 
     _setKpiLoading(isLoading) {
@@ -645,10 +804,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
       );
     }
 
-    _renderWarning(skippedCharge, skippedVolume, meta = {}) {
-      const chargeCount = Number(skippedCharge) || 0;
-      const volumeCount = Number(skippedVolume) || 0;
-
+    _renderWarning(_skippedCharge, _skippedVolume, meta = {}) {
       if (meta.elapsed_ms != null || meta.timings) {
         const elapsed =
           meta.elapsed_ms === undefined || meta.elapsed_ms === null
@@ -700,27 +856,6 @@ import { clearToasts, showToast } from "../lib/toast.js";
             variant: "info",
             title: "Готово",
             delay: 7000,
-          }),
-        );
-      }
-
-      const warnings = [];
-      if (chargeCount > 0) {
-        warnings.push(
-          `${chargeCount} маршрут(ов) без провозной платы не учтены в расчёте доходов.`,
-        );
-      }
-      if (volumeCount > 0) {
-        warnings.push(
-          `${volumeCount} маршрут(ов) без объёма перевозок не учтены в блоке объёмов.`,
-        );
-      }
-      if (warnings.length) {
-        showToast(
-          warnings,
-          this._toastOptions({
-            variant: "warning",
-            delay: 9000,
           }),
         );
       }
@@ -1136,6 +1271,42 @@ import { clearToasts, showToast } from "../lib/toast.js";
       return (num / 1_000_000_000).toFixed(1);
     }
 
+    _absoluteGroupingIsDefault() {
+      const revenuesGroupBy =
+        this.revenuesGroupBySelectTarget?.value || "cargo_group";
+      const revenuesInner =
+        this.revenuesGroupByInnerSelectTarget?.value || "none";
+      const volumesGroupBy =
+        this.volumesGroupBySelectTarget?.value || "cargo_group";
+      const volumesInner =
+        this.volumesGroupByInnerSelectTarget?.value || "none";
+      return (
+        revenuesGroupBy === "cargo_group" &&
+        revenuesInner === "none" &&
+        volumesGroupBy === "cargo_group" &&
+        volumesInner === "none"
+      );
+    }
+
+    _canUseEarlyAbsolute(earlyGroupReady = this.state.earlyGroupReady) {
+      return Boolean(earlyGroupReady) && this._absoluteGroupingIsDefault();
+    }
+
+    _needsFullCompactForAbsolute() {
+      return !this._absoluteGroupingIsDefault();
+    }
+
+    async _refreshAbsoluteWhenCompactReady() {
+      const ready = await this._ensureCompactReady();
+      if (!ready || !this._absoluteGroupingIsDefault()) {
+        return;
+      }
+      await Promise.all([
+        this._aggregateRevenues(),
+        this._aggregateVolumes(),
+      ]);
+    }
+
     _absolutePayload(kind) {
       const isRevenues = kind === "revenues";
       return {
@@ -1150,89 +1321,108 @@ import { clearToasts, showToast } from "../lib/toast.js";
       };
     }
 
-    async _aggregateRevenues() {
-      if (
-        !this.revenuesUrlValue ||
-        !this.state.cacheKey ||
-        !this.state.selectedScenarioId
-      ) {
-        return;
-      }
-
-      this._setRevenuesTableLoading(true);
-
-      try {
-        const { response, data } = await fetchJson(this.revenuesUrlValue, {
-          method: "POST",
-          body: this._absolutePayload("revenues"),
-        });
-
-        if (!response.ok || !data || !data.success) {
-          const message =
-            (data && data.errors && data.errors.join("; ")) ||
-            "Ошибка загрузки выручки";
-          this._showError(message);
-          if (this.hasRevenuesTableWrapTarget) {
-            this._setAbsoluteTableLoading(
-              this.revenuesTableWrapTarget,
-              false,
-            );
-            this.revenuesTableWrapTarget.innerHTML =
-              '<div class="text-muted py-4 text-center">Нет данных.</div>';
-          }
-          return;
-        }
-
-        this._renderAbsoluteTable(
-          this.revenuesTableWrapTarget,
-          data,
-        );
-      } catch (error) {
-        console.error("[decision-effects] revenues aggregate failed", error);
-        if (this.hasRevenuesTableWrapTarget) {
-          this._setAbsoluteTableLoading(this.revenuesTableWrapTarget, false);
-          this.revenuesTableWrapTarget.innerHTML =
-            '<div class="text-muted py-4 text-center">Не удалось загрузить таблицу.</div>';
-        }
-      }
+    async _aggregateRevenues(options = {}) {
+      return this._aggregateAbsoluteTable("revenues", options);
     }
 
-    async _aggregateVolumes() {
-      if (
-        !this.volumesUrlValue ||
-        !this.state.cacheKey ||
-        !this.state.selectedScenarioId
-      ) {
+    async _aggregateVolumes(options = {}) {
+      return this._aggregateAbsoluteTable("volumes", options);
+    }
+
+    async _aggregateAbsoluteTable(kind, { attempt = 0 } = {}) {
+      const isRevenues = kind === "revenues";
+      const url = isRevenues ? this.revenuesUrlValue : this.volumesUrlValue;
+      const wrapTarget = isRevenues
+        ? this.revenuesTableWrapTarget
+        : this.volumesTableWrapTarget;
+      const hasTarget = isRevenues
+        ? this.hasRevenuesTableWrapTarget
+        : this.hasVolumesTableWrapTarget;
+      const setLoading = (isLoading, message) => {
+        if (isRevenues) {
+          this._setRevenuesTableLoading(isLoading, message);
+        } else {
+          this._setVolumesTableLoading(isLoading, message);
+        }
+      };
+      const errorLabel = isRevenues ? "выручки" : "объёмов";
+
+      if (!url || !this.state.cacheKey || !this.state.selectedScenarioId) {
         return;
       }
 
-      this._setVolumesTableLoading(true);
+      const needsCompactWait =
+        (this.state.awaitingCompact || this.state.compactPending) &&
+        !this._canUseEarlyAbsolute();
+      const maxAttempts = needsCompactWait ? 45 : 5;
+      const loadingMessage = needsCompactWait
+        ? "Обновление детализации…"
+        : "Расчёт данных…";
+
+      if (attempt === 0 || needsCompactWait) {
+        setLoading(true, loadingMessage);
+      }
 
       try {
-        const { response, data } = await fetchJson(this.volumesUrlValue, {
+        const { response, data } = await fetchJson(url, {
           method: "POST",
-          body: this._absolutePayload("volumes"),
+          body: this._absolutePayload(kind),
         });
 
         if (!response.ok || !data || !data.success) {
           const message =
             (data && data.errors && data.errors.join("; ")) ||
-            "Ошибка загрузки объёмов";
+            `Ошибка загрузки ${errorLabel}`;
+          if (needsCompactWait && attempt + 1 < maxAttempts) {
+            await this._waitForCompactReady();
+            return this._aggregateAbsoluteTable(kind, {
+              attempt: attempt + 1,
+            });
+          }
+          if (
+            this._isAggregatePendingMessage(message) &&
+            attempt + 1 < maxAttempts
+          ) {
+            await this._sleep(2000);
+            return this._aggregateAbsoluteTable(kind, {
+              attempt: attempt + 1,
+            });
+          }
           this._showError(message);
-          if (this.hasVolumesTableWrapTarget) {
-            this._setAbsoluteTableLoading(this.volumesTableWrapTarget, false);
-            this.volumesTableWrapTarget.innerHTML =
+          if (hasTarget) {
+            setLoading(false);
+            wrapTarget.innerHTML =
               '<div class="text-muted py-4 text-center">Нет данных.</div>';
           }
           return;
         }
 
-        this._renderAbsoluteTable(this.volumesTableWrapTarget, data);
+        const rows = (data.table && data.table.rows) || [];
+        if (
+          !rows.length &&
+          needsCompactWait &&
+          attempt + 1 < maxAttempts
+        ) {
+          await this._waitForCompactReady();
+          return this._aggregateAbsoluteTable(kind, { attempt: attempt + 1 });
+        }
+
+        if (rows.length) {
+          this.state.compactPending = false;
+          this.state.awaitingCompact = false;
+          this._setCompactPendingIndicator(false);
+        }
+
+        this._renderAbsoluteTable(wrapTarget, data);
       } catch (error) {
-        console.error("[decision-effects] volumes aggregate failed", error);
-        if (this.hasVolumesTableWrapTarget) {
-          this._setAbsoluteTableLoading(this.volumesTableWrapTarget, false);
-          this.volumesTableWrapTarget.innerHTML =
+        console.error(`[decision-effects] ${kind} aggregate failed`, error);
+        if (attempt + 1 < maxAttempts) {
+          await this._sleep(2000);
+          return this._aggregateAbsoluteTable(kind, { attempt: attempt + 1 });
+        }
+        if (hasTarget) {
+          setLoading(false);
+          wrapTarget.innerHTML =
             '<div class="text-muted py-4 text-center">Не удалось загрузить таблицу.</div>';
         }
       }

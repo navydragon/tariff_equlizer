@@ -6,6 +6,26 @@
 {% block extra_css %}
   <link rel="stylesheet" href="{% static 'core/css/route-analysis-equalizer.css' %}" />
   <link rel="stylesheet" href="{% static 'core/css/route-analysis-charts.css' %}" />
+  <style>
+    .route-analysis-scenario-edit-modal-content {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+
+    .route-analysis-scenario-edit-modal-content .modal-body {
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    .route-analysis-scenario-edit-frame {
+      display: block;
+      width: 100%;
+      height: 100%;
+      border: 0;
+    }
+  </style>
 {% endblock %}
 
 {% block content %}
@@ -16,6 +36,7 @@
   data-route-analysis-route-picker-picker-options-url-value="{% url 'route_picker_options_api' %}"
   data-route-analysis-route-picker-route-analysis-url-value="{% url 'route_analysis_api' %}"
   data-route-analysis-route-picker-active-scenario-id-value="{{ request.user.active_scenario_id|default:'' }}"
+  data-route-analysis-route-picker-scenario-edit-url-value="{% url 'scenarios:edit' 0 %}"
 >
   <div class="page-header d-print-none">
     <div class="row align-items-center">
@@ -26,13 +47,26 @@
         <label class="form-label mb-1" for="routeAnalysisPageScenarioSelect">
           Сценарий
         </label>
-        <select
-          id="routeAnalysisPageScenarioSelect"
-          class="form-select form-select-sm"
-          style="min-width: 320px;"
-          data-route-analysis-route-picker-target="scenarioSelect"
-          data-action="change->route-analysis-route-picker#onScenarioChange"
-        ></select>
+        <div class="d-flex align-items-center gap-2">
+          <select
+            id="routeAnalysisPageScenarioSelect"
+            class="form-select form-select-sm"
+            style="min-width: 320px;"
+            data-route-analysis-route-picker-target="scenarioSelect"
+            data-action="change->route-analysis-route-picker#onScenarioChange"
+          ></select>
+          <button
+            type="button"
+            class="btn btn-outline-primary px-3"
+            data-route-analysis-route-picker-target="scenarioEditButton"
+            data-action="click->route-analysis-route-picker#openScenarioEditModal"
+            aria-label="Редактировать сценарий"
+            title="Редактировать сценарий"
+            disabled
+          >
+            <i class="ti ti-edit" style="font-size: 1.25rem;"></i>
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -141,7 +175,7 @@
             <option value="structure_ts">Структура ТС</option>
             <option value="decision_effects">Эффект от решений</option>
             <option value="kpi">KPI</option>
-            <option value="rzd_tariff_sensitivity">Изменение тарифа ОАО "РЖД"</option>
+            <option value="rzd_tariff_sensitivity">Эластичность грузовой базы по тарифу</option>
           </select>
         </div>
       </div>
@@ -417,6 +451,38 @@
             <i class="ti ti-check"></i>
             ОК
           </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div
+    class="modal modal-blur fade"
+    id="routeAnalysisScenarioEditModal"
+    tabindex="-1"
+    aria-labelledby="routeAnalysisScenarioEditModalLabel"
+    aria-hidden="true"
+  >
+    <div class="modal-dialog modal-fullscreen" role="document">
+      <div class="modal-content route-analysis-scenario-edit-modal-content">
+        <div class="modal-header py-2">
+          <h5 class="modal-title" id="routeAnalysisScenarioEditModalLabel">
+            Редактирование сценария
+          </h5>
+          <button
+            type="button"
+            class="btn-close"
+            data-bs-dismiss="modal"
+            aria-label="Закрыть"
+          ></button>
+        </div>
+        <div class="modal-body p-0">
+          <iframe
+            id="routeAnalysisScenarioEditFrame"
+            class="route-analysis-scenario-edit-frame"
+            title="Редактирование сценария"
+            src="about:blank"
+          ></iframe>
         </div>
       </div>
     </div>

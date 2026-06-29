@@ -16,6 +16,7 @@ from calculations.domain.services.scenario_effects_compact import (
 )
 from calculations.domain.services.scenario_effects_cache import (
     COMPACT_API_WAIT_TIMEOUT_SECONDS,
+    EarlyGroupSnapshot,
     ScenarioEffectsCachePayload,
     get_payload_ready,
     validate_cache_access,
@@ -40,16 +41,24 @@ class ScenarioAbsoluteService:
             cache_key=request.cache_key,
             user_id=user_id,
             scenario_id=scenario.id,
+            request=request,
         )
         if errors:
             return None, errors
 
-        year_values = self._aggregate_year_values(
-            payload,
-            request=request,
-            value_fn=lambda fact, year: fact.charge_by_year.get(year, Decimal("0")),
-            values_matrix=payload.compact.charge_by_year if payload.compact else None,
-        )
+        if self._can_use_early_snapshot(payload, request):
+            year_values = self._year_values_from_early_snapshot(
+                payload.early_group_snapshot,
+                years=payload.years,
+                metric="charge",
+            )
+        else:
+            year_values = self._aggregate_year_values(
+                payload,
+                request=request,
+                value_fn=lambda fact, year: fact.charge_by_year.get(year, Decimal("0")),
+                values_matrix=payload.compact.charge_by_year if payload.compact else None,
+            )
         rows = self._format_rows(
             year_values,
             years=payload.years,
@@ -79,11 +88,18 @@ class ScenarioAbsoluteService:
             cache_key=request.cache_key,
             user_id=user_id,
             scenario_id=scenario.id,
+            request=request,
         )
         if errors:
             return None, errors
 
-        if payload.compact is not None:
+        if self._can_use_early_snapshot(payload, request):
+            year_values = self._year_values_from_early_snapshot(
+                payload.early_group_snapshot,
+                years=payload.years,
+                metric="volume",
+            )
+        elif payload.compact is not None:
             if payload.compact.volume_by_year is not None:
                 year_values = aggregate_compact_year_values(
                     payload.compact,
@@ -142,6 +158,7 @@ class ScenarioAbsoluteService:
         cache_key: str,
         user_id: int,
         scenario_id: int,
+        request: ScenarioAbsoluteRequestDTO,
     ) -> tuple[ScenarioEffectsCachePayload | None, list[str]]:
         payload = get_payload_ready(
             cache_key,
@@ -159,9 +176,48 @@ class ScenarioAbsoluteService:
             return None, access_errors
 
         if payload.compact is None and payload.compact_pending:
+            if self._can_use_early_snapshot(payload, request):
+                return payload, []
             return None, ["Расчёт ещё выполняется. Повторите запрос через несколько секунд."]
 
         return payload, []
+
+    @staticmethod
+    def _can_use_early_snapshot(
+        payload: ScenarioEffectsCachePayload,
+        request: ScenarioAbsoluteRequestDTO,
+    ) -> bool:
+        snapshot = payload.early_group_snapshot
+        if snapshot is None:
+            return False
+        if request.group_by != "cargo_group" or request.group_by_inner != "none":
+            return False
+        return snapshot.group_dim == "cargo_group"
+
+    @staticmethod
+    def _year_values_from_early_snapshot(
+        snapshot: EarlyGroupSnapshot | None,
+        *,
+        years: list[int],
+        metric: str,
+    ) -> dict[tuple[str, ...], dict[int, Decimal]]:
+        if snapshot is None:
+            return {}
+
+        source = (
+            snapshot.charge_by_year if metric == "charge" else snapshot.volume_by_year
+        )
+        year_values: dict[tuple[str, ...], dict[int, Decimal]] = {}
+        for label_index, label in enumerate(snapshot.dimension_labels):
+            values: dict[int, Decimal] = {}
+            for year in years:
+                year_bucket = source.get(year) or []
+                if label_index < len(year_bucket):
+                    values[year] = year_bucket[label_index]
+                else:
+                    values[year] = Decimal("0")
+            year_values[(label,)] = values
+        return year_values
 
     def _aggregate_year_values(
         self,

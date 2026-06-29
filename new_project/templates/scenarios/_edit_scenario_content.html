@@ -1,0 +1,157 @@
+<div id="editScenarioErrors"></div>
+
+<div
+  data-controller="scenario-edit"
+  data-scenario-edit-scenario-id-value="{{ scenario.id }}"
+  data-scenario-edit-update-url-value="{% url 'scenarios:api_update' scenario.id %}"
+  data-scenario-edit-route-set-list-url-value="{% url 'route_set_list_api' %}"
+  data-scenario-edit-route-sets-preloaded-value="true"
+  data-scenario-edit-tabs-value='["tab-basic","tab-base","tab-fx","tab-inflation","tab-elasticity","tab-tariff"]'
+>
+  <ul class="nav nav-tabs" role="tablist">
+    <li class="nav-item" role="presentation">
+      <a
+        class="nav-link active"
+        id="tab-basic-tab"
+        data-bs-toggle="tab"
+        href="#tab-basic"
+        role="tab"
+        aria-controls="tab-basic"
+        aria-selected="true"
+      >
+        <i class="ti ti-info-circle me-2"></i>
+        Основные сведения
+      </a>
+    </li>
+    <li class="nav-item" role="presentation">
+      <a
+        class="nav-link"
+        id="tab-base-tab"
+        data-bs-toggle="tab"
+        href="#tab-base"
+        role="tab"
+        aria-controls="tab-base"
+        aria-selected="false"
+      >
+        <i class="ti ti-database me-2"></i>
+        Базовые тарифные решения
+      </a>
+    </li>
+    <li class="nav-item" role="presentation">
+      <a
+        class="nav-link"
+        id="tab-tariff-tab"
+        data-bs-toggle="tab"
+        href="#tab-tariff"
+        role="tab"
+        aria-controls="tab-tariff"
+        aria-selected="false"
+      >
+        <i class="ti ti-receipt me-2"></i>
+        Отдельные тарифные решения
+      </a>
+    </li>
+    <li class="nav-item" role="presentation">
+      <a
+        class="nav-link"
+        id="tab-fx-tab"
+        data-bs-toggle="tab"
+        href="#tab-fx"
+        role="tab"
+        aria-controls="tab-fx"
+        aria-selected="false"
+      >
+        <i class="ti ti-currency-dollar me-2"></i>
+        Курсы валют
+      </a>
+    </li>
+    <li class="nav-item" role="presentation">
+      <a
+        class="nav-link"
+        id="tab-inflation-tab"
+        data-bs-toggle="tab"
+        href="#tab-inflation"
+        role="tab"
+        aria-controls="tab-inflation"
+        aria-selected="false"
+      >
+        <i class="ti ti-trending-up me-2"></i>
+        Инфляция
+      </a>
+    </li>
+    <li class="nav-item" role="presentation">
+      <a
+        class="nav-link"
+        id="tab-elasticity-tab"
+        data-bs-toggle="tab"
+        href="#tab-elasticity"
+        role="tab"
+        aria-controls="tab-elasticity"
+        aria-selected="false"
+      >
+        <i class="ti ti-chart-arrows me-2"></i>
+        Эластичность
+      </a>
+    </li>
+  </ul>
+
+  <div class="tab-content pt-3">
+    <div
+      class="tab-pane fade show active"
+      id="tab-basic"
+      role="tabpanel"
+      aria-labelledby="tab-basic-tab"
+    >
+      {% include "scenarios/parameters/basic.html" %}
+    </div>
+
+    <div class="tab-pane fade" id="tab-base" role="tabpanel" aria-labelledby="tab-base-tab">
+      {% include "scenarios/parameters/base.html" %}
+    </div>
+
+    <div class="tab-pane fade" id="tab-fx" role="tabpanel" aria-labelledby="tab-fx-tab">
+      {% include "scenarios/parameters/currencies.html" %}
+    </div>
+
+    <div class="tab-pane fade" id="tab-inflation" role="tabpanel" aria-labelledby="tab-inflation-tab">
+      {% include "scenarios/parameters/inflation.html" %}
+    </div>
+
+    <div class="tab-pane fade" id="tab-elasticity" role="tabpanel" aria-labelledby="tab-elasticity-tab">
+      {% include "scenarios/parameters/elasticity.html" %}
+    </div>
+
+    <div
+      class="tab-pane fade"
+      id="tab-tariff"
+      role="tabpanel"
+      aria-labelledby="tab-tariff-tab"
+    >
+      {% include "scenarios/parameters/tariff.html" %}
+    </div>
+  </div>
+</div>
+
+{# Контейнер для toast уведомлений в правом нижнем углу #}
+<div class="toast-container position-fixed bottom-0 end-0 p-3" style="z-index: 11;">
+  <div id="toastSuccess" class="toast" role="alert" aria-live="assertive" aria-atomic="true">
+    <div class="toast-header bg-success text-white">
+      <i class="ti ti-check me-2"></i>
+      <strong class="me-auto">Успешно</strong>
+      <small class="text-white-50 me-2" id="toastSuccessTime"></small>
+      <button type="button" class="btn-close btn-close-white" data-bs-dismiss="toast" aria-label="Close"></button>
+    </div>
+    <div class="toast-body">
+      Сценарий успешно обновлен
+    </div>
+  </div>
+  <div id="toastError" class="toast" role="alert" aria-live="assertive" aria-atomic="true">
+    <div class="toast-header bg-danger text-white">
+      <i class="ti ti-alert-circle me-2"></i>
+      <strong class="me-auto">Ошибка</strong>
+      <button type="button" class="btn-close btn-close-white" data-bs-dismiss="toast" aria-label="Close"></button>
+    </div>
+    <div class="toast-body" id="toastErrorBody">
+    </div>
+  </div>
+</div>

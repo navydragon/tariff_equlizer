@@ -1,5 +1,12 @@
 import { fetchJson } from "../lib/http.js";
 import { escapeHtml } from "../lib/dom.js";
+import {
+  ROUTE_ANALYTICS_METRICS,
+  createAnalyticsBarChart,
+  destroyAnalyticsChart,
+  renderAnalyticsTable,
+  renderLoadingTable,
+} from "../lib/route_analytics_presentation.js";
 
 (function () {
   const application = window.stimulusApp;
@@ -8,8 +15,7 @@ import { escapeHtml } from "../lib/dom.js";
     return;
   }
 
-  const TOP_CHART_GROUPS = 15;
-  const METRICS = ["count", "money", "volume", "turnover"];
+  const METRICS = ROUTE_ANALYTICS_METRICS;
 
   class RouteAnalyticsController extends Stimulus.Controller {
     static targets = [
@@ -181,13 +187,7 @@ import { escapeHtml } from "../lib/dom.js";
       if (placeholder) placeholder.classList.add("d-none");
       if (content) content.classList.remove("d-none");
 
-      tableWrap.classList.add("route-analytics-table-wrap--loading");
-      tableWrap.innerHTML = `
-        <div class="route-analytics-table-loading text-muted">
-          <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
-          Загрузка...
-        </div>
-      `;
+      renderLoadingTable(tableWrap);
 
       const params = new URLSearchParams();
       params.set("route_set_id", String(this.state.routeSetId));
@@ -214,8 +214,9 @@ import { escapeHtml } from "../lib/dom.js";
         }
 
         this.state.loadedTabs.add(metric);
-        this._renderTable(tableWrap, data);
-        this._renderChart(metric, chartCanvas, data);
+        renderAnalyticsTable(tableWrap, data);
+        this._destroyChart(metric);
+        this.state.charts[metric] = createAnalyticsBarChart(chartCanvas, data);
       } catch (error) {
         if (generation !== this.state.filterGeneration) {
           return;
@@ -225,159 +226,6 @@ import { escapeHtml } from "../lib/dom.js";
         tableWrap.innerHTML =
           '<div class="text-danger py-4 text-center">Не удалось загрузить данные.</div>';
       }
-    }
-
-    _renderTable(tableWrap, data) {
-      const rows = Array.isArray(data.rows) ? data.rows : [];
-      const unit = data.unit || "";
-
-      if (!rows.length) {
-        tableWrap.classList.remove("route-analytics-table-wrap--loading");
-        tableWrap.innerHTML =
-          '<div class="text-muted py-4 text-center">Нет данных для таблицы.</div>';
-        return;
-      }
-
-      const body = rows
-        .map((row) => {
-          const rowClass = row.is_total ? "fw-bold" : "";
-          return `
-            <tr class="${rowClass}">
-              <td>${escapeHtml(row.label || "")}</td>
-              <td class="text-end">${escapeHtml(row.value_display || "")}</td>
-              <td class="text-end">${escapeHtml(row.share_pct || "0.0")}%</td>
-            </tr>
-          `;
-        })
-        .join("");
-
-      tableWrap.classList.remove("route-analytics-table-wrap--loading");
-      tableWrap.innerHTML = `
-        <div class="table-responsive">
-          <table class="table table-sm table-vcenter">
-            <thead>
-              <tr>
-                <th>${escapeHtml(data.dimension_label || "Категория")}</th>
-                <th class="text-end">Значение${unit ? `, ${escapeHtml(unit)}` : ""}</th>
-                <th class="text-end">Доля, %</th>
-              </tr>
-            </thead>
-            <tbody>${body}</tbody>
-          </table>
-        </div>
-      `;
-    }
-
-    _renderChart(metric, canvas, data) {
-      if (typeof window.Chart === "undefined") {
-        return;
-      }
-
-      this._destroyChart(metric);
-
-      const chartRows = this._buildChartRows(data.rows || [], data.unit || "");
-      if (!chartRows.length) {
-        return;
-      }
-
-      const labels = chartRows.map((row) => row.label);
-      const values = chartRows.map((row) => Number(row.value) || 0);
-
-      const ChartDataLabelsPlugin =
-        window.ChartDataLabels || window.ChartDataLabelsPlugin || null;
-      if (ChartDataLabelsPlugin && window.Chart) {
-        window.Chart.register(ChartDataLabelsPlugin);
-      }
-
-      const ctx = canvas.getContext("2d");
-      this.state.charts[metric] = new window.Chart(ctx, {
-        type: "bar",
-        data: {
-          labels,
-          datasets: [
-            {
-              label: data.unit || "",
-              data: values,
-              backgroundColor: "rgba(6, 57, 113, 0.75)",
-              borderRadius: 4,
-              maxBarThickness: 28,
-            },
-          ],
-        },
-        options: {
-          indexAxis: "y",
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            legend: { display: false },
-            datalabels: {
-              anchor: "end",
-              align: "right",
-              color: "#1f2937",
-              font: { size: 11, weight: "600" },
-              formatter: (_value, context) => {
-                const row = chartRows[context.dataIndex];
-                return row ? row.value_display : "";
-              },
-            },
-          },
-          scales: {
-            x: {
-              display: false,
-              grid: { display: false },
-            },
-            y: {
-              grid: { display: false },
-            },
-          },
-        },
-      });
-    }
-
-    _buildChartRows(rows, unit) {
-      const dataRows = rows.filter((row) => !row.is_total);
-      const sorted = [...dataRows].sort(
-        (a, b) => (Number(b.value) || 0) - (Number(a.value) || 0),
-      );
-
-      if (sorted.length <= TOP_CHART_GROUPS) {
-        return sorted;
-      }
-
-      const top = sorted.slice(0, TOP_CHART_GROUPS);
-      const rest = sorted.slice(TOP_CHART_GROUPS);
-      const otherValue = rest.reduce(
-        (sum, row) => sum + (Number(row.value) || 0),
-        0,
-      );
-      const total = rows.find((row) => row.is_total);
-      const totalValue = total ? Number(total.value) || 0 : 0;
-      const sharePct =
-        totalValue > 0
-          ? ((otherValue / totalValue) * 100).toFixed(1)
-          : "0.0";
-
-      top.push({
-        label: "Прочие",
-        value: otherValue,
-        value_display: this._formatCompactValue(otherValue, unit),
-        share_pct: sharePct,
-      });
-
-      return top;
-    }
-
-    _formatCompactValue(value, unit) {
-      if (unit.includes("шт")) {
-        return String(Math.round(value));
-      }
-      if (value >= 1_000_000_000) {
-        return (value / 1_000_000_000).toFixed(2);
-      }
-      if (value >= 1_000_000) {
-        return (value / 1_000_000).toFixed(2);
-      }
-      return value.toFixed(2);
     }
 
     _findPanel(metric) {
@@ -399,11 +247,8 @@ import { escapeHtml } from "../lib/dom.js";
     }
 
     _destroyChart(metric) {
-      const chart = this.state.charts[metric];
-      if (chart) {
-        chart.destroy();
-        delete this.state.charts[metric];
-      }
+      destroyAnalyticsChart(this.state.charts[metric]);
+      delete this.state.charts[metric];
     }
 
     _destroyAllCharts() {
