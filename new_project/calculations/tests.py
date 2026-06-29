@@ -3880,6 +3880,60 @@ class TariffRulesCacheAuditTests(TariffLoadServiceTestMixin, TestCase):
         self.assertTrue(job.consider_demand_elasticity)
         self.assertEqual(job.retention_coefficient_mode, "relative_to_base")
 
+    def test_compute_pandas_passes_elasticity_to_deferred_job(self) -> None:
+        from unittest.mock import patch
+
+        from calculations.domain.services.scenario_effects_pandas import (
+            ScenarioEffectsPandasService,
+        )
+        from calculations.domain.services.route_effects_loader import (
+            fetch_routes_dataframe_cached_timed,
+        )
+
+        category = BTDCategory.objects.create(
+            name="BTD elastic pandas",
+            scenario=self.scenario,
+            position=1,
+        )
+        BTDCategoryValue.objects.create(
+            scenario=self.scenario,
+            category=category,
+            year=2025,
+            value=Decimal("1.0000"),
+        )
+        BTDCategoryValue.objects.create(
+            scenario=self.scenario,
+            category=category,
+            year=2026,
+            value=Decimal("1.1000"),
+        )
+        self.route.freight_charge_rub = Decimal("1000000.00")
+        self.route.save(update_fields=["freight_charge_rub"])
+        fetch_routes_dataframe_cached_timed(self.route_set.id)
+
+        self.scenario.consider_demand_elasticity = True
+        self.scenario.retention_coefficient_mode = "relative_to_base"
+        self.scenario.save(
+            update_fields=[
+                "consider_demand_elasticity",
+                "retention_coefficient_mode",
+            ],
+        )
+
+        with patch(
+            "calculations.domain.services.scenario_effects_pandas.schedule_deferred_full_compute",
+        ) as schedule_mock:
+            ScenarioEffectsPandasService().compute_pandas(
+                scenario=self.scenario,
+                user_id=self.user.id,
+            )
+
+        schedule_mock.assert_called_once()
+        job = schedule_mock.call_args.args[0]
+        self.assertTrue(job.consider_demand_elasticity)
+        self.assertEqual(job.retention_coefficient_mode, "relative_to_base")
+        self.assertTrue(job.cache_key)
+
     def test_ten_rules_mask_cache_hit(self) -> None:
         from calculations.domain.services.route_effects_loader import (
             fetch_routes_dataframe_cached_timed,

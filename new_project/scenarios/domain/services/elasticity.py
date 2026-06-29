@@ -80,6 +80,11 @@ class ElasticityService:
 
         scenario.elasticity_set = elasticity_set
         scenario.save(update_fields=["elasticity_set"])
+        from calculations.domain.services.scenario_warm_scheduler import (
+            schedule_scenario_compute_rebuild,
+        )
+
+        schedule_scenario_compute_rebuild(scenario_id=scenario.id)
         return ScenarioDTO.from_model(scenario), []
 
     @transaction.atomic

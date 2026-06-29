@@ -245,26 +245,8 @@ class ScenarioEffectsPandasService:
         t_cache = time.perf_counter()
 
         if deferred_job is not None:
-            schedule_deferred_full_compute(
-                DeferredFullComputeJob(
-                    cache_key=cache_key,
-                    scenario_id=deferred_job.scenario_id,
-                    route_set_id=deferred_job.route_set_id,
-                    data_version=deferred_job.data_version,
-                    years=deferred_job.years,
-                    base_coef_by_year=deferred_job.base_coef_by_year,
-                    rule_specs=deferred_job.rule_specs,
-                    parquet_path=deferred_job.parquet_path,
-                    mask_cache_dir_path=deferred_job.mask_cache_dir_path,
-                    mart_meta=deferred_job.mart_meta,
-                    global_totals=deferred_job.global_totals,
-                    filter_options=deferred_job.filter_options,
-                    skipped_charge=deferred_job.skipped_charge,
-                    routes_without_volume=deferred_job.routes_without_volume,
-                    include_rule_breakdown=deferred_job.include_rule_breakdown,
-                    consider_turnover_changes=deferred_job.consider_turnover_changes,
-                ),
-            )
+            deferred_job.cache_key = cache_key
+            schedule_deferred_full_compute(deferred_job)
 
         elapsed_ms = int((t_cache - started) * 1000)
         route_mart_hit = bool(load_timings.get("cache_hit"))

@@ -84,3 +84,12 @@ def schedule_debounced_scenario_warm(
             timer.start()
 
     transaction.on_commit(_schedule_timer)
+
+
+def schedule_scenario_compute_rebuild(*, scenario_id: int) -> None:
+    schedule_debounced_scenario_warm(
+        scenario_id=scenario_id,
+        change="update",
+        rule_id=None,
+        mask_changed=False,
+    )

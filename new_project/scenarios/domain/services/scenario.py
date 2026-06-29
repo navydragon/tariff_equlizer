@@ -18,6 +18,36 @@ from scenarios.domain.services.scenario_access import (
 from scenarios.models import ExchangeRateSet
 
 
+def _schedule_scenario_compute_warm(*, scenario_id: int) -> None:
+    from calculations.domain.services.scenario_warm_scheduler import (
+        schedule_scenario_compute_rebuild,
+    )
+
+    schedule_scenario_compute_rebuild(scenario_id=scenario_id)
+
+
+def _compute_affecting_update(
+    scenario,
+    update_data: dict,
+    *,
+    route_set_changed: bool,
+) -> bool:
+    if route_set_changed:
+        return True
+    compute_fields = (
+        "start_year",
+        "end_year",
+        "consider_turnover_changes",
+        "consider_demand_elasticity",
+        "consider_enterprise_load",
+        "retention_coefficient_mode",
+    )
+    return any(
+        field in update_data and getattr(scenario, field) != update_data[field]
+        for field in compute_fields
+    )
+
+
 class ScenarioService:
     """Сервис для работы со сценариями."""
 
@@ -147,6 +177,7 @@ class ScenarioService:
         route_set, errors = self._get_route_set(dto.route_set_id)
         if errors:
             return None, errors
+        route_set_changed = route_set is not None and scenario.route_set_id != route_set.id
         if route_set is not None:
             update_data["route_set"] = route_set
 
@@ -165,6 +196,13 @@ class ScenarioService:
         updated_scenario = self.repository.update(scenario_id, update_data)
         if not updated_scenario:
             return None, ["Ошибка при обновлении сценария"]
+
+        if _compute_affecting_update(
+            scenario,
+            update_data,
+            route_set_changed=route_set_changed,
+        ):
+            _schedule_scenario_compute_warm(scenario_id=scenario_id)
 
         if dto.price_change_settings is not None:
             price_errors = self.price_change_service.save_settings(
