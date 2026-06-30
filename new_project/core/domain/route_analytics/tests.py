@@ -223,3 +223,41 @@ class RouteAnalyticsServiceTests(TestCase):
         result, errors = self.service.aggregate_totals(999999)
         self.assertIsNone(result)
         self.assertIn("Набор маршрутов не найден", errors)
+
+    def test_excludes_ipem_model_routes_from_analytics(self) -> None:
+        cargo = Cargo.objects.get(code=3001)
+        origin = Station.objects.get(esr_code=300001)
+        destination = Station.objects.get(esr_code=300002)
+        wagon_kind = WagonKind.objects.get(code="WK3")
+        shipment_type = ShipmentType.objects.get(code="ST3")
+        message_type = MessageType.objects.get(code="MT3")
+
+        Route.objects.create(
+            route_set=self.route_set,
+            route_code="RA-MODEL",
+            cargo=cargo,
+            origin_station=origin,
+            destination_station=destination,
+            wagon_kind=wagon_kind,
+            shipment_type=shipment_type,
+            message_type=message_type,
+            is_model=True,
+            freight_charge_rub=Decimal("9000000.00"),
+            transport_volume_tons=Decimal("9000.00"),
+            freight_turnover_tkm=Decimal("90000000.00"),
+        )
+
+        totals, errors = self.service.aggregate_totals(self.route_set.id)
+        self.assertEqual(errors, [])
+        assert totals is not None
+        cards_by_metric = {card.metric: card for card in totals.cards}
+        self.assertEqual(cards_by_metric["count"].value, Decimal("3"))
+        self.assertEqual(cards_by_metric["money"].value, Decimal("6000000.00"))
+        self.assertEqual(cards_by_metric["turnover"].value, Decimal("30000000.00"))
+
+        result, errors = self.service.aggregate(
+            self._request(dimension="cargo_group", metric="count"),
+        )
+        self.assertEqual(errors, [])
+        assert result is not None
+        self.assertEqual(result.total, Decimal("3"))

@@ -91,6 +91,10 @@ class RouteRepository:
     def list_queryset(self, route_set_id: int) -> QuerySet[Route]:
         return self.detail_queryset().filter(route_set_id=route_set_id)
 
+    def list_operational_queryset(self, route_set_id: int) -> QuerySet[Route]:
+        """Маршруты выгрузки РЖД (без IPEM model-маршрутов для экономики/эластичности)."""
+        return self.list_queryset(route_set_id).operational()
+
     def apply_filters(
         self,
         qs: QuerySet[Route],

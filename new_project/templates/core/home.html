@@ -10,6 +10,10 @@
       .home-database-section-title {
         margin-top: 2rem;
       }
+      .home-database-source-columns {
+        font-size: 0.875rem;
+        line-height: 1.45;
+      }
     </style>
   {% endif %}
 {% endblock %}
@@ -71,9 +75,16 @@
 >
   <div class="home-database-section-title">
     <h3 class="mb-1">Актуальная версия базы</h3>
-    {% if rzd_route_set_name %}
-      <div class="text-muted">{{ rzd_route_set_name }}</div>
-    {% endif %}
+    <div class="text-muted">РЖД, версия базы 2026 года</div>
+    <div class="text-muted home-database-source-columns mt-1">
+      Данные столбцов таблицы «ИХ_ГП»:
+      <ul class="mb-0 ps-3">
+        <li>«Объем перевозок (т)» — погрузка</li>
+        <li>«Грузооборот (т_км)» — грузооборот</li>
+        <li>«Провозная плата (руб)» — экономика</li>
+        <li>количество маршрутов — по всем строкам выгрузки</li>
+      </ul>
+    </div>
   </div>
 
   <div class="row row-cards g-3 mt-2" data-home-database-target="kpiRow">

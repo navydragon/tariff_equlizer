@@ -103,7 +103,7 @@ class RouteAnalyticsService:
 
         formatter, agg_expr = _metric_formatters()[request_dto.metric]
 
-        qs = self.route_repository.list_queryset(request_dto.route_set_id)
+        qs = self.route_repository.list_operational_queryset(request_dto.route_set_id)
         qs = _annotate_dimension(qs, spec)
 
         grouped = (
@@ -174,7 +174,7 @@ class RouteAnalyticsService:
 
         formatters = _metric_formatters()
         agg_kwargs = {metric: expr for metric, (_fmt, expr) in formatters.items()}
-        qs = self.route_repository.list_queryset(route_set_id)
+        qs = self.route_repository.list_operational_queryset(route_set_id)
         raw = qs.aggregate(**agg_kwargs)
 
         cards: list[RouteSetTotalCardDTO] = []
