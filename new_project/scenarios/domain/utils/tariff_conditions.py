@@ -3,7 +3,10 @@ from __future__ import annotations
 from django.db.models import F, Value
 from django.db.models.functions import Coalesce, NullIf, Trim
 
+from core.domain.cargo.formatting import format_cargo_code_3
 from core.models import Route
+
+_CARGO_CODE_3_PARAMETERS = frozenset({"cargo_code_3", "cargo_code_izpod_3"})
 
 
 FIELD_MAP = {
@@ -75,6 +78,15 @@ def apply_tariff_conditions(qs, conditions: list[dict]):
         vals = [v for v in _as_list(values) if v is not None and str(v) != ""]
         if not vals:
             continue
+
+        if parameter in _CARGO_CODE_3_PARAMETERS:
+            vals = [
+                formatted
+                for value in vals
+                if (formatted := format_cargo_code_3(value))
+            ]
+            if not vals:
+                continue
 
         compare_field = field
         if parameter in _NORMALIZED_STRING_PARAMETERS:

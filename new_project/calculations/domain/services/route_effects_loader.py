@@ -13,6 +13,7 @@ from calculations.domain.services.route_mart_store import (
     save_route_mart,
     try_load_route_mart,
 )
+from core.domain.cargo.formatting import format_cargo_code_3
 from core.domain.route.turnover_coefficients import (
     TURNOVER_COEF_YEARS,
     route_field_for_year,
@@ -372,3 +373,7 @@ def normalize_route_dimensions(df: pd.DataFrame) -> None:
     holding = df["shipper_holding"].fillna("").astype(str).str.strip()
     df["holding"] = holding.mask(holding.eq(""), "Прочие")
     df["shipper_holding"] = df["holding"]
+
+    for column in ("cargo_code_3", "cargo_code_izpod_3"):
+        if column in df.columns:
+            df[column] = df[column].map(format_cargo_code_3)

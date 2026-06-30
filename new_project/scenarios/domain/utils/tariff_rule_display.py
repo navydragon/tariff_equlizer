@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 from core.models import Cargo, CargoGroup, MessageType, Route, ShipmentType, WagonKind
-from core.domain.cargo.formatting import format_etsng_code, parse_etsng_code
+from core.domain.cargo.formatting import (
+    format_cargo_code_3,
+    format_etsng_code,
+    parse_etsng_code,
+)
 
 
 def _as_list(value) -> list:
@@ -65,6 +69,9 @@ def resolve_condition_value_labels(*, parameter: str, values) -> list[str]:
             for item in model.objects.filter(id__in=ids)
         }
         return [names.get(str(value), str(value)) for value in vals]
+
+    if parameter in {"cargo_code_3", "cargo_code_izpod_3"}:
+        return [format_cargo_code_3(value) for value in vals]
 
     if parameter in {"origin_railroad", "destination_railroad", "shipper_holding", "distance_belt"}:
         return [str(value) for value in vals]

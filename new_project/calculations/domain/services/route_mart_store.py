@@ -14,6 +14,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from calculations.domain.services.scenario_effects_compact import _DIMENSION_COLUMNS
+from core.domain.cargo.formatting import format_cargo_code_3
 from core.domain.cargo.ordering import sort_cargo_group_names
 from core.domain.route.turnover_coefficients import (
     TURNOVER_COEF_YEARS,
@@ -106,6 +107,10 @@ _MASK_SIDECAR_FACTORIZE_COLUMNS = frozenset(
         "cargo_code_izpod_3",
         "cargo_group_izpod",
     },
+)
+
+_CARGO_CODE_3_MASK_COLUMNS = frozenset(
+    {"cargo_code_3", "cargo_code_izpod_3"},
 )
 
 # Колонки slim-parquet; fat-витрина (legacy) инвалидируется при загрузке.
@@ -1110,11 +1115,28 @@ def _try_migrate_npz_sidecars_to_npy(parquet_path: Path) -> bool:
     return migrated
 
 
-def _normalize_mask_label_values(values: list[str] | np.ndarray) -> list[str]:
+def _format_mask_label_value(column: str, raw) -> str:
+    text = str(raw).strip()
+    if not text or text.lower() == "nan":
+        return ""
+    if column in _CARGO_CODE_3_MASK_COLUMNS:
+        return format_cargo_code_3(text)
+    return text
+
+
+def _normalize_mask_label_values(
+    values: list[str] | np.ndarray,
+    *,
+    column: str | None = None,
+) -> list[str]:
     normalized: list[str] = []
     seen: set[str] = set()
     for raw in values:
-        text = str(raw).strip()
+        text = (
+            _format_mask_label_value(column, raw)
+            if column
+            else str(raw).strip()
+        )
         if not text or text in seen:
             continue
         seen.add(text)
@@ -1125,7 +1147,10 @@ def _normalize_mask_label_values(values: list[str] | np.ndarray) -> list[str]:
 def _mask_column_labels_from_df(df: pd.DataFrame, column: str) -> list[str]:
     if column not in df.columns:
         return []
-    return _normalize_mask_label_values(df[column].astype(str).unique().tolist())
+    return _normalize_mask_label_values(
+        df[column].astype(str).unique().tolist(),
+        column=column,
+    )
 
 
 def _merge_mask_labels_into_meta(df: pd.DataFrame, meta: MartMeta | None) -> MartMeta | None:
@@ -1171,7 +1196,7 @@ def distinct_mask_sidecar_labels(
     cached = meta.dimension_labels.get(column)
     if not cached:
         return None
-    labels = _normalize_mask_label_values(cached)
+    labels = _normalize_mask_label_values(cached, column=column)
     return labels or None
 
 

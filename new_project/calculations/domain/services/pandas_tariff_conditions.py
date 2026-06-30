@@ -4,6 +4,9 @@ import numpy as np
 import pandas as pd
 
 from calculations.domain.services.route_mart_store import MartMeta, MartSidecarView
+from core.domain.cargo.formatting import format_cargo_code_3
+
+_CARGO_CODE_3_COLUMNS = frozenset({"cargo_code_3", "cargo_code_izpod_3"})
 
 PARAMETER_COLUMN_MAP = {
     "cargo_group": "cargo_group_code",
@@ -56,11 +59,26 @@ def _as_list(value) -> list:
     return [value]
 
 
-def _label_codes(values: list, labels: list[str]) -> list[int]:
-    label_to_code = {label: index for index, label in enumerate(labels)}
+def _mask_label_key(column: str | None, value) -> str:
+    if column in _CARGO_CODE_3_COLUMNS:
+        return format_cargo_code_3(value)
+    return str(value).strip()
+
+
+def _label_codes(
+    values: list,
+    labels: list[str],
+    *,
+    column: str | None = None,
+) -> list[int]:
+    label_to_code: dict[str, int] = {}
+    for index, label in enumerate(labels):
+        key = _mask_label_key(column, label)
+        if key and key not in label_to_code:
+            label_to_code[key] = index
     codes: list[int] = []
     for value in values:
-        key = str(value)
+        key = _mask_label_key(column, value)
         if key in label_to_code:
             codes.append(label_to_code[key])
     return codes
@@ -71,10 +89,11 @@ def _mask_sidecar_codes_array(
     *,
     labels: list[str],
     compare_vals: list,
+    column: str | None = None,
 ) -> tuple[np.ndarray, list[int]] | None:
     if not labels or not np.issubdtype(arr.dtype, np.integer):
         return None
-    compare_codes = _label_codes([str(v) for v in compare_vals], labels)
+    compare_codes = _label_codes(compare_vals, labels, column=column)
     if not compare_codes:
         return None
     return np.asarray(arr, dtype=np.int32), compare_codes
@@ -324,12 +343,20 @@ def build_rule_mask_numpy(
 
         compare_vals = vals
         arr = _sidecar_column_array(sidecar, column)
+        if column in _CARGO_CODE_3_COLUMNS:
+            compare_vals = [
+                formatted
+                for value in compare_vals
+                if (formatted := format_cargo_code_3(value))
+            ]
+
         coded = (
             _mask_sidecar_codes_array(
                 arr,
                 labels=(mart_meta.dimension_labels.get(column, [])
                         if mart_meta is not None else []),
                 compare_vals=compare_vals,
+                column=column,
             )
             if mart_meta is not None
             else None
