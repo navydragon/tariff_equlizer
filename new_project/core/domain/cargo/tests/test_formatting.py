@@ -2,6 +2,7 @@ from django.test import SimpleTestCase
 
 from core.domain.cargo.formatting import (
     cargo_code_3_from_etsng,
+    cargo_code_lookup_keys,
     format_cargo_code_3,
     format_etsng_code,
     parse_etsng_code,
@@ -53,6 +54,20 @@ class FormatCargoCode3Tests(SimpleTestCase):
     def test_empty(self) -> None:
         self.assertEqual(format_cargo_code_3(None), "")
         self.assertEqual(format_cargo_code_3(""), "")
+
+
+class CargoCodeLookupKeysTests(SimpleTestCase):
+    def test_includes_padded_unpadded_and_stripped(self) -> None:
+        self.assertEqual(
+            cargo_code_lookup_keys(16101),
+            ["016101", "16101"],
+        )
+
+    def test_six_digit_code(self) -> None:
+        self.assertEqual(
+            cargo_code_lookup_keys("161016"),
+            ["161016"],
+        )
 
 
 class CargoCode3FromEtsngTests(SimpleTestCase):

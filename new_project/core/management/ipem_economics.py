@@ -9,6 +9,7 @@ from typing import Any, Callable, Iterable, Optional
 
 from core.domain.cargo.formatting import (
     cargo_code_3_from_etsng,
+    cargo_code_lookup_keys,
     format_etsng_code,
     parse_etsng_code,
 )
@@ -404,20 +405,11 @@ def resolve_cargo_by_etsng(raw_code: Any) -> Optional[Cargo]:
     code = format_etsng_code(raw_code)
     if not code:
         return None
-    for candidate in _cargo_code_lookup_candidates(raw_code, code):
+    for candidate in cargo_code_lookup_keys(raw_code):
         cargo = Cargo.objects.filter(code=candidate).first()
         if cargo is not None and format_etsng_code(cargo.code) == code:
             return cargo
     return None
-
-
-def _cargo_code_lookup_candidates(raw_code: Any, formatted_code: str) -> list[str]:
-    candidates: list[str] = []
-    for value in (formatted_code, parse_etsng_code(raw_code), formatted_code.lstrip("0")):
-        if not value or value in candidates:
-            continue
-        candidates.append(value)
-    return candidates
 
 
 def resolve_wagon_kind(

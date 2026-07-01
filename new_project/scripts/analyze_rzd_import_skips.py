@@ -15,7 +15,10 @@ import django
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
 django.setup()
 
-from core.domain.cargo.formatting import format_etsng_code  # noqa: E402
+from core.domain.cargo.formatting import (  # noqa: E402
+    cargo_code_lookup_keys,
+    format_etsng_code,
+)
 from core.management.rzd_paths import RZD_TABLE, get_rzd_db_path  # noqa: E402
 from core.models import Cargo, Station  # noqa: E402
 
@@ -49,7 +52,10 @@ def main() -> None:
         print(f"DB not found: {db_path}")
         return
 
-    cargo_codes = set(Cargo.objects.values_list("code", flat=True))
+    cargo_by_key: dict[str, str] = {}
+    for code in Cargo.objects.values_list("code", flat=True):
+        for key in cargo_code_lookup_keys(code):
+            cargo_by_key.setdefault(key, code)
     station_esrs = set(Station.objects.values_list("esr_code", flat=True))
 
     conn = sqlite3.connect(db_path)
@@ -83,7 +89,7 @@ def main() -> None:
         if not cargo_code:
             bump("invalid_cargo_code")
             continue
-        if cargo_code not in cargo_codes:
+        if cargo_code not in cargo_by_key:
             bump("cargo_not_found")
             continue
 
@@ -107,7 +113,7 @@ def main() -> None:
 
     skipped = sum(reasons.values())
     print(f"DB: {db_path}")
-    print(f"Справочники: грузов {len(cargo_codes):,}, станций {len(station_esrs):,}")
+    print(f"Справочники: грузов {len(cargo_by_key):,} ключей, станций {len(station_esrs):,}")
     print(f"Строк в {RZD_TABLE}: {total:,}")
     print(f"Будет пропущено: {skipped:,} ({skipped / total * 100:.2f}%)")
     print(f"Будет импортировано: {total - skipped:,}")

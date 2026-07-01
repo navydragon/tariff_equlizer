@@ -14,6 +14,7 @@ from django.utils import timezone
 
 from core.domain.cargo.formatting import (
     cargo_code_3_from_etsng,
+    cargo_code_lookup_keys,
     format_cargo_code_3,
     format_etsng_code,
 )
@@ -345,7 +346,10 @@ class Command(BaseCommand):
         message_by_name = {
             _normalize_name(m.name): m for m in MessageType.objects.all()
         }
-        cargo_by_code = Cargo.objects.in_bulk()
+        cargo_by_code: dict[str, Cargo] = {}
+        for cargo in Cargo.objects.all():
+            for key in cargo_code_lookup_keys(cargo.code):
+                cargo_by_code.setdefault(key, cargo)
         station_by_esr = Station.objects.in_bulk(field_name="esr_code")
         shipper_by_key: dict[tuple[Any, str, str], Shipper] = {}
         for shipper in Shipper.objects.all():

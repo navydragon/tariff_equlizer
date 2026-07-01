@@ -38,3 +38,16 @@ def cargo_code_3_from_etsng(value: Any) -> str:
     """Первые 3 цифры полного кода ЕТСНГ с сохранением ведущего нуля."""
     formatted = format_etsng_code(value)
     return formatted[:CARGO_CODE_3_WIDTH] if formatted else ""
+
+
+def cargo_code_lookup_keys(value: Any) -> list[str]:
+    """Варианты кода для поиска Cargo (6 цифр / как в CSV / без ведущих нулей)."""
+    formatted = format_etsng_code(value)
+    if not formatted:
+        return []
+
+    keys: list[str] = []
+    for candidate in (formatted, parse_etsng_code(value), formatted.lstrip("0")):
+        if candidate and candidate not in keys:
+            keys.append(candidate)
+    return keys
