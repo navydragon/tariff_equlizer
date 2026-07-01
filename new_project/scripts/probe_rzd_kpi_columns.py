@@ -97,9 +97,9 @@ def main() -> None:
     print()
 
     current = {
-        "Объем перевозок (т)": ("volume", "t"),
-        "Грузооборот (т_км)": ("turnover", "tkm"),
-        "Провозная плата (руб)": ("money", "rub"),
+        "2025 Погрузка,т": ("volume", "t"),
+        "2025 Грузоб,ткм": ("turnover", "tkm"),
+        "2025 Доходы,руб": ("money", "rub"),
     }
 
     print("=== Current import columns ===")
