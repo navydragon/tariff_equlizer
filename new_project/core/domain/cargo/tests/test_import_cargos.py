@@ -17,7 +17,7 @@ class ImportCargosParseTests(SimpleTestCase):
             "Код группы груза": "1",
         }
         parsed = _parse_row(row, stderr=StringIO(), style=_Style())
-        self.assertEqual(parsed, ("016101", "АНТРАЦИТ", "1"))
+        self.assertEqual(parsed, ("16101", "АНТРАЦИТ", "1", None))
 
     def test_parse_row_rejects_non_numeric(self) -> None:
         row = {

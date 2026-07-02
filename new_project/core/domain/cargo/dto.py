@@ -16,6 +16,8 @@ class CargoDTO:
     name: str
     cargo_group_code: Optional[int]
     cargo_group_name: Optional[str]
+    is_consumer_goods: bool = False
+    is_food_goods: bool = False
 
     @classmethod
     def from_model(cls, cargo) -> "CargoDTO":
@@ -25,6 +27,8 @@ class CargoDTO:
             name=cargo.name,
             cargo_group_code=group.code if group else None,
             cargo_group_name=group.name if group else None,
+            is_consumer_goods=cargo.is_consumer_goods,
+            is_food_goods=cargo.is_food_goods,
         )
 
 

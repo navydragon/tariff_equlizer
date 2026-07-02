@@ -107,6 +107,16 @@ class Cargo(models.Model):
         blank=True,
         related_name="cargos",
     )
+    is_consumer_goods = models.BooleanField(
+        "Потребительские товары",
+        default=False,
+        db_index=True,
+    )
+    is_food_goods = models.BooleanField(
+        "Продовольственные товары",
+        default=False,
+        db_index=True,
+    )
 
     class Meta:
         verbose_name = "Груз (ETSNG)"

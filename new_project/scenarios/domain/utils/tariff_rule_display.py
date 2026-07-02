@@ -73,6 +73,10 @@ def resolve_condition_value_labels(*, parameter: str, values) -> list[str]:
     if parameter in {"cargo_code_3", "cargo_code_izpod_3"}:
         return [format_cargo_code_3(value) for value in vals]
 
+    if parameter in {"is_consumer_goods", "is_food_goods"}:
+        labels = {"yes": "Да", "no": "Нет"}
+        return [labels.get(str(value).strip().lower(), str(value)) for value in vals]
+
     if parameter in {"origin_railroad", "destination_railroad", "shipper_holding", "distance_belt"}:
         return [str(value) for value in vals]
 

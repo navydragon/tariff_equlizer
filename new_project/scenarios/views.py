@@ -37,6 +37,7 @@ from scenarios.domain.dto import (
 from scenarios.domain.utils.tariff_rule_display import enrich_rule_dict_for_api
 from scenarios.domain.utils.tariff_conditions import apply_tariff_conditions
 from scenarios.domain.services.tariff_rule_options import (
+    boolean_option_items,
     cargo_group_izpod_option_items,
     mask_sidecar_option_items,
 )
@@ -552,6 +553,8 @@ def tariff_rule_options_api(request, scenario_id):
         )
     elif parameter == "cargo_group_izpod":
         items = cargo_group_izpod_option_items(route_set_id=scenario.route_set_id)
+    elif parameter in {"is_consumer_goods", "is_food_goods"}:
+        items = boolean_option_items()
     elif parameter == "origin_railroad":
         rows = (
             qs.values("origin_station__railroad__code", "origin_station__railroad__name")

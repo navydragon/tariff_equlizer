@@ -23,6 +23,13 @@ def _format_mask_option_value(column: str, value: str) -> str:
     return value
 
 
+def boolean_option_items() -> list[dict[str, str]]:
+    return [
+        {"value": "yes", "text": "Да"},
+        {"value": "no", "text": "Нет"},
+    ]
+
+
 def mask_sidecar_option_items(
     *,
     route_set_id: int,

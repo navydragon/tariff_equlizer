@@ -31,7 +31,7 @@ class IpemCoal2026ImportTests(TestCase):
         self.route_set = RouteSet.objects.create(code="RZD_2026_IMPORT", name="RZD import")
         cargo_group = CargoGroup.objects.create(name="Уголь", code=1, position=1)
         self.cargo = Cargo.objects.create(
-            code="016111",
+            code="16111",
             name="УГОЛЬ Г",
             cargo_group=cargo_group,
         )
@@ -162,7 +162,7 @@ class IpemCoal2026ImportTests(TestCase):
             },
             self.cargo,
         )
-        self.assertEqual(fields["cargo_code_3"], "016")
+        self.assertEqual(fields["cargo_code_3"], "161")
         self.assertEqual(fields["cargo_group_izpod"], "Уголь каменный")
         self.assertEqual(fields["cargo_code_izpod"], "")
         self.assertEqual(fields["cargo_code_izpod_3"], "")

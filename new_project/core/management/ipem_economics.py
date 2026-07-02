@@ -8,9 +8,9 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
 
 from core.domain.cargo.formatting import (
-    cargo_code_3_from_etsng,
+    cargo_code_3_from_normalized,
     cargo_code_lookup_keys,
-    format_etsng_code,
+    normalize_rzd_cargo_code,
     parse_etsng_code,
 )
 from core.models import Cargo, MessageType, Route, RouteSet, ShipmentType, Shipper, Station, WagonKind
@@ -235,7 +235,7 @@ def parse_cargo_izpod_fields_from_ipem_row(
     return {
         "cargo_code_izpod": "",
         "cargo_group_izpod": cargo_group,
-        "cargo_code_3": cargo_code_3_from_etsng(cargo_code_raw),
+        "cargo_code_3": cargo_code_3_from_normalized(cargo_code_raw),
         "cargo_code_izpod_3": "",
     }
 
@@ -347,11 +347,12 @@ def count_rzd_routes(
     wagon_kind_id: Optional[int] = None,
     message_type_id: Optional[int] = None,
 ) -> int:
+    normalized_cargo_id, _ = normalize_rzd_cargo_code(cargo_id)
     qs = Route.objects.operational().filter(
         route_set=route_set,
         origin_station__esr_code=origin_esr,
         destination_station__esr_code=dest_esr,
-        cargo_id=format_etsng_code(cargo_id),
+        cargo_id=normalized_cargo_id,
     )
     if wagon_kind_id is not None:
         qs = qs.filter(wagon_kind_id=wagon_kind_id)
@@ -402,12 +403,15 @@ def resolve_station_by_ipem_name(
 
 
 def resolve_cargo_by_etsng(raw_code: Any) -> Optional[Cargo]:
-    code = format_etsng_code(raw_code)
-    if not code:
+    normalized, _ = normalize_rzd_cargo_code(raw_code)
+    if not normalized:
         return None
     for candidate in cargo_code_lookup_keys(raw_code):
         cargo = Cargo.objects.filter(code=candidate).first()
-        if cargo is not None and format_etsng_code(cargo.code) == code:
+        if cargo is None:
+            continue
+        cargo_normalized, _ = normalize_rzd_cargo_code(cargo.code)
+        if cargo_normalized == normalized:
             return cargo
     return None
 
@@ -557,7 +561,7 @@ def build_ipem_coal_2026_overlap(
                 message_type_raw=row.get("Вид перевозки", ""),
                 origin_esr=origin.esr_code if origin else None,
                 dest_esr=dest.esr_code if dest else None,
-                cargo_code=format_etsng_code(cargo.code) if cargo else "",
+                cargo_code=cargo.code if cargo else "",
                 wagon_kind_name=wagon.name if wagon else "",
                 message_type_name=message.name if message else "",
                 resolve_status=resolve_status,

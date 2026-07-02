@@ -17,7 +17,7 @@ django.setup()
 
 from core.domain.cargo.formatting import (  # noqa: E402
     cargo_code_lookup_keys,
-    format_etsng_code,
+    resolve_route_cargo_fields,
 )
 from core.management.rzd_paths import RZD_TABLE, get_rzd_db_path  # noqa: E402
 from core.models import Cargo, Station  # noqa: E402
@@ -85,11 +85,11 @@ def main() -> None:
             bump("empty_index")
             continue
 
-        cargo_code = format_etsng_code(cargo_raw)
-        if not cargo_code:
+        cargo_fields = resolve_route_cargo_fields(cargo_raw, None)
+        if not cargo_fields.main_code:
             bump("invalid_cargo_code")
             continue
-        if cargo_code not in cargo_by_key:
+        if cargo_fields.main_code not in cargo_by_key:
             bump("cargo_not_found")
             continue
 

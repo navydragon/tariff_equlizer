@@ -59,6 +59,8 @@ KEEP_SIDECAR_OR_PARQUET = frozenset(
         "cargo_code_3",
         "cargo_code_izpod_3",
         "cargo_group_izpod",
+        "is_consumer_goods",
+        "is_food_goods",
     },
 )
 

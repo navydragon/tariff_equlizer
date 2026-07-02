@@ -2,10 +2,13 @@ from django.test import SimpleTestCase
 
 from core.domain.cargo.formatting import (
     cargo_code_3_from_etsng,
+    cargo_code_3_from_normalized,
     cargo_code_lookup_keys,
     format_cargo_code_3,
     format_etsng_code,
+    normalize_rzd_cargo_code,
     parse_etsng_code,
+    resolve_route_cargo_fields,
 )
 
 
@@ -57,17 +60,62 @@ class FormatCargoCode3Tests(SimpleTestCase):
 
 
 class CargoCodeLookupKeysTests(SimpleTestCase):
-    def test_includes_padded_unpadded_and_stripped(self) -> None:
+    def test_includes_normalized_and_six_digit_legacy(self) -> None:
         self.assertEqual(
-            cargo_code_lookup_keys(16101),
-            ["016101", "16101"],
+            set(cargo_code_lookup_keys(16101)),
+            {"16101", "016101"},
         )
 
-    def test_six_digit_code(self) -> None:
+    def test_six_digit_code_without_leading_zero(self) -> None:
         self.assertEqual(
             cargo_code_lookup_keys("161016"),
             ["161016"],
         )
+
+
+class NormalizeRzdCargoCodeTests(SimpleTestCase):
+    def test_six_digit_with_leading_zero(self) -> None:
+        code, warn = normalize_rzd_cargo_code("016101")
+        self.assertEqual(code, "16101")
+        self.assertIsNone(warn)
+
+    def test_four_digit_adds_leading_zero(self) -> None:
+        code, warn = normalize_rzd_cargo_code("8101")
+        self.assertEqual(code, "08101")
+        self.assertIsNone(warn)
+
+    def test_five_digit_unchanged(self) -> None:
+        code, warn = normalize_rzd_cargo_code("16101")
+        self.assertEqual(code, "16101")
+        self.assertIsNone(warn)
+
+    def test_six_digit_without_leading_zero_warns(self) -> None:
+        code, warn = normalize_rzd_cargo_code("161016")
+        self.assertEqual(code, "161016")
+        self.assertIn("без ведущего нуля", warn or "")
+
+
+class CargoCode3FromNormalizedTests(SimpleTestCase):
+    def test_from_five_digit_code(self) -> None:
+        self.assertEqual(cargo_code_3_from_normalized("16101"), "161")
+
+    def test_from_four_digit_raw(self) -> None:
+        self.assertEqual(cargo_code_3_from_normalized("8101"), "081")
+
+
+class ResolveRouteCargoFieldsTests(SimpleTestCase):
+    def test_main_and_izpod_normalized(self) -> None:
+        fields = resolve_route_cargo_fields("016101", "8101")
+        self.assertEqual(fields.main_code, "16101")
+        self.assertEqual(fields.izpod_code, "08101")
+        self.assertEqual(fields.code_3, "161")
+        self.assertEqual(fields.izpod_3, "081")
+        self.assertEqual(fields.warnings, ())
+
+    def test_empty_izpod(self) -> None:
+        fields = resolve_route_cargo_fields("016101", None)
+        self.assertEqual(fields.izpod_code, "")
+        self.assertEqual(fields.izpod_3, "")
 
 
 class CargoCode3FromEtsngTests(SimpleTestCase):

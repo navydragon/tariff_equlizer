@@ -69,6 +69,8 @@ MART_RULE_MASK_SIDECAR_COLUMNS = (
     "shipper_id",
     "shipment_type_id",
     "message_type_id",
+    "is_consumer_goods",
+    "is_food_goods",
 )
 
 MART_ELASTICITY_SIDECAR_COLUMNS = (
@@ -92,8 +94,12 @@ _MASK_SIDECAR_INT_COLUMNS = frozenset(
     {"shipper_id", "shipment_type_id", "message_type_id"},
 )
 
+_MASK_SIDECAR_BOOL_COLUMNS = frozenset(
+    {"is_consumer_goods", "is_food_goods"},
+)
+
 # Версия sidecar на диске (отдельные .npy + mmap); bump при смене dtype/колонок.
-SIDECAR_SCHEMA_VERSION = 7
+SIDECAR_SCHEMA_VERSION = 8
 # Legacy npz (до v4).
 MASKS_NPZ_SCHEMA_VERSION = 3
 MASKS_NPZ_META_KEYS = frozenset({"__schema_version__"})
@@ -781,7 +787,20 @@ def _mask_sidecar_columns_in_df(df: pd.DataFrame) -> list[str]:
     ]
 
 
+def _bool_series_to_uint8(series: pd.Series) -> np.ndarray:
+    if pd.api.types.is_bool_dtype(series):
+        bool_series = series.fillna(False)
+    elif pd.api.types.is_numeric_dtype(series):
+        bool_series = pd.to_numeric(series, errors="coerce").fillna(0).astype(int) != 0
+    else:
+        normalized = series.fillna("f").astype(str).str.strip().str.lower()
+        bool_series = normalized.isin({"1", "true", "t", "yes", "y", "on"})
+    return bool_series.to_numpy(dtype=np.uint8, copy=False)
+
+
 def _mask_sidecar_array(series: pd.Series, column: str) -> np.ndarray | None:
+    if column in _MASK_SIDECAR_BOOL_COLUMNS:
+        return _bool_series_to_uint8(series)
     if column in _MASK_SIDECAR_INT_COLUMNS:
         numeric = pd.to_numeric(series, errors="coerce")
         if column == "shipper_id":

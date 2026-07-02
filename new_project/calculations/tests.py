@@ -2804,6 +2804,151 @@ class SpecialContainerTypeTariffConditionsTests(TariffLoadServiceTestMixin, Test
         self.assertNotIn("", values)
 
 
+class CargoCategoryFlagsTariffConditionsTests(TariffLoadServiceTestMixin, TestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.route_consumer = self._create_route(
+            rzd=Decimal("100.00"),
+            route_code="R-CC-CONSUMER",
+            cargo_code=99101,
+        )
+        self.route_consumer.cargo.is_consumer_goods = True
+        self.route_consumer.cargo.is_food_goods = False
+        self.route_consumer.cargo.save(
+            update_fields=["is_consumer_goods", "is_food_goods"],
+        )
+
+        self.route_food = self._create_route(
+            rzd=Decimal("200.00"),
+            route_code="R-CC-FOOD",
+            cargo_code=99201,
+        )
+        self.route_food.cargo.is_consumer_goods = False
+        self.route_food.cargo.is_food_goods = True
+        self.route_food.cargo.save(
+            update_fields=["is_consumer_goods", "is_food_goods"],
+        )
+
+        self.route_other = self._create_route(
+            rzd=Decimal("300.00"),
+            route_code="R-CC-OTHER",
+            cargo_code=99301,
+        )
+        self.route_other.cargo.is_consumer_goods = False
+        self.route_other.cargo.is_food_goods = False
+        self.route_other.cargo.save(
+            update_fields=["is_consumer_goods", "is_food_goods"],
+        )
+
+    def test_apply_tariff_conditions_include_consumer_goods_yes(self) -> None:
+        qs = Route.objects.filter(route_set=self.route_set)
+        matched = apply_tariff_conditions(
+            qs,
+            [
+                {
+                    "parameter": "is_consumer_goods",
+                    "operator": "include",
+                    "values": ["yes"],
+                }
+            ],
+        )
+        ids = set(matched.values_list("id", flat=True))
+        self.assertIn(self.route_consumer.id, ids)
+        self.assertNotIn(self.route_food.id, ids)
+        self.assertNotIn(self.route_other.id, ids)
+
+    def test_apply_tariff_conditions_exclude_consumer_goods_yes(self) -> None:
+        qs = Route.objects.filter(route_set=self.route_set)
+        matched = apply_tariff_conditions(
+            qs,
+            [
+                {
+                    "parameter": "is_consumer_goods",
+                    "operator": "exclude",
+                    "values": ["yes"],
+                }
+            ],
+        )
+        ids = set(matched.values_list("id", flat=True))
+        self.assertNotIn(self.route_consumer.id, ids)
+        self.assertIn(self.route_food.id, ids)
+        self.assertIn(self.route_other.id, ids)
+
+    def test_build_rule_mask_numpy_consumer_goods_include(self) -> None:
+        df = pd.DataFrame({"is_consumer_goods": [1, 0, 0]})
+        mask = build_rule_mask_numpy(
+            df,
+            [
+                {
+                    "parameter": "is_consumer_goods",
+                    "operator": "include",
+                    "values": ["yes"],
+                }
+            ],
+        )
+        self.assertTrue(mask[0])
+        self.assertFalse(mask[1])
+        self.assertFalse(mask[2])
+
+    def test_build_rule_mask_food_goods_include(self) -> None:
+        df = pd.DataFrame({"is_food_goods": [0, 1, 0]})
+        mask = build_rule_mask(
+            df,
+            [
+                {
+                    "parameter": "is_food_goods",
+                    "operator": "include",
+                    "values": ["yes"],
+                }
+            ],
+        )
+        self.assertFalse(mask.iloc[0])
+        self.assertTrue(mask.iloc[1])
+        self.assertFalse(mask.iloc[2])
+
+    def test_tariff_rule_options_api_consumer_goods(self) -> None:
+        self.client = Client()
+        self.client.force_login(self.user)
+        url = reverse("scenarios:tariff_rule_options", args=[self.scenario.id])
+        response = self.client.get(url, {"parameter": "is_consumer_goods"})
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["success"])
+        items = {item["value"]: item["text"] for item in payload["items"]}
+        self.assertEqual(items, {"yes": "Да", "no": "Нет"})
+
+    def test_masks_npz_includes_cargo_category_sidecars(self) -> None:
+        import shutil
+
+        from calculations.domain.services.route_effects_loader import (
+            fetch_routes_dataframe_cached_timed,
+        )
+        from calculations.domain.services.route_mart_store import (
+            MART_RULE_MASK_SIDECAR_COLUMNS,
+            SIDECAR_SCHEMA_VERSION,
+            load_mart_meta,
+            load_masks_npz,
+            resolve_mart_parquet_path,
+            route_mart_cache_dir,
+        )
+
+        shutil.rmtree(
+            route_mart_cache_dir(route_set_id=self.route_set.id),
+            ignore_errors=True,
+        )
+        fetch_routes_dataframe_cached_timed(self.route_set.id)
+        parquet_path = resolve_mart_parquet_path(route_set_id=self.route_set.id)
+        mask_keys = set(load_masks_npz(parquet_path))
+        self.assertIn("is_consumer_goods", mask_keys)
+        self.assertIn("is_food_goods", mask_keys)
+        self.assertTrue(mask_keys.issubset(set(MART_RULE_MASK_SIDECAR_COLUMNS)))
+
+        meta = load_mart_meta(parquet_path)
+        assert meta is not None
+        self.assertEqual(meta.sidecar_schema_version, SIDECAR_SCHEMA_VERSION)
+        self.assertEqual(meta.sidecar_schema_version, 8)
+
+
 class ShipmentCategoryTariffConditionsTests(TariffLoadServiceTestMixin, TestCase):
     def setUp(self) -> None:
         super().setUp()

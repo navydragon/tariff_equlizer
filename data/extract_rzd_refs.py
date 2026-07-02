@@ -5,10 +5,18 @@ from __future__ import annotations
 import csv
 import re
 import sqlite3
+import sys
+from collections import Counter
 from pathlib import Path
 
-DB_PATH = Path(__file__).resolve().parent.parent / "databases" / "01_2026-05-19.db"
-DB_PATH_FALLBACK = Path(__file__).resolve().parent / "01_2026-05-19.db"
+REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO_ROOT / "new_project"))
+
+from core.domain.cargo.formatting import normalize_rzd_cargo_code  # noqa: E402
+
+DB_PATH = REPO_ROOT / "databases" / "02_2026-06-22.db"
+DB_PATH_FALLBACK = REPO_ROOT / "databases" / "01_2026-05-19.db"
+DB_PATH_LEGACY = Path(__file__).resolve().parent / "01_2026-05-19.db"
 OUT_DIR = Path(__file__).parent / "refs-01"
 TABLE = "ИХ_ГП"
 
@@ -60,12 +68,63 @@ def _parse_cargo_code(raw: str) -> str | None:
 
 
 def _resolve_db_path() -> Path:
-    for candidate in (DB_PATH, DB_PATH_FALLBACK):
+    for candidate in (DB_PATH, DB_PATH_FALLBACK, DB_PATH_LEGACY):
         if candidate.exists():
             return candidate
     raise FileNotFoundError(
-        f"База РЖД не найдена: проверены {DB_PATH} и {DB_PATH_FALLBACK}"
+        f"База РЖД не найдена: проверены {DB_PATH}, {DB_PATH_FALLBACK}, {DB_PATH_LEGACY}"
     )
+
+
+def _extract_cargos(cur: sqlite3.Cursor) -> tuple[Path, int, Counter[str]]:
+    cur.execute(
+        f"""
+        SELECT
+            "Код груза" AS cargo_code,
+            "Наим груза" AS cargo_name,
+            "Код группы груза" AS group_code
+        FROM [{TABLE}]
+        WHERE "Код груза" IS NOT NULL AND TRIM("Код груза") != ''
+        """
+    )
+
+    cargo_by_code: dict[str, dict[str, str]] = {}
+    warning_counts: Counter[str] = Counter()
+    skipped_cargos = 0
+
+    for row in cur.fetchall():
+        raw_code = _parse_cargo_code(row["cargo_code"])
+        if raw_code is None:
+            skipped_cargos += 1
+            continue
+
+        normalized, warn = normalize_rzd_cargo_code(raw_code)
+        if not normalized:
+            skipped_cargos += 1
+            continue
+        if warn:
+            warning_counts[warn] += 1
+
+        name = (row["cargo_name"] or "").strip()
+        group_code = row["group_code"]
+        group_raw = "" if group_code is None else str(group_code).strip()
+
+        existing = cargo_by_code.get(normalized)
+        if existing is None or name > existing["name"]:
+            cargo_by_code[normalized] = {
+                "name": name,
+                "group": group_raw,
+            }
+
+    cargos_path = OUT_DIR / "cargos.csv"
+    with cargos_path.open("w", encoding="utf-8-sig", newline="") as f:
+        writer = csv.writer(f, delimiter=";")
+        writer.writerow(["Код", "Наименование", "Код группы груза"])
+        for code in sorted(cargo_by_code):
+            entry = cargo_by_code[code]
+            writer.writerow([code, entry["name"], entry["group"]])
+
+    return cargos_path, skipped_cargos, warning_counts
 
 
 def main() -> None:
@@ -161,33 +220,14 @@ def main() -> None:
                 ]
             )
 
-    # --- Грузы, одна строка на код ---
-    cur.execute(
-        f"""
-        SELECT
-            "Код груза" AS cargo_code,
-            MAX("Наим груза") AS cargo_name,
-            MAX("Код группы груза") AS group_code
-        FROM [{TABLE}]
-        WHERE "Код груза" IS NOT NULL AND TRIM("Код груза") != ''
-        GROUP BY "Код груза"
-        ORDER BY cargo_code
-        """
-    )
-    cargos_path = OUT_DIR / "cargos.csv"
-    skipped_cargos = 0
-    with cargos_path.open("w", encoding="utf-8-sig", newline="") as f:
-        writer = csv.writer(f, delimiter=";")
-        writer.writerow(["Код", "Наименование", "Код группы груза"])
-        for row in cur.fetchall():
-            code = _parse_cargo_code(row["cargo_code"])
-            if code is None:
-                skipped_cargos += 1
-                continue
-            name = (row["cargo_name"] or "").strip()
-            group_code = row["group_code"]
-            group_raw = "" if group_code is None else str(group_code).strip()
-            writer.writerow([code, name, group_raw])
+    # --- Грузы, одна строка на нормализованный 5-значный код ---
+    cargos_path, skipped_cargos, cargo_warnings = _extract_cargos(cur)
+    if skipped_cargos:
+        print(f"  cargos: пропущено строк с невалидным кодом: {skipped_cargos}")
+    if cargo_warnings:
+        print("  cargos: предупреждения по аномальным кодам:")
+        for warning, count in cargo_warnings.most_common():
+            print(f"    {warning}: {count} строк")
 
     # --- Грузоотправители (компании-отправители) ---
     cur.execute(

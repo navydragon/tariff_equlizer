@@ -1,9 +1,12 @@
 import csv
 from pathlib import Path
 
+from collections import Counter
+
 from django.core.management.base import BaseCommand, CommandError
 
-from core.domain.cargo.formatting import parse_etsng_code
+from core.domain.cargo.etsng_categories import classify_cargo_flags
+from core.domain.cargo.formatting import normalize_rzd_cargo_code, parse_etsng_code
 from core.management.reference_clear import clear_cargos_catalog
 from core.management.refs_paths import get_refs_csv
 from core.models import Cargo, CargoGroup
@@ -37,7 +40,18 @@ def _parse_row(row, stderr, style):
         )
         return None
 
-    return code, raw_name, raw_group_code
+    normalized, warn = normalize_rzd_cargo_code(code)
+    if not normalized:
+        stderr.write(
+            style.WARNING(
+                f"Пропуск строки {row!r}: не удалось нормализовать код '{raw_code}'"
+            )
+        )
+        return None
+    if warn:
+        stderr.write(style.WARNING(f"Код {raw_code}: {warn}"))
+
+    return normalized, raw_name, raw_group_code, warn
 
 
 def _resolve_group(raw_group_code, stderr, style, code):
@@ -92,6 +106,9 @@ class Command(BaseCommand):
         created_count = 0
         updated_count = 0
         skipped_no_group = 0
+        consumer_goods_count = 0
+        food_goods_count = 0
+        warning_counts: Counter[str] = Counter()
 
         with csv_path.open(mode="r", encoding="utf-8-sig", newline="") as f:
             reader = csv.DictReader(f, delimiter=";")
@@ -109,7 +126,9 @@ class Command(BaseCommand):
                 if not parsed:
                     continue
 
-                code, raw_name, raw_group_code = parsed
+                code, raw_name, raw_group_code, warn = parsed
+                if warn:
+                    warning_counts[warn] += 1
                 cargo_group, skipped = _resolve_group(
                     raw_group_code, self.stderr, self.style, code
                 )
@@ -117,11 +136,19 @@ class Command(BaseCommand):
                     skipped_no_group += 1
                     continue
 
+                is_consumer_goods, is_food_goods = classify_cargo_flags(code)
+                if is_consumer_goods:
+                    consumer_goods_count += 1
+                if is_food_goods:
+                    food_goods_count += 1
+
                 _, created = Cargo.objects.update_or_create(
                     code=code,
                     defaults={
                         "name": raw_name,
                         "cargo_group": cargo_group,
+                        "is_consumer_goods": is_consumer_goods,
+                        "is_food_goods": is_food_goods,
                     },
                 )
 
@@ -134,6 +161,12 @@ class Command(BaseCommand):
             self.style.SUCCESS(
                 "Импорт грузов ETSNG завершён. "
                 f"Создано: {created_count}, обновлено: {updated_count}, "
-                f"пропущено из‑за отсутствующей группы: {skipped_no_group}."
+                f"пропущено из-за отсутствующей группы: {skipped_no_group}, "
+                f"потребительские: {consumer_goods_count}, "
+                f"продовольственные: {food_goods_count}."
             )
         )
+        if warning_counts:
+            self.stdout.write(self.style.WARNING("Предупреждения по аномальным кодам:"))
+            for warning, count in warning_counts.most_common():
+                self.stdout.write(f"  {warning}: {count}")

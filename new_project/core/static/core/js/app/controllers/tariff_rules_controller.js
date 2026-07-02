@@ -15,6 +15,8 @@ import { renderErrors } from "../lib/errors.js";
     { code: "cargo_code_3", label: "Код груза (3 знака)", type: "choice" },
     { code: "cargo_code_izpod_3", label: "Код груза из-под (3 знака)", type: "choice" },
     { code: "cargo_group_izpod", label: "Группа груза из-под", type: "choice" },
+    { code: "is_consumer_goods", label: "Потребительские товары", type: "choice" },
+    { code: "is_food_goods", label: "Продовольственные товары", type: "choice" },
     { code: "origin_railroad", label: "Дорога отправления", type: "choice" },
     { code: "destination_railroad", label: "Дорога назначения", type: "choice" },
     { code: "wagon_kind", label: "Род вагона", type: "choice" },
@@ -38,6 +40,8 @@ import { renderErrors } from "../lib/errors.js";
     cargo_code_3: ["include", "exclude"],
     cargo_code_izpod_3: ["include", "exclude"],
     cargo_group_izpod: ["include", "exclude"],
+    is_consumer_goods: ["include", "exclude"],
+    is_food_goods: ["include", "exclude"],
     shipment_category: ["include", "exclude"],
     special_container_type: ["include", "exclude"],
   };

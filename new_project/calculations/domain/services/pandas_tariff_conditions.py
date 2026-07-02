@@ -7,6 +7,7 @@ from calculations.domain.services.route_mart_store import MartMeta, MartSidecarV
 from core.domain.cargo.formatting import format_cargo_code_3
 
 _CARGO_CODE_3_COLUMNS = frozenset({"cargo_code_3", "cargo_code_izpod_3"})
+_BOOL_PARAMETERS = frozenset({"is_consumer_goods", "is_food_goods"})
 
 PARAMETER_COLUMN_MAP = {
     "cargo_group": "cargo_group_code",
@@ -24,6 +25,8 @@ PARAMETER_COLUMN_MAP = {
     "distance_belt": "distance_belt",
     "shipment_category": "shipment_category",
     "special_container_type": "special_container_type",
+    "is_consumer_goods": "is_consumer_goods",
+    "is_food_goods": "is_food_goods",
 }
 
 _DIM_PARAMETERS = frozenset(
@@ -57,6 +60,17 @@ def _as_list(value) -> list:
     if isinstance(value, list):
         return value
     return [value]
+
+
+def _parse_bool_mask_codes(values) -> list[int]:
+    codes: list[int] = []
+    for value in _as_list(values):
+        token = str(value).strip().lower()
+        if token == "yes":
+            codes.append(1)
+        elif token == "no":
+            codes.append(0)
+    return codes
 
 
 def _mask_label_key(column: str | None, value) -> str:
@@ -287,6 +301,20 @@ def build_rule_mask_numpy(
                 mask &= np.nan_to_num(series_arr, nan=-1.0) > num
             continue
 
+        if parameter in _BOOL_PARAMETERS:
+            column = PARAMETER_COLUMN_MAP.get(parameter)
+            if not column or not operator or not _sidecar_has_column(sidecar, column):
+                continue
+            compare_codes = _parse_bool_mask_codes(values)
+            if not compare_codes:
+                continue
+            arr = _sidecar_column_array(sidecar, column, dtype=np.uint8)
+            if operator == "include":
+                mask &= np.isin(arr, compare_codes)
+            elif operator == "exclude":
+                mask &= ~np.isin(arr, compare_codes)
+            continue
+
         column = PARAMETER_COLUMN_MAP.get(parameter)
         if not column or not operator:
             continue
@@ -416,6 +444,20 @@ def build_rule_mask(df: pd.DataFrame, conditions: list[dict]) -> pd.Series:
                 mask &= series < num
             elif operator == "gt":
                 mask &= series > num
+            continue
+
+        if parameter in _BOOL_PARAMETERS:
+            column = PARAMETER_COLUMN_MAP.get(parameter)
+            if not column or not operator or column not in df.columns:
+                continue
+            compare_codes = _parse_bool_mask_codes(values)
+            if not compare_codes:
+                continue
+            series = pd.to_numeric(df[column], errors="coerce").fillna(0).astype(int)
+            if operator == "include":
+                mask &= series.isin(compare_codes)
+            elif operator == "exclude":
+                mask &= ~series.isin(compare_codes)
             continue
 
         column = PARAMETER_COLUMN_MAP.get(parameter)

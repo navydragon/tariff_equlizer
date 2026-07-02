@@ -7,6 +7,7 @@ from core.domain.cargo.formatting import format_cargo_code_3
 from core.models import Route
 
 _CARGO_CODE_3_PARAMETERS = frozenset({"cargo_code_3", "cargo_code_izpod_3"})
+_BOOL_PARAMETERS = frozenset({"is_consumer_goods", "is_food_goods"})
 
 
 FIELD_MAP = {
@@ -25,6 +26,8 @@ FIELD_MAP = {
     "distance_belt": "distance_belt",
     "shipment_category": "shipment_category",
     "special_container_type": "special_container_type",
+    "is_consumer_goods": "cargo__is_consumer_goods",
+    "is_food_goods": "cargo__is_food_goods",
 }
 
 _NORMALIZED_STRING_PARAMETERS = frozenset({"shipment_category"})
@@ -36,6 +39,17 @@ def _as_list(value):
     if isinstance(value, list):
         return value
     return [value]
+
+
+def _parse_bool_values(values) -> list[bool]:
+    parsed: list[bool] = []
+    for value in _as_list(values):
+        token = str(value).strip().lower()
+        if token == "yes":
+            parsed.append(True)
+        elif token == "no":
+            parsed.append(False)
+    return parsed
 
 
 def _annotate_normalized_string_field(qs, parameter: str):
@@ -87,6 +101,16 @@ def apply_tariff_conditions(qs, conditions: list[dict]):
             ]
             if not vals:
                 continue
+
+        if parameter in _BOOL_PARAMETERS:
+            bool_vals = _parse_bool_values(vals)
+            if not bool_vals:
+                continue
+            if operator == "include":
+                filtered = filtered.filter(**{f"{field}__in": bool_vals})
+            elif operator == "exclude":
+                filtered = filtered.exclude(**{f"{field}__in": bool_vals})
+            continue
 
         compare_field = field
         if parameter in _NORMALIZED_STRING_PARAMETERS:

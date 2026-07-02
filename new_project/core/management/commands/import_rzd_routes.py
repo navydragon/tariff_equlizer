@@ -12,11 +12,11 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.utils import timezone
 
+from collections import Counter
+
 from core.domain.cargo.formatting import (
-    cargo_code_3_from_etsng,
     cargo_code_lookup_keys,
-    format_cargo_code_3,
-    format_etsng_code,
+    resolve_route_cargo_fields,
 )
 from core.domain.route.turnover_coefficients import (
     TURNOVER_COEF_YEARS,
@@ -51,8 +51,6 @@ COL_DISTANCE_BELT = "Пояс дальности по 10_01"
 COL_CARGO_GROUP_CMTP = "Группа груза (ЦМТП)"
 COL_CARGO_GROUP_IZPOD = "Группа груза(изпод)"
 COL_CARGO_CODE_IZPOD = "Код груза(изпод)"
-COL_CARGO_CODE_3 = "Код груза(3цифры)"
-COL_CARGO_CODE_IZPOD_3 = "Код груза(изпод)(3цифры)"
 COL_OKPO = "ОКПО_компании_отпр"
 COL_INN = "ИНН_компании"
 COL_SHIPPER_NAME = "Наименование_компании"
@@ -87,11 +85,6 @@ _BASE_SELECT_COLS = [
     COL_CHARGE_RUB,
 ]
 
-_OPTIONAL_SELECT_COLS = (
-    COL_CARGO_CODE_3,
-    COL_CARGO_CODE_IZPOD_3,
-)
-
 _TURNOVER_COEF_OPTIONAL_COLS = tuple(
     sqlite_column_for_year(year) for year in TURNOVER_COEF_YEARS
 )
@@ -104,9 +97,6 @@ def _rzd_table_columns(conn: sqlite3.Connection) -> set[str]:
 
 def _build_select_sql(available_columns: set[str]) -> str:
     cols = list(_BASE_SELECT_COLS)
-    for col in _OPTIONAL_SELECT_COLS:
-        if col in available_columns:
-            cols.append(col)
     for col in _TURNOVER_COEF_OPTIONAL_COLS:
         if col in available_columns:
             cols.append(col)
@@ -144,23 +134,6 @@ def _normalize_inn(value: Any) -> str:
 def _is_missing_ref(value: str) -> bool:
     v = (value or "").strip()
     return not v or v in ("-", "0")
-
-
-def _strip_text(value: Any) -> str:
-    if value is None:
-        return ""
-    return str(value).strip()
-
-
-def _resolve_cargo_code_3(
-    row: sqlite3.Row,
-    *,
-    source_col: str,
-    fallback_value: Any,
-) -> str:
-    if source_col in row.keys():
-        return format_cargo_code_3(row[source_col])
-    return cargo_code_3_from_etsng(fallback_value)
 
 
 def _parse_decimal(value: Any) -> Optional[Decimal]:
@@ -335,6 +308,10 @@ class Command(BaseCommand):
                 stats["skip_reasons"].items(), key=lambda x: -x[1]
             ):
                 self.stdout.write(f"  {reason}: {count}")
+        if stats.get("cargo_warnings"):
+            self.stdout.write(self.style.WARNING("Предупреждения по аномальным кодам груза:"))
+            for warning, count in stats["cargo_warnings"].most_common():
+                self.stdout.write(f"  {warning}: {count}")
 
     def _build_caches(self) -> dict[str, Any]:
         wagon_by_name = {
@@ -557,6 +534,7 @@ class Command(BaseCommand):
         created = 0
         skipped = 0
         skip_reasons: dict[str, int] = {}
+        cargo_warnings: Counter[str] = Counter()
         batch: list[Route] = []
 
         def bump_skip(reason: str) -> None:
@@ -582,7 +560,9 @@ class Command(BaseCommand):
                     if processed % 50000 == 0:
                         self.stdout.write(f"Обработано строк: {processed}…")
 
-                    route = self._row_to_route(row, route_set, caches, bump_skip)
+                    route = self._row_to_route(
+                        row, route_set, caches, bump_skip, cargo_warnings
+                    )
                     if route is None:
                         continue
 
@@ -609,6 +589,7 @@ class Command(BaseCommand):
             "created": created,
             "skipped": skipped,
             "skip_reasons": skip_reasons,
+            "cargo_warnings": cargo_warnings,
             "created_refs": caches["created_refs"],
         }
 
@@ -618,6 +599,7 @@ class Command(BaseCommand):
         route_set: RouteSet,
         caches: dict[str, Any],
         bump_skip,
+        cargo_warnings: Counter[str],
     ) -> Optional[Route]:
         index_value = row[COL_INDEX]
         route_code = str(index_value).strip() if index_value is not None else ""
@@ -625,11 +607,17 @@ class Command(BaseCommand):
             bump_skip("empty_index")
             return None
 
-        cargo_code = format_etsng_code(row[COL_CARGO_CODE])
-        if not cargo_code:
+        cargo_fields = resolve_route_cargo_fields(
+            row[COL_CARGO_CODE],
+            row[COL_CARGO_CODE_IZPOD],
+        )
+        for warning in cargo_fields.warnings:
+            cargo_warnings[warning] += 1
+
+        if not cargo_fields.main_code:
             bump_skip("invalid_cargo_code")
             return None
-        cargo = caches["cargo_by_code"].get(cargo_code)
+        cargo = caches["cargo_by_code"].get(cargo_fields.main_code)
         if cargo is None:
             bump_skip("cargo_not_found")
             return None
@@ -684,19 +672,7 @@ class Command(BaseCommand):
         turnover = _parse_decimal(row[COL_TURNOVER_TKM])
         charge = _parse_decimal(row[COL_CHARGE_RUB])
 
-        izpod_raw = row[COL_CARGO_CODE_IZPOD]
-        cargo_code_izpod = _strip_text(izpod_raw)
         cargo_group_izpod = (row[COL_CARGO_GROUP_IZPOD] or "").strip()
-        cargo_code_3 = _resolve_cargo_code_3(
-            row,
-            source_col=COL_CARGO_CODE_3,
-            fallback_value=row[COL_CARGO_CODE],
-        )
-        cargo_code_izpod_3 = _resolve_cargo_code_3(
-            row,
-            source_col=COL_CARGO_CODE_IZPOD_3,
-            fallback_value=izpod_raw,
-        )
 
         from core.domain.distance_belt import parse_distance_belt_midpoint
 
@@ -722,10 +698,10 @@ class Command(BaseCommand):
             # В выгрузке РЖД «Тип парка» = груженые/порожние → shipment_category;
             # «Вид спец контейнера» = универсальный/… → park_type и special_container_type.
             cargo_group_cmtp=(row[COL_CARGO_GROUP_CMTP] or "").strip(),
-            cargo_code_izpod=cargo_code_izpod,
+            cargo_code_izpod=cargo_fields.izpod_code,
             cargo_group_izpod=cargo_group_izpod,
-            cargo_code_3=cargo_code_3,
-            cargo_code_izpod_3=cargo_code_izpod_3,
+            cargo_code_3=cargo_fields.code_3,
+            cargo_code_izpod_3=cargo_fields.izpod_3,
             transport_volume_tons=volume,
             freight_turnover_tkm=turnover,
             freight_charge_rub=charge,
