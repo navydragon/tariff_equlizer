@@ -30,16 +30,20 @@ class ExpandEtsngPositionSpecTests(SimpleTestCase):
 
 class ClassifyCargoFlagsTests(SimpleTestCase):
     def test_consumer_and_food_overlap_position(self) -> None:
-        self.assertEqual(classify_cargo_flags("41101"), (True, True))
+        self.assertEqual(classify_cargo_flags("04101"), (True, True))
 
     def test_consumer_only_position(self) -> None:
-        self.assertEqual(classify_cargo_flags("691101"), (True, False))
+        self.assertEqual(classify_cargo_flags("69101"), (True, False))
 
     def test_food_only_position(self) -> None:
-        self.assertEqual(classify_cargo_flags("521101"), (False, True))
+        self.assertEqual(classify_cargo_flags("52101"), (False, True))
 
     def test_non_category_code(self) -> None:
         self.assertEqual(classify_cargo_flags("16101"), (False, False))
 
-    def test_accepts_six_digit_etsng_code(self) -> None:
-        self.assertEqual(classify_cargo_flags("041101"), (True, True))
+    def test_locomotive_on_own_axles_not_consumer(self) -> None:
+        self.assertEqual(classify_cargo_flags("42201"), (False, False))
+
+    def test_six_digit_input_normalizes_before_classify(self) -> None:
+        self.assertEqual(classify_cargo_flags("041101"), (False, False))
+        self.assertEqual(classify_cargo_flags("016101"), (False, False))

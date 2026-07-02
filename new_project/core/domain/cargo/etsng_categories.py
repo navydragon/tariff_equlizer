@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from core.domain.cargo.formatting import (
     CARGO_CODE_3_WIDTH,
-    cargo_code_3_from_etsng,
+    cargo_code_3_from_normalized,
 )
 
 # Импортные перевозки потребительских товаров (позиции ЕТСНГ).
@@ -88,8 +88,10 @@ FOOD_GOODS_POSITIONS = expand_etsng_position_spec(FOOD_GOODS_POSITION_SPEC)
 
 
 def classify_cargo_flags(normalized_code: str) -> tuple[bool, bool]:
-    """(is_consumer_goods, is_food_goods) для нормализованного кода груза."""
-    position = cargo_code_3_from_etsng(normalized_code)
+    """(is_consumer_goods, is_food_goods) для нормализованного 5-значного кода груза."""
+    # Позиция ЕТСНГ — первые 3 цифры кода в формате приложения (без zfill до 6).
+    # Иначе 42201 ошибочно превращается в 042201 → позиция 042.
+    position = cargo_code_3_from_normalized(normalized_code)
     if not position:
         return False, False
     return (
