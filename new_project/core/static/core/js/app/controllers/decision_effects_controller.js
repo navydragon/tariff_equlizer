@@ -64,6 +64,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
         suppressFilterEvents: false,
         computing: false,
         compactPending: false,
+        effectsCompactPending: false,
         awaitingCompact: false,
         earlyGroupReady: false,
         lastDataVersion: null,
@@ -344,6 +345,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
 
         this.state.cacheKey = data.cache_key || null;
         this.state.compactPending = data.compact_ready === false;
+        this.state.effectsCompactPending = data.compact_ready === false;
         this.state.awaitingCompact = data.compact_ready === false;
         this.state.earlyGroupReady = Boolean(
           data.early_group_ready ?? data.compact_ready,
@@ -382,6 +384,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
           } else {
             await this._ensureCompactReady();
             await Promise.all([
+              this._aggregateEffects({ showTableLoading: true }),
               this._aggregateRevenues(),
               this._aggregateVolumes(),
             ]);
@@ -439,7 +442,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
         this._setTableLoading(true);
       }
 
-      const maxAttempts = this.state.compactPending ? 45 : 1;
+      const maxAttempts = this.state.effectsCompactPending ? 45 : 5;
 
       try {
         const payload = {
@@ -473,18 +476,12 @@ import { clearToasts, showToast } from "../lib/toast.js";
             await this._computeEffects();
             return;
           }
-          if (this.state.compactPending && attempt + 1 < maxAttempts) {
-            await this._waitForCompactReady();
-            return this._aggregateEffects({
-              showTableLoading,
-              attempt: attempt + 1,
-            });
-          }
           if (
-            this._isAggregatePendingMessage(message) &&
+            (this.state.effectsCompactPending ||
+              this._isAggregatePendingMessage(message)) &&
             attempt + 1 < maxAttempts
           ) {
-            await this._sleep(2000);
+            await this._waitForCompactReady();
             return this._aggregateEffects({
               showTableLoading,
               attempt: attempt + 1,
@@ -497,6 +494,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
           return;
         }
 
+        this.state.effectsCompactPending = false;
         if (!this.state.awaitingCompact) {
           this.state.compactPending = false;
           this._setCompactPendingIndicator(false);
@@ -549,7 +547,9 @@ import { clearToasts, showToast } from "../lib/toast.js";
           body: { cache_key: this.state.cacheKey },
         });
         if (data && data.success) {
-          this.state.compactPending = !data.compact_ready;
+          if (!data.compact_ready) {
+            this.state.compactPending = true;
+          }
           if (data.compact_ready) {
             this.state.awaitingCompact = false;
           }
@@ -1298,13 +1298,16 @@ import { clearToasts, showToast } from "../lib/toast.js";
 
     async _refreshAbsoluteWhenCompactReady() {
       const ready = await this._ensureCompactReady();
-      if (!ready || !this._absoluteGroupingIsDefault()) {
+      if (!ready) {
         return;
       }
-      await Promise.all([
-        this._aggregateRevenues(),
-        this._aggregateVolumes(),
-      ]);
+      const tasks = [
+        this._aggregateEffects({ showTableLoading: true }),
+      ];
+      if (this._absoluteGroupingIsDefault()) {
+        tasks.push(this._aggregateRevenues(), this._aggregateVolumes());
+      }
+      await Promise.all(tasks);
     }
 
     _absolutePayload(kind) {

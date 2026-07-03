@@ -4,6 +4,7 @@ from core.domain.cargo.formatting import (
     cargo_code_3_from_etsng,
     cargo_code_3_from_normalized,
     cargo_code_lookup_keys,
+    format_app_cargo_code,
     format_cargo_code_3,
     format_etsng_code,
     normalize_rzd_cargo_code,
@@ -26,6 +27,24 @@ class ParseEtsngCodeTests(SimpleTestCase):
         self.assertIsNone(parse_etsng_code(None))
         self.assertIsNone(parse_etsng_code(""))
         self.assertIsNone(parse_etsng_code("ABC"))
+
+
+class FormatAppCargoCodeTests(SimpleTestCase):
+    def test_anthracite_code_five_digits(self) -> None:
+        self.assertEqual(format_app_cargo_code(16101), "16101")
+
+    def test_six_digit_rzd_normalized(self) -> None:
+        self.assertEqual(format_app_cargo_code("016101"), "16101")
+
+    def test_four_digit_padded(self) -> None:
+        self.assertEqual(format_app_cargo_code("8101"), "08101")
+
+    def test_six_digit_without_leading_zero_unchanged(self) -> None:
+        self.assertEqual(format_app_cargo_code(161016), "161016")
+
+    def test_none_and_empty(self) -> None:
+        self.assertEqual(format_app_cargo_code(None), "")
+        self.assertEqual(format_app_cargo_code(""), "")
 
 
 class FormatEtsngCodeTests(SimpleTestCase):

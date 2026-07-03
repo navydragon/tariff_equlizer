@@ -248,3 +248,35 @@ else:
             "LOCATION": "tariff-equlizer",
         }
     }
+
+######################################################################
+# Scenario rebuild timing logs (add/update/delete tariff rules)
+######################################################################
+
+if DEBUG and _env_bool("SCENARIO_REBUILD_TIMING_LOG", default=True):
+    LOGGING = {
+        "version": 1,
+        "disable_existing_loggers": False,
+        "handlers": {
+            "console": {
+                "class": "logging.StreamHandler",
+            },
+        },
+        "loggers": {
+            "calculations.domain.services.scenario_effects_warm": {
+                "handlers": ["console"],
+                "level": "INFO",
+                "propagate": False,
+            },
+            "calculations.domain.services.scenario_effects_deferred": {
+                "handlers": ["console"],
+                "level": "INFO",
+                "propagate": False,
+            },
+            "calculations.domain.services.elasticity_fallout_compute": {
+                "handlers": ["console"],
+                "level": "INFO",
+                "propagate": False,
+            },
+        },
+    }

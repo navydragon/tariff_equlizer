@@ -14,7 +14,7 @@ from core.models import (
     Station,
     WagonKind,
 )
-from core.domain.cargo.formatting import format_etsng_code, parse_etsng_code
+from core.domain.cargo.formatting import format_app_cargo_code, parse_etsng_code
 
 
 def _decimal_to_api_str(value: Decimal) -> str:
@@ -312,7 +312,7 @@ class RouteDTO:
             "cargo_code_3": self.cargo_code_3,
             "cargo_code_izpod_3": self.cargo_code_izpod_3,
             "cargo_code": self.cargo_code,
-            "cargo_code_display": format_etsng_code(self.cargo_code),
+            "cargo_code_display": format_app_cargo_code(self.cargo_code),
             "cargo_name": self.cargo_name,
             "cargo_group_code": self.cargo_group_code,
             "cargo_group_name": self.cargo_group_name,

@@ -18,7 +18,7 @@ from core.domain.cargo.etsng_categories import (
     CONSUMER_GOODS_POSITIONS,
     classify_cargo_flags,
 )
-from core.domain.cargo.formatting import format_etsng_code
+from core.domain.cargo.formatting import format_app_cargo_code
 from core.models import Cargo, CargoGroup, Route, RouteSet
 
 EXAMPLE_CODE = "042201"
@@ -41,7 +41,7 @@ def main() -> None:
     print(f"total: {total:,}")
     print(f"is_consumer_goods=True: {consumer:,} ({consumer / total * 100:.2f}%)")
 
-    formatted = format_etsng_code(EXAMPLE_CODE)
+    formatted = format_app_cargo_code(EXAMPLE_CODE)
     cargo = Cargo.objects.filter(code=formatted).first()
     if cargo:
         routes = qs.filter(cargo=cargo).count()

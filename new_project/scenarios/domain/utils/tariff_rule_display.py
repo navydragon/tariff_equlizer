@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from core.models import Cargo, CargoGroup, MessageType, Route, ShipmentType, WagonKind
 from core.domain.cargo.formatting import (
+    format_app_cargo_code,
     format_cargo_code_3,
-    format_etsng_code,
+    normalize_rzd_cargo_code,
     parse_etsng_code,
 )
 
@@ -30,23 +31,26 @@ def resolve_condition_value_labels(*, parameter: str, values) -> list[str]:
         return [names.get(code, code) for code in codes]
 
     if parameter == "cargo_code":
-        codes = []
+        normalized_codes: list[str] = []
         for value in vals:
-            code = parse_etsng_code(value)
-            if code is not None:
-                codes.append(code)
+            parsed = parse_etsng_code(value)
+            if parsed is not None:
+                normalized, _ = normalize_rzd_cargo_code(parsed)
+                if normalized:
+                    normalized_codes.append(normalized)
         names = {
             item.code: item.name
-            for item in Cargo.objects.filter(code__in=codes)
+            for item in Cargo.objects.filter(code__in=normalized_codes)
         }
         labels = []
         for value in vals:
-            code = parse_etsng_code(value)
-            if code is None:
+            parsed = parse_etsng_code(value)
+            if parsed is None:
                 labels.append(str(value))
                 continue
-            name = names.get(code)
-            display_code = format_etsng_code(code)
+            normalized, _ = normalize_rzd_cargo_code(parsed)
+            name = names.get(normalized or "")
+            display_code = format_app_cargo_code(value)
             labels.append(
                 f"{display_code} — {name}" if name else display_code,
             )

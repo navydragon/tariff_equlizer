@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
@@ -31,6 +32,7 @@ from calculations.domain.services.scenario_effects_compute import (
     compute_arrays_full,
 )
 from calculations.domain.services.scenario_effects_formatting import GlobalTotals
+from calculations.domain.services.scenario_warm_timing import log_warm_timings
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +114,10 @@ def _run_deferred_full_compute(job: DeferredFullComputeJob) -> None:
         if _job_data_version_stale(job):
             return
 
+        started = time.perf_counter()
+        phases: dict[str, int] = {}
+        detail: dict[str, int | str] = {}
+
         parquet_path = Path(job.parquet_path)
         if not ensure_compute_sidecars(parquet_path):
             logger.error(
@@ -120,11 +126,14 @@ def _run_deferred_full_compute(job: DeferredFullComputeJob) -> None:
             )
             return
 
-        sidecar, _sidecar_timings = load_mart_sidecar(
+        t_sidecar = time.perf_counter()
+        sidecar, sidecar_timings = load_mart_sidecar(
             parquet_path,
             include_charge=True,
             include_volume=True,
         )
+        phases["sidecar_charge_load_ms"] = int((time.perf_counter() - t_sidecar) * 1000)
+        detail.update(sidecar_timings)
         if sidecar.empty or "freight_charge_rub" not in sidecar:
             logger.error(
                 "Deferred compute aborted: charge sidecar missing for %s",
@@ -135,7 +144,8 @@ def _run_deferred_full_compute(job: DeferredFullComputeJob) -> None:
 
         scenario_stub = _elasticity_scenario_stub(job)
 
-        _global_totals, _timings, arrays = compute_arrays_full(
+        t_compute = time.perf_counter()
+        _global_totals, compute_timings, arrays = compute_arrays_full(
             sidecar,
             years=job.years,
             base_coef_by_year=job.base_coef_by_year,
@@ -151,14 +161,18 @@ def _run_deferred_full_compute(job: DeferredFullComputeJob) -> None:
                 mart_meta.dimension_labels if mart_meta is not None else None
             ),
         )
+        phases["compute_full_ms"] = int((time.perf_counter() - t_compute) * 1000)
+        detail.update(compute_timings)
         if arrays is None:
             return
 
-        volume_sidecar, _volume_timings = load_mart_sidecar(
+        t_volume = time.perf_counter()
+        volume_sidecar, volume_timings = load_mart_sidecar(
             parquet_path,
             include_charge=False,
             include_volume=True,
         )
+        detail.update(volume_timings)
         if volume_sidecar.empty or "transport_volume_tons" not in volume_sidecar:
             compact_df = load_route_mart_parquet(
                 parquet_path,
@@ -189,6 +203,9 @@ def _run_deferred_full_compute(job: DeferredFullComputeJob) -> None:
         route_ids = None
         if "route_id" in compact_df.columns:
             route_ids = compact_df["route_id"].to_numpy(dtype=np.int32, copy=False)
+        phases["compact_prep_ms"] = int((time.perf_counter() - t_volume) * 1000)
+
+        t_compact = time.perf_counter()
         compact = build_compact_from_arrays(
             years=job.years,
             initial=arrays.initial,
@@ -205,8 +222,11 @@ def _run_deferred_full_compute(job: DeferredFullComputeJob) -> None:
             volume_fallout_by_year=arrays.volume_fallout_by_year,
             money_fallout_by_year=arrays.money_fallout_by_year,
         )
+        phases["compact_build_ms"] = int((time.perf_counter() - t_compact) * 1000)
         if _job_data_version_stale(job):
             return
+
+        t_save = time.perf_counter()
         save_scenario_compute(
             scenario_id=job.scenario_id,
             data_version=job.data_version,
@@ -233,6 +253,18 @@ def _run_deferred_full_compute(job: DeferredFullComputeJob) -> None:
             scenario_id=job.scenario_id,
             data_version=job.data_version,
             phase="done",
+        )
+        phases["save_ms"] = int((time.perf_counter() - t_save) * 1000)
+        phases["total_ms"] = int((time.perf_counter() - started) * 1000)
+        log_warm_timings(
+            logger,
+            label="compact",
+            phases=phases,
+            detail=detail,
+            scenario_id=job.scenario_id,
+            data_version=job.data_version,
+            rules=len(job.rule_specs),
+            include_rule_breakdown=job.include_rule_breakdown,
         )
     except Exception:
         logger.exception(

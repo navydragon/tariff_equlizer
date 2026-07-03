@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 from typing import Literal
 
@@ -32,6 +33,7 @@ from calculations.domain.services.scenario_warm_status import (
     resolve_warm_data_version,
     update_warm_status,
 )
+from calculations.domain.services.scenario_warm_timing import log_warm_timings
 from calculations.domain.services.tariff_load import TariffLoadService
 from scenarios.models import Scenario, TariffRule
 
@@ -76,6 +78,11 @@ def warm_scenario_after_rule_change(
         return
 
     try:
+        started = time.perf_counter()
+        phases: dict[str, int] = {}
+        detail: dict[str, int | str] = {}
+        prewarm_result = None
+
         if mask_changed and rule_id is not None:
             update_warm_status(
                 scenario_id=scenario_id,
@@ -84,11 +91,15 @@ def warm_scenario_after_rule_change(
                 rule_id=rule_id,
                 phase="mask",
             )
+            t_mask = time.perf_counter()
             try:
                 rule = TariffRule.objects.get(pk=rule_id, scenario_id=scenario_id)
                 prewarm_result = prewarm_rule_mask(rule=rule)
             except TariffRule.DoesNotExist:
                 prewarm_result = None
+            phases["mask_prewarm_ms"] = int((time.perf_counter() - t_mask) * 1000)
+            if prewarm_result is not None:
+                detail["mask_prewarm_elapsed_ms"] = prewarm_result.elapsed_ms
             update_warm_status(
                 scenario_id=scenario_id,
                 phase="kpi",
@@ -105,7 +116,9 @@ def warm_scenario_after_rule_change(
                 phase="kpi",
             )
 
+        t_parquet = time.perf_counter()
         parquet_path = _resolve_ready_parquet_path(route_set_id=scenario.route_set_id)
+        phases["parquet_resolve_ms"] = int((time.perf_counter() - t_parquet) * 1000)
         if parquet_path is None:
             logger.debug(
                 "Skip scenario warm: mart not ready scenario_id=%s change=%s",
@@ -115,6 +128,7 @@ def warm_scenario_after_rule_change(
             return
 
         tariff_load = TariffLoadService()
+        t_context = time.perf_counter()
         context = tariff_load.build_scenario_context(scenario)
         years = context.years
         rule_specs = rule_specs_from_context(tariff_load, context)
@@ -123,14 +137,19 @@ def warm_scenario_after_rule_change(
             base_coef_by_year=context.base_coef_by_year,
             rules=context.rules,
         )
+        phases["context_ms"] = int((time.perf_counter() - t_context) * 1000)
         update_warm_status(scenario_id=scenario_id, data_version=data_version)
 
-        df, _sidecar_timings = load_mart_sidecar(parquet_path, include_charge=True)
+        t_sidecar = time.perf_counter()
+        df, sidecar_timings = load_mart_sidecar(parquet_path, include_charge=True)
+        phases["sidecar_load_ms"] = int((time.perf_counter() - t_sidecar) * 1000)
+        detail.update(sidecar_timings)
         if df.empty:
             return
 
         mart_meta = load_mart_meta(parquet_path)
-        global_totals, early_group_snapshot, _compute_timings = compute_kpi_totals(
+        t_kpi = time.perf_counter()
+        global_totals, early_group_snapshot, compute_timings = compute_kpi_totals(
             df,
             years=years,
             base_coef_by_year=context.base_coef_by_year,
@@ -140,6 +159,10 @@ def warm_scenario_after_rule_change(
             consider_turnover_changes=bool(scenario.consider_turnover_changes),
             early_group_dim="cargo_group",
         )
+        phases["kpi_compute_ms"] = int((time.perf_counter() - t_kpi) * 1000)
+        detail.update(compute_timings)
+
+        t_post = time.perf_counter()
         filter_options = ScenarioEffectsPandasService._collect_filter_options(
             df,
             mart_meta,
@@ -149,7 +172,9 @@ def warm_scenario_after_rule_change(
             skipped_volume = mart_meta.routes_without_volume
         else:
             skipped_charge, skipped_volume = fetch_route_set_stats(scenario.route_set_id)
+        phases["post_compute_ms"] = int((time.perf_counter() - t_post) * 1000)
 
+        t_save = time.perf_counter()
         save_scenario_compute_kpi_only(
             scenario_id=scenario.id,
             data_version=data_version,
@@ -181,6 +206,7 @@ def warm_scenario_after_rule_change(
             route_set_id=scenario.route_set_id,
             keep_cache_dir=resolved_mask_dir,
         )
+        phases["kpi_save_ms"] = int((time.perf_counter() - t_save) * 1000)
 
         update_warm_status(scenario_id=scenario_id, phase="compact")
 
@@ -199,6 +225,18 @@ def warm_scenario_after_rule_change(
             include_rule_breakdown=False,
         )
         schedule_deferred_full_compute(deferred_job)
+
+        phases["total_ms"] = int((time.perf_counter() - started) * 1000)
+        log_warm_timings(
+            logger,
+            label="kpi",
+            phases=phases,
+            detail=detail,
+            scenario_id=scenario_id,
+            change=change,
+            rule_id=rule_id,
+            rules=len(rule_specs),
+        )
     except Exception as exc:
         logger.exception(
             "Scenario warm failed scenario_id=%s change=%s rule_id=%s",

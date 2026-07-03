@@ -548,17 +548,20 @@ def compute_arrays_full(
         )
 
         t_fallout = time.perf_counter()
-        volume_fallout_by_year, money_fallout_by_year = compute_fallout_arrays(
-            sidecar,
-            scenario=scenario,
-            years=years,
-            initial_charge=initial,
-            charge_by_year=charge_by_year,
-            turnover_coef=turnover_coef,
-            model_rows=model_rows,
-            dimension_labels=dimension_labels,
+        volume_fallout_by_year, money_fallout_by_year, fallout_stats = (
+            compute_fallout_arrays(
+                sidecar,
+                scenario=scenario,
+                years=years,
+                initial_charge=initial,
+                charge_by_year=charge_by_year,
+                turnover_coef=turnover_coef,
+                model_rows=model_rows,
+                dimension_labels=dimension_labels,
+            )
         )
         timings["elasticity_fallout_ms"] = int((time.perf_counter() - t_fallout) * 1000)
+        timings.update(fallout_stats.to_timings())
 
     arrays = FullComputeArrays(
         initial=initial,

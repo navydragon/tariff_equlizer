@@ -21,11 +21,24 @@ def parse_etsng_code(value: Any) -> str | None:
 
 
 def format_etsng_code(code: int | str | None) -> str:
-    """Форматирует код груза ЕТСНГ с ведущими нулями для отображения."""
+    """Форматирует код груза ЕТСНГ с ведущими нулями (6 цифр, legacy/импорт)."""
     parsed = parse_etsng_code(code)
     if parsed is None:
         return "" if code is None else str(code).strip()
     return parsed.zfill(ETSNG_CODE_WIDTH)
+
+
+def format_app_cargo_code(code: int | str | None) -> str:
+    """Форматирует код груза для отображения в UI (5-значный формат приложения)."""
+    parsed = parse_etsng_code(code)
+    if parsed is None:
+        return "" if code is None else str(code).strip()
+    normalized, _ = normalize_rzd_cargo_code(parsed)
+    if not normalized:
+        return ""
+    if len(normalized) >= APP_CARGO_CODE_WIDTH:
+        return normalized
+    return normalized.zfill(APP_CARGO_CODE_WIDTH)
 
 
 def format_cargo_code_3(value: Any) -> str:

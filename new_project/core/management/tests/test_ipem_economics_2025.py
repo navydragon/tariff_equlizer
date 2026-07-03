@@ -19,7 +19,7 @@ from core.management.ipem_economics import (
     resolve_wagon_kind,
     write_export_csv,
 )
-from core.domain.cargo.formatting import format_etsng_code
+from core.domain.cargo.formatting import format_app_cargo_code
 from core.models import (
     Cargo,
     CargoGroup,
@@ -236,7 +236,7 @@ class IpemCoal2026OverlapTests(TestCase):
     def test_resolve_cargo_by_etsng_pads_code(self) -> None:
         cargo = resolve_cargo_by_etsng("16111")
         self.assertIsNotNone(cargo)
-        self.assertEqual(format_etsng_code(cargo.code), "016111")
+        self.assertEqual(format_app_cargo_code(cargo.code), "16111")
 
     def test_resolve_wagon_kind_maps_poluvagon(self) -> None:
         wagon, issue = resolve_wagon_kind("полувагон", [self.wagon_kind])

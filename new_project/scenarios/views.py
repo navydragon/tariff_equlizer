@@ -13,7 +13,7 @@ from django.views.decorators.http import require_http_methods
 
 from core.domain.route.services import RouteSetService
 from core.domain.services.app_settings import AppSettingsService
-from core.domain.cargo.formatting import format_etsng_code
+from core.domain.cargo.formatting import format_app_cargo_code
 from core.models import Route
 from scenarios.models import Scenario
 from scenarios.domain.constants import PRICE_CHANGE_MODES, PRICE_CHANGE_PARAMETERS
@@ -536,7 +536,7 @@ def tariff_rule_options_api(request, scenario_id):
             {
                 "value": r["cargo__code"],
                 "text": (
-                    f'{format_etsng_code(r["cargo__code"])} — {r["cargo__name"]}'
+                    f'{format_app_cargo_code(r["cargo__code"])} — {r["cargo__name"]}'
                 ),
             }
             for r in rows
@@ -1523,7 +1523,7 @@ def elasticity_rule_options_api(request, scenario_id: int):
             {
                 "value": r["cargo__code"],
                 "text": (
-                    f'{format_etsng_code(r["cargo__code"])} — {r["cargo__name"]}'
+                    f'{format_app_cargo_code(r["cargo__code"])} — {r["cargo__name"]}'
                 ),
             }
             for r in rows

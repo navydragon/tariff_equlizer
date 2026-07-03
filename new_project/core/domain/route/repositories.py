@@ -4,7 +4,7 @@ from typing import Optional
 
 from django.db.models import Count, Q, QuerySet
 
-from core.domain.cargo.formatting import format_etsng_code
+from core.domain.cargo.formatting import format_app_cargo_code
 from core.domain.cargo.ordering import sort_cargo_group_names
 from core.domain.route.dto import (
     RouteListFiltersDTO,
@@ -201,7 +201,7 @@ class RouteRepository:
             )
             items: list[RoutePickerOptionDTO] = []
             for row in rows:
-                code = format_etsng_code(row["cargo__code"])
+                code = format_app_cargo_code(row["cargo__code"])
                 name = row["cargo__name"] or ""
                 text = f"{code} — {name}" if name else code
                 items.append(

@@ -109,6 +109,78 @@ def select_rule_for_route_indexed(route: Route, rule_index: RuleIndex) -> Elasti
     return None
 
 
+def select_rule_for_keys_indexed(
+    rule_index: RuleIndex,
+    *,
+    cargo_group_id: int | None,
+    cargo_id: int | None,
+    message_type_id: int | None,
+) -> ElasticityRule | None:
+    """Быстрый выбор правила по id полям (без Route/proxy)."""
+    keys: tuple[RuleKey, ...] = (
+        (cargo_group_id, cargo_id, message_type_id),
+        (cargo_group_id, cargo_id, None),
+        (cargo_group_id, None, message_type_id),
+        (None, cargo_id, message_type_id),
+        (cargo_group_id, None, None),
+        (None, cargo_id, None),
+        (None, None, message_type_id),
+        (None, None, None),
+    )
+    for key in keys:
+        rules = rule_index.get(key)
+        if rules:
+            return rules[0]
+    return None
+
+
+FloatPointsIndex = dict[int, tuple[list[float], list[float]]]
+
+
+def build_float_points_index(points_index: PointsIndex) -> FloatPointsIndex:
+    """Конвертирует точки правил в float для hot path fallout."""
+    index: FloatPointsIndex = {}
+    for rule_id, (margs, coefs) in points_index.items():
+        index[int(rule_id)] = (
+            [float(m) for m in margs],
+            [float(c) for c in coefs],
+        )
+    return index
+
+
+def lookup_coefficient_for_marginality_float(
+    rule_id: int,
+    marginality_ratio: float,
+    points_index: FloatPointsIndex,
+) -> float | None:
+    packed = points_index.get(int(rule_id))
+    if packed is None:
+        return None
+    margs, coefs = packed
+    if not margs:
+        return None
+    pos = bisect_right(margs, marginality_ratio) - 1
+    if pos < 0:
+        return coefs[0]
+    return coefs[pos]
+
+
+def apply_enterprise_load_cap_float(
+    coefficient: float | None,
+    enterprise_load: float,
+    *,
+    enabled: bool,
+) -> float | None:
+    if coefficient is None or not enabled:
+        return coefficient
+    if enterprise_load == 0.0 or enterprise_load != enterprise_load:
+        return coefficient
+    if enterprise_load >= 1.0:
+        return 1.0
+    cap = 1.0 + (1.0 - enterprise_load)
+    return min(coefficient, cap)
+
+
 def marginality_ratio_from_percent(marginality_percent: Decimal) -> Decimal:
     """Конвертирует маржинальность из процентов (12.96) в долю (0.1296)."""
     return marginality_percent / Decimal("100")

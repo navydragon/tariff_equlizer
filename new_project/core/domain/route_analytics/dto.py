@@ -66,7 +66,7 @@ class RouteAnalyticsResultDTO:
 
 METRIC_LABELS: dict[str, str] = {
     "count": "Количество",
-    "money": "Экономика",
+    "money": "Доходы",
     "volume": "Погрузка",
     "turnover": "Грузооборот",
 }
