@@ -14,6 +14,8 @@ from django.views.decorators.http import require_http_methods
 from core.domain.cargo.dto import CreateCargoDTO, UpdateCargoDTO
 from core.domain.cargo.formatting import format_app_cargo_code
 from core.domain.cargo.services import CargoService
+from core.domain.cargo_category.dto import AddPositionDTO
+from core.domain.cargo_category.services import CargoCategoryService
 from core.domain.route_analysis.dto import RouteAnalysisRequestDTO
 from core.domain.route_analysis.services import RouteAnalysisService
 from core.domain.route_analytics.dimensions import RZD_2026_ROUTE_SET_CODE
@@ -1553,6 +1555,85 @@ def message_type_update_api(request, pk: int):
 @require_http_methods(["POST"])
 def message_type_delete_api(request, pk: int):
     return _simple_dict_delete_api(MessageType, pk)
+
+
+# === Специальные наборы: HTML и API ===
+
+
+@login_required
+def special_sets_list_view(request):
+    return render(
+        request,
+        "core/special_sets_list.html",
+        {
+            "page_title": "Специальные наборы",
+            "page_subtitle": (
+                "Позиции ЕТСНГ для потребительских и продовольственных товаров "
+                "(Приказ ФАС № 862/24)"
+            ),
+            "consumer_list_api_url": "/references/api/special-sets/consumer_goods/",
+            "food_list_api_url": "/references/api/special-sets/food_goods/",
+            "consumer_create_api_url": "/references/api/special-sets/consumer_goods/create/",
+            "food_create_api_url": "/references/api/special-sets/food_goods/create/",
+            "consumer_delete_api_url_template": (
+                "/references/api/special-sets/consumer_goods/000/delete/"
+            ),
+            "food_delete_api_url_template": (
+                "/references/api/special-sets/food_goods/000/delete/"
+            ),
+        },
+    )
+
+
+@login_required
+@require_http_methods(["GET"])
+def special_sets_list_api(request, category: str):
+    service = CargoCategoryService()
+    result, errors = service.list_positions(category)
+    if errors:
+        return JsonResponse({"success": False, "errors": errors}, status=400)
+    return JsonResponse(
+        {
+            "success": True,
+            "category": result.category,
+            "category_label": result.category_label,
+            "total": result.total,
+            "items": [item.to_dict() for item in result.items],
+        }
+    )
+
+
+@login_required
+@require_http_methods(["POST"])
+def special_sets_create_api(request, category: str):
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse(
+            {"success": False, "errors": ["Неверный формат JSON"]},
+            status=400,
+        )
+
+    dto = AddPositionDTO(
+        category=category,
+        position=str(data.get("position", "")),
+    )
+    service = CargoCategoryService()
+    item, errors = service.add_position(dto)
+    if errors:
+        return JsonResponse({"success": False, "errors": errors}, status=400)
+    return JsonResponse({"success": True, "item": item.to_dict()})
+
+
+@login_required
+@require_http_methods(["POST"])
+def special_sets_delete_api(request, category: str, position: str):
+    service = CargoCategoryService()
+    deleted, errors = service.delete_position(category=category, position=position)
+    if errors:
+        status = 404 if "не найдена" in errors[0] else 400
+        return JsonResponse({"success": False, "errors": errors}, status=status)
+    return JsonResponse({"success": True, "deleted": deleted})
 
 
 # === Shipper: HTML и API ===

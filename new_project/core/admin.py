@@ -8,6 +8,7 @@ from .models import (
     Setting,
     CargoGroup,
     Cargo,
+    CargoCategoryPosition,
     RailRoad,
     Region,
     Station,
@@ -113,6 +114,14 @@ class CargoAdmin(admin.ModelAdmin):
     ordering = ("code",)
     search_fields = ("code", "name")
     list_filter = ("cargo_group", "is_consumer_goods", "is_food_goods")
+
+
+@admin.register(CargoCategoryPosition)
+class CargoCategoryPositionAdmin(admin.ModelAdmin):
+    list_display = ("category", "position")
+    ordering = ("category", "position")
+    list_filter = ("category",)
+    search_fields = ("position",)
 
 
 @admin.register(RailRoad)

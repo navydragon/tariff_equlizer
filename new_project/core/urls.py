@@ -44,6 +44,11 @@ urlpatterns = [
     path("references/shipment-types/", views.shipment_type_list_view, name="shipment_type_list"),
     path("references/message-types/", views.message_type_list_view, name="message_type_list"),
     path("references/shippers/", views.shipper_list_view, name="shipper_list"),
+    path(
+        "references/special-sets/",
+        views.special_sets_list_view,
+        name="special_sets_list",
+    ),
     # API для грузов
     path(
         "references/api/cargos/",
@@ -225,6 +230,22 @@ urlpatterns = [
         "references/api/message-types/<int:pk>/delete/",
         views.message_type_delete_api,
         name="message_type_delete_api",
+    ),
+    # API: специальные наборы
+    path(
+        "references/api/special-sets/<str:category>/",
+        views.special_sets_list_api,
+        name="special_sets_list_api",
+    ),
+    path(
+        "references/api/special-sets/<str:category>/create/",
+        views.special_sets_create_api,
+        name="special_sets_create_api",
+    ),
+    path(
+        "references/api/special-sets/<str:category>/<str:position>/delete/",
+        views.special_sets_delete_api,
+        name="special_sets_delete_api",
     ),
     # API: наборы маршрутов и маршруты
     path(

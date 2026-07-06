@@ -1,12 +1,15 @@
 """Классификация грузов по позициям ЕТСНГ (Приказ ФАС № 862/24)."""
 from __future__ import annotations
 
+from django.core.cache import cache
+
 from core.domain.cargo.formatting import (
     CARGO_CODE_3_WIDTH,
     cargo_code_3_from_normalized,
 )
 
 # Импортные перевозки потребительских товаров (позиции ЕТСНГ).
+# Используется только для data-migration.
 CONSUMER_GOODS_POSITION_SPEC: tuple[str, ...] = (
     "041-044",
     "051-054",
@@ -45,6 +48,7 @@ CONSUMER_GOODS_POSITION_SPEC: tuple[str, ...] = (
 )
 
 # Внутригосударственные перевозки продовольственных товаров (позиции ЕТСНГ).
+# Используется только для data-migration.
 FOOD_GOODS_POSITION_SPEC: tuple[str, ...] = (
     "041-044",
     "051-054",
@@ -62,8 +66,14 @@ FOOD_GOODS_POSITION_SPEC: tuple[str, ...] = (
     "602",
 )
 
+CACHE_KEY_CONSUMER = "cargo_category_positions:consumer_goods"
+CACHE_KEY_FOOD = "cargo_category_positions:food_goods"
+CACHE_TTL_SECONDS = 300
 
-def expand_etsng_position_spec(spec: list[str] | tuple[str, ...]) -> frozenset[str]:
+
+def expand_etsng_position_spec(
+    spec: list[str] | tuple[str, ...],
+) -> frozenset[str]:
     """Разворачивает спецификацию позиций ЕТСНГ в множество 3-значных кодов."""
     positions: set[str] = set()
     for item in spec:
@@ -83,18 +93,55 @@ def expand_etsng_position_spec(spec: list[str] | tuple[str, ...]) -> frozenset[s
     return frozenset(positions)
 
 
-CONSUMER_GOODS_POSITIONS = expand_etsng_position_spec(CONSUMER_GOODS_POSITION_SPEC)
-FOOD_GOODS_POSITIONS = expand_etsng_position_spec(FOOD_GOODS_POSITION_SPEC)
+def clear_cargo_category_positions_cache() -> None:
+    cache.delete_many([CACHE_KEY_CONSUMER, CACHE_KEY_FOOD])
+
+
+def _load_positions_from_db(category: str) -> frozenset[str]:
+    from core.models import CargoCategoryPosition
+
+    return frozenset(
+        CargoCategoryPosition.objects.filter(category=category).values_list(
+            "position",
+            flat=True,
+        )
+    )
+
+
+def get_consumer_goods_positions() -> frozenset[str]:
+    cached = cache.get(CACHE_KEY_CONSUMER)
+    if cached is not None:
+        return frozenset(cached)
+
+    from core.models import CargoCategoryPosition
+
+    positions = _load_positions_from_db(
+        CargoCategoryPosition.Category.CONSUMER_GOODS,
+    )
+    cache.set(CACHE_KEY_CONSUMER, list(positions), CACHE_TTL_SECONDS)
+    return positions
+
+
+def get_food_goods_positions() -> frozenset[str]:
+    cached = cache.get(CACHE_KEY_FOOD)
+    if cached is not None:
+        return frozenset(cached)
+
+    from core.models import CargoCategoryPosition
+
+    positions = _load_positions_from_db(
+        CargoCategoryPosition.Category.FOOD_GOODS,
+    )
+    cache.set(CACHE_KEY_FOOD, list(positions), CACHE_TTL_SECONDS)
+    return positions
 
 
 def classify_cargo_flags(normalized_code: str) -> tuple[bool, bool]:
-    """(is_consumer_goods, is_food_goods) для нормализованного 5-значного кода груза."""
-    # Позиция ЕТСНГ — первые 3 цифры кода в формате приложения (без zfill до 6).
-    # Иначе 42201 ошибочно превращается в 042201 → позиция 042.
+    """(is_consumer_goods, is_food_goods) для 5-значного кода груза."""
     position = cargo_code_3_from_normalized(normalized_code)
     if not position:
         return False, False
     return (
-        position in CONSUMER_GOODS_POSITIONS,
-        position in FOOD_GOODS_POSITIONS,
+        position in get_consumer_goods_positions(),
+        position in get_food_goods_positions(),
     )

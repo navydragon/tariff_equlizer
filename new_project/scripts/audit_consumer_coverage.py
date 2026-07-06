@@ -15,8 +15,8 @@ django.setup()
 from django.db.models import Count
 
 from core.domain.cargo.etsng_categories import (
-    CONSUMER_GOODS_POSITIONS,
     classify_cargo_flags,
+    get_consumer_goods_positions,
 )
 from core.domain.cargo.formatting import format_app_cargo_code
 from core.models import Cargo, CargoGroup, Route, RouteSet
@@ -27,7 +27,8 @@ EXAMPLE_CODE = "042201"
 def main() -> None:
     print("=== classify_cargo_flags ===")
     print(f"{EXAMPLE_CODE}: {classify_cargo_flags(EXAMPLE_CODE)}")
-    print(f"position 042 in CONSUMER: {'042' in CONSUMER_GOODS_POSITIONS}")
+    consumer_positions = get_consumer_goods_positions()
+    print(f"position 042 in CONSUMER: {'042' in consumer_positions}")
 
     rs = RouteSet.objects.filter(code="RZD_2026").first()
     if not rs:
@@ -83,7 +84,7 @@ def main() -> None:
     ):
         print(f"  {row['cargo_code_3']}: {row['n']:,}")
 
-    print(f"\nCONSUMER positions count: {len(CONSUMER_GOODS_POSITIONS)}")
+    print(f"\nCONSUMER positions count: {len(consumer_positions)}")
 
 
 if __name__ == "__main__":

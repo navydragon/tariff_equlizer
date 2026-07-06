@@ -1,0 +1,208 @@
+{% extends "base.html" %}
+
+{% block title %}{{ page_title }} · Цифровой тарифный инструментарий{% endblock %}
+
+{% block content %}
+<div
+  data-controller="special-sets"
+  data-special-sets-consumer-list-url-value="{{ consumer_list_api_url }}"
+  data-special-sets-food-list-url-value="{{ food_list_api_url }}"
+  data-special-sets-consumer-create-url-value="{{ consumer_create_api_url }}"
+  data-special-sets-food-create-url-value="{{ food_create_api_url }}"
+  data-special-sets-consumer-delete-url-template-value="{{ consumer_delete_api_url_template }}"
+  data-special-sets-food-delete-url-template-value="{{ food_delete_api_url_template }}"
+>
+  <div class="page-header d-print-none">
+    <div class="row align-items-center">
+      <div class="col">
+        <h2 class="page-title">{{ page_title }}</h2>
+        <div class="text-muted mt-1">{{ page_subtitle }}</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="page-body">
+    <div class="container-xl">
+      <div class="row row-cards">
+        <div class="col-lg-6">
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title">Потребительские товары</h3>
+              <div class="card-actions">
+                <button
+                  type="button"
+                  class="btn btn-primary btn-sm"
+                  data-bs-toggle="modal"
+                  data-bs-target="#addConsumerPositionModal"
+                >
+                  <i class="ti ti-plus"></i>
+                  Добавить позицию
+                </button>
+              </div>
+            </div>
+            <div class="card-body p-0">
+              <div
+                class="text-center py-4"
+                style="display: none;"
+                data-special-sets-target="consumerLoading"
+              >
+                <div class="spinner-border text-primary" role="status">
+                  <span class="visually-hidden">Загрузка...</span>
+                </div>
+              </div>
+              <div class="table-responsive">
+                <table class="table table-vcenter card-table table-striped mb-0">
+                  <thead>
+                    <tr>
+                      <th>Позиция</th>
+                      <th class="text-end">Грузов</th>
+                      <th class="text-end">Маршрутов</th>
+                      <th class="w-1"></th>
+                    </tr>
+                  </thead>
+                  <tbody data-special-sets-target="consumerTableBody"></tbody>
+                </table>
+              </div>
+              <div
+                class="text-center py-4 text-muted"
+                style="display: none;"
+                data-special-sets-target="consumerEmpty"
+              >
+                Нет позиций в наборе
+              </div>
+            </div>
+            <div class="card-footer text-muted" data-special-sets-target="consumerSummary">
+              Всего позиций: 0
+            </div>
+          </div>
+        </div>
+
+        <div class="col-lg-6">
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title">Продовольственные товары</h3>
+              <div class="card-actions">
+                <button
+                  type="button"
+                  class="btn btn-primary btn-sm"
+                  data-bs-toggle="modal"
+                  data-bs-target="#addFoodPositionModal"
+                >
+                  <i class="ti ti-plus"></i>
+                  Добавить позицию
+                </button>
+              </div>
+            </div>
+            <div class="card-body p-0">
+              <div
+                class="text-center py-4"
+                style="display: none;"
+                data-special-sets-target="foodLoading"
+              >
+                <div class="spinner-border text-primary" role="status">
+                  <span class="visually-hidden">Загрузка...</span>
+                </div>
+              </div>
+              <div class="table-responsive">
+                <table class="table table-vcenter card-table table-striped mb-0">
+                  <thead>
+                    <tr>
+                      <th>Позиция</th>
+                      <th class="text-end">Грузов</th>
+                      <th class="text-end">Маршрутов</th>
+                      <th class="w-1"></th>
+                    </tr>
+                  </thead>
+                  <tbody data-special-sets-target="foodTableBody"></tbody>
+                </table>
+              </div>
+              <div
+                class="text-center py-4 text-muted"
+                style="display: none;"
+                data-special-sets-target="foodEmpty"
+              >
+                Нет позиций в наборе
+              </div>
+            </div>
+            <div class="card-footer text-muted" data-special-sets-target="foodSummary">
+              Всего позиций: 0
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal fade" id="addConsumerPositionModal" tabindex="-1">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Добавить позицию — потребительские товары</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="alert alert-danger" style="display: none;" data-special-sets-target="consumerCreateErrors"></div>
+          <div class="mb-3">
+            <label class="form-label" for="consumerPositionInput">Позиция ЕТСНГ (3 цифры)</label>
+            <input
+              type="text"
+              id="consumerPositionInput"
+              class="form-control"
+              maxlength="3"
+              placeholder="например, 041"
+              data-special-sets-target="consumerPositionInput"
+            />
+            <div class="form-text">Первые 3 цифры кода груза по классификатору ЕТСНГ</div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+          <button
+            type="button"
+            class="btn btn-primary"
+            data-action="click->special-sets#addConsumerPosition"
+          >
+            Добавить
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal fade" id="addFoodPositionModal" tabindex="-1">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Добавить позицию — продовольственные товары</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="alert alert-danger" style="display: none;" data-special-sets-target="foodCreateErrors"></div>
+          <div class="mb-3">
+            <label class="form-label" for="foodPositionInput">Позиция ЕТСНГ (3 цифры)</label>
+            <input
+              type="text"
+              id="foodPositionInput"
+              class="form-control"
+              maxlength="3"
+              placeholder="например, 521"
+              data-special-sets-target="foodPositionInput"
+            />
+            <div class="form-text">Первые 3 цифры кода груза по классификатору ЕТСНГ</div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+          <button
+            type="button"
+            class="btn btn-primary"
+            data-action="click->special-sets#addFoodPosition"
+          >
+            Добавить
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

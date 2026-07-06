@@ -91,6 +91,11 @@ def breadcrumbs(request):
             {"title": refs_title, "url": refs_url},
             {"title": "Грузоотправители", "url": None},
         ],
+        "special_sets_list": [
+            {"title": home_title, "url": home_url},
+            {"title": refs_title, "url": refs_url},
+            {"title": "Специальные наборы", "url": None},
+        ],
         "scenarios:management": [
             {"title": home_title, "url": home_url},
             {"title": "Сценарии", "url": None},

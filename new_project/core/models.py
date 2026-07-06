@@ -127,6 +127,36 @@ class Cargo(models.Model):
         return f"{self.code} — {self.name}"
 
 
+class CargoCategoryPosition(models.Model):
+    """Позиция ЕТСНГ (первые 3 цифры) для специальных наборов грузов."""
+
+    class Category(models.TextChoices):
+        CONSUMER_GOODS = "consumer_goods", "Потребительские товары"
+        FOOD_GOODS = "food_goods", "Продовольственные товары"
+
+    category = models.CharField(
+        "Категория",
+        max_length=32,
+        choices=Category.choices,
+        db_index=True,
+    )
+    position = models.CharField("Позиция ЕТСНГ", max_length=3)
+
+    class Meta:
+        verbose_name = "Позиция специального набора"
+        verbose_name_plural = "Позиции специальных наборов"
+        ordering = ["category", "position"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["category", "position"],
+                name="uniq_cargo_category_position",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.get_category_display()} — {self.position}"
+
+
 class RailRoad(models.Model):
     code = models.CharField("Код", max_length=4, primary_key=True)
     name = models.CharField("Название", max_length=255)
