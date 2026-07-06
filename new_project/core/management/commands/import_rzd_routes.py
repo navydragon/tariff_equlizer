@@ -165,6 +165,8 @@ def _row_decimal_optional(row: sqlite3.Row, column: str) -> Optional[Decimal]:
         return None
     return _parse_decimal(row[column])
 
+
+class Command(BaseCommand):
     help = (
         "Импортирует маршруты из databases/01_2026-05-19.db (ИХ_ГП) "
         f'в набор «{DEFAULT_ROUTE_SET_NAME}».'
