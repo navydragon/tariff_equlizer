@@ -221,19 +221,31 @@
           </select>
         </div>
         <div class="col-md-6 col-lg-4">
-          <label class="form-label" for="decisionEffectsRevenuesFalloutToggle">
-            Учёт выпадения
-          </label>
-          <label class="form-check form-switch mb-0" for="decisionEffectsRevenuesFalloutToggle">
-            <input
-              type="checkbox"
-              class="form-check-input"
-              id="decisionEffectsRevenuesFalloutToggle"
-              data-decision-effects-target="revenuesFalloutToggle"
-              data-action="change->decision-effects#onRevenuesFalloutToggle"
-            />
-            <span class="form-check-label">Показывать с учётом выпадения</span>
-          </label>
+          <div
+            class="d-none"
+            data-decision-effects-target="revenuesFalloutControl"
+          >
+            <label class="form-label" for="decisionEffectsRevenuesFalloutToggle">
+              Учёт выпадения
+            </label>
+            <label class="form-check form-switch mb-0" for="decisionEffectsRevenuesFalloutToggle">
+              <input
+                type="checkbox"
+                class="form-check-input"
+                id="decisionEffectsRevenuesFalloutToggle"
+                data-decision-effects-target="revenuesFalloutToggle"
+                data-action="change->decision-effects#onRevenuesFalloutToggle"
+              />
+              <span class="form-check-label">Показывать с учётом выпадения</span>
+            </label>
+          </div>
+          <div
+            class="decision-effects-fallout-disabled-hint text-muted small d-none"
+            data-decision-effects-target="revenuesFalloutDisabledHint"
+          >
+            <i class="ti ti-info-circle me-1" aria-hidden="true"></i>
+            Учёт эластичности спроса в сценарии выключен
+          </div>
         </div>
         <div class="col-auto ms-lg-auto">
           <button
@@ -304,19 +316,31 @@
           </select>
         </div>
         <div class="col-md-6 col-lg-4">
-          <label class="form-label" for="decisionEffectsVolumesFalloutToggle">
-            Учёт выпадения
-          </label>
-          <label class="form-check form-switch mb-0" for="decisionEffectsVolumesFalloutToggle">
-            <input
-              type="checkbox"
-              class="form-check-input"
-              id="decisionEffectsVolumesFalloutToggle"
-              data-decision-effects-target="volumesFalloutToggle"
-              data-action="change->decision-effects#onVolumesFalloutToggle"
-            />
-            <span class="form-check-label">Показывать с учётом выпадения</span>
-          </label>
+          <div
+            class="d-none"
+            data-decision-effects-target="volumesFalloutControl"
+          >
+            <label class="form-label" for="decisionEffectsVolumesFalloutToggle">
+              Учёт выпадения
+            </label>
+            <label class="form-check form-switch mb-0" for="decisionEffectsVolumesFalloutToggle">
+              <input
+                type="checkbox"
+                class="form-check-input"
+                id="decisionEffectsVolumesFalloutToggle"
+                data-decision-effects-target="volumesFalloutToggle"
+                data-action="change->decision-effects#onVolumesFalloutToggle"
+              />
+              <span class="form-check-label">Показывать с учётом выпадения</span>
+            </label>
+          </div>
+          <div
+            class="decision-effects-fallout-disabled-hint text-muted small d-none"
+            data-decision-effects-target="volumesFalloutDisabledHint"
+          >
+            <i class="ti ti-info-circle me-1" aria-hidden="true"></i>
+            Учёт эластичности спроса в сценарии выключен
+          </div>
         </div>
         <div class="col-auto ms-lg-auto">
           <button

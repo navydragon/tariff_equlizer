@@ -31,6 +31,10 @@ import { clearToasts, showToast } from "../lib/toast.js";
       "volumesTableWrap",
       "revenuesFalloutToggle",
       "volumesFalloutToggle",
+      "revenuesFalloutControl",
+      "revenuesFalloutDisabledHint",
+      "volumesFalloutControl",
+      "volumesFalloutDisabledHint",
     ];
 
     static values = {
@@ -137,6 +141,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
       this.state.selectedScenarioId = scenarioId;
       this.state.cacheKey = null;
       this._resetFalloutToggles();
+      this._updateFalloutControlsVisibility();
       this._updateScenarioEditButtonState();
       this._persistActiveScenario(scenarioId);
       this._computeEffects();
@@ -169,6 +174,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
           }
           this.state.selectedScenarioId = prevId;
           this._updateScenarioEditButtonState();
+          this._updateFalloutControlsVisibility();
         }
       } catch (e) {
         console.error("[decision-effects] scenario list refresh failed", e);
@@ -290,7 +296,43 @@ import { clearToasts, showToast } from "../lib/toast.js";
       }
     }
 
+    _isElasticityEnabled() {
+      const scenarioId = this.state.selectedScenarioId;
+      if (!scenarioId) {
+        return false;
+      }
+      const scenario = this.state.scenarioById.get(scenarioId);
+      return Boolean(scenario && scenario.consider_demand_elasticity);
+    }
+
+    _updateFalloutControlsVisibility() {
+      const scenarioSelected = Boolean(this.state.selectedScenarioId);
+      const elasticityEnabled = this._isElasticityEnabled();
+      const showControl = scenarioSelected && elasticityEnabled;
+      const showHint = scenarioSelected && !elasticityEnabled;
+
+      this._toggleFalloutBlock("revenues", showControl, showHint);
+      this._toggleFalloutBlock("volumes", showControl, showHint);
+    }
+
+    _toggleFalloutBlock(kind, showControl, showHint) {
+      const controlTarget = `${kind}FalloutControlTarget`;
+      const hintTarget = `${kind}FalloutDisabledHintTarget`;
+      const hasControl = `has${kind.charAt(0).toUpperCase()}${kind.slice(1)}FalloutControlTarget`;
+      const hasHint = `has${kind.charAt(0).toUpperCase()}${kind.slice(1)}FalloutDisabledHintTarget`;
+
+      if (this[hasControl]) {
+        this[controlTarget].classList.toggle("d-none", !showControl);
+      }
+      if (this[hasHint]) {
+        this[hintTarget].classList.toggle("d-none", !showHint);
+      }
+    }
+
     _includeFalloutForKind(kind) {
+      if (!this._isElasticityEnabled()) {
+        return false;
+      }
       return kind === "revenues"
         ? Boolean(this.state.showFalloutAdjustedRevenues)
         : Boolean(this.state.showFalloutAdjustedVolumes);
@@ -334,6 +376,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
         this.scenarioSelectTarget.appendChild(opt);
         this.state.selectedScenarioId = null;
         this._updateScenarioEditButtonState();
+        this._updateFalloutControlsVisibility();
         return;
       }
 
@@ -356,6 +399,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
         this.scenarioSelectTarget.value = String(selectedId);
         this.state.selectedScenarioId = selectedId;
         this._updateScenarioEditButtonState();
+        this._updateFalloutControlsVisibility();
         this._computeEffects();
       }
     }

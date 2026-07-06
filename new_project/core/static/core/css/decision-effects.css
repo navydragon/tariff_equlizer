@@ -4,6 +4,13 @@
   white-space: nowrap;
 }
 
+.decision-effects-fallout-disabled-hint {
+  display: flex;
+  align-items: center;
+  min-height: 2rem;
+  line-height: 1.35;
+}
+
 .decision-effects-toast-container .toast {
   width: 100%;
 }
