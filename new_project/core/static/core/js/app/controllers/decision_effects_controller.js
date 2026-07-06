@@ -29,6 +29,8 @@ import { clearToasts, showToast } from "../lib/toast.js";
       "volumesGroupBySelect",
       "volumesGroupByInnerSelect",
       "volumesTableWrap",
+      "revenuesFalloutToggle",
+      "volumesFalloutToggle",
     ];
 
     static values = {
@@ -73,6 +75,8 @@ import { clearToasts, showToast } from "../lib/toast.js";
         scenarioEditModalEl: null,
         scenarioEditFrame: null,
         boundScenarioEditModalHiddenHandler: null,
+        showFalloutAdjustedRevenues: false,
+        showFalloutAdjustedVolumes: false,
       };
 
       this.state.scenarioEditModalEl = document.getElementById(
@@ -132,6 +136,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
       const scenarioId = raw ? Number(raw) : null;
       this.state.selectedScenarioId = scenarioId;
       this.state.cacheKey = null;
+      this._resetFalloutToggles();
       this._updateScenarioEditButtonState();
       this._persistActiveScenario(scenarioId);
       this._computeEffects();
@@ -234,6 +239,61 @@ import { clearToasts, showToast } from "../lib/toast.js";
 
     onVolumesExport() {
       this._exportAbsolute("volumes");
+    }
+
+    async onRevenuesFalloutToggle() {
+      this.state.showFalloutAdjustedRevenues = Boolean(
+        this.hasRevenuesFalloutToggleTarget &&
+          this.revenuesFalloutToggleTarget.checked,
+      );
+      await this._handleAbsoluteFalloutToggle("revenues");
+    }
+
+    async onVolumesFalloutToggle() {
+      this.state.showFalloutAdjustedVolumes = Boolean(
+        this.hasVolumesFalloutToggleTarget &&
+          this.volumesFalloutToggleTarget.checked,
+      );
+      await this._handleAbsoluteFalloutToggle("volumes");
+    }
+
+    async _handleAbsoluteFalloutToggle(kind) {
+      if (!this.state.cacheKey || !this.state.selectedScenarioId) {
+        return;
+      }
+
+      const includeFallout = this._includeFalloutForKind(kind);
+      if (includeFallout) {
+        if (kind === "revenues") {
+          this._setRevenuesTableLoading(true, "Расчёт выпадения…");
+        } else {
+          this._setVolumesTableLoading(true, "Расчёт выпадения…");
+        }
+        await this._ensureCompactReady();
+      }
+
+      if (kind === "revenues") {
+        await this._aggregateRevenues();
+      } else {
+        await this._aggregateVolumes();
+      }
+    }
+
+    _resetFalloutToggles() {
+      this.state.showFalloutAdjustedRevenues = false;
+      this.state.showFalloutAdjustedVolumes = false;
+      if (this.hasRevenuesFalloutToggleTarget) {
+        this.revenuesFalloutToggleTarget.checked = false;
+      }
+      if (this.hasVolumesFalloutToggleTarget) {
+        this.volumesFalloutToggleTarget.checked = false;
+      }
+    }
+
+    _includeFalloutForKind(kind) {
+      return kind === "revenues"
+        ? Boolean(this.state.showFalloutAdjustedRevenues)
+        : Boolean(this.state.showFalloutAdjustedVolumes);
     }
 
     _fixInnerGroupConflict(outerSelect, innerSelect) {
@@ -1321,6 +1381,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
         group_by_inner: isRevenues
           ? this.revenuesGroupByInnerSelectTarget?.value || "none"
           : this.volumesGroupByInnerSelectTarget?.value || "none",
+        include_fallout: this._includeFalloutForKind(kind),
       };
     }
 
@@ -1354,15 +1415,22 @@ import { clearToasts, showToast } from "../lib/toast.js";
         return;
       }
 
+      const includeFallout = this._includeFalloutForKind(kind);
       const needsCompactWait =
         (this.state.awaitingCompact || this.state.compactPending) &&
-        !this._canUseEarlyAbsolute();
-      const maxAttempts = needsCompactWait ? 45 : 5;
-      const loadingMessage = needsCompactWait
-        ? "Обновление детализации…"
-        : "Расчёт данных…";
+        (!this._canUseEarlyAbsolute() || includeFallout);
+      const maxAttempts = needsCompactWait || includeFallout ? 45 : 5;
+      const loadingMessage = includeFallout
+        ? "Расчёт выпадения…"
+        : needsCompactWait
+          ? "Обновление детализации…"
+          : "Расчёт данных…";
 
-      if (attempt === 0 || needsCompactWait) {
+      if (attempt === 0 && includeFallout) {
+        await this._ensureCompactReady();
+      }
+
+      if (attempt === 0 || needsCompactWait || includeFallout) {
         setLoading(true, loadingMessage);
       }
 
@@ -1376,7 +1444,10 @@ import { clearToasts, showToast } from "../lib/toast.js";
           const message =
             (data && data.errors && data.errors.join("; ")) ||
             `Ошибка загрузки ${errorLabel}`;
-          if (needsCompactWait && attempt + 1 < maxAttempts) {
+          if (
+            (needsCompactWait || includeFallout) &&
+            attempt + 1 < maxAttempts
+          ) {
             await this._waitForCompactReady();
             return this._aggregateAbsoluteTable(kind, {
               attempt: attempt + 1,
@@ -1403,7 +1474,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
         const rows = (data.table && data.table.rows) || [];
         if (
           !rows.length &&
-          needsCompactWait &&
+          (needsCompactWait || includeFallout) &&
           attempt + 1 < maxAttempts
         ) {
           await this._waitForCompactReady();
@@ -1431,6 +1502,14 @@ import { clearToasts, showToast } from "../lib/toast.js";
       }
     }
 
+    _formatAbsoluteCell(value, fallout) {
+      const main = escapeHtml(value || "0.00");
+      if (!fallout) {
+        return main;
+      }
+      return `${main} <span class="decision-effects-fallout-hint text-danger">(${escapeHtml(fallout)})</span>`;
+    }
+
     _renderAbsoluteTable(wrapEl, data) {
       if (!wrapEl) return;
 
@@ -1439,6 +1518,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
       const years = data.years || [];
       const rows = (data.table && data.table.rows) || [];
       const totalLabel = data.total_column_label || "Итого";
+      const showFalloutAdjusted = Boolean(data.show_fallout_adjusted);
 
       if (!rows.length) {
         wrapEl.classList.remove(
@@ -1459,14 +1539,22 @@ import { clearToasts, showToast } from "../lib/toast.js";
           const yearCells = years
             .map((year) => {
               const value = (row.years && row.years[String(year)]) || "0.00";
-              return `<td class="text-end">${escapeHtml(value)}</td>`;
+              const fallout =
+                showFalloutAdjusted &&
+                row.years_fallout &&
+                row.years_fallout[String(year)]
+                  ? row.years_fallout[String(year)]
+                  : null;
+              return `<td class="text-end">${this._formatAbsoluteCell(value, fallout)}</td>`;
             })
             .join("");
+          const totalFallout =
+            showFalloutAdjusted && row.total_fallout ? row.total_fallout : null;
           return `
             <tr class="${rowClass}">
               <td>${escapeHtml(row.label || "")}</td>
               ${yearCells}
-              <td class="text-end fw-bold">${escapeHtml(row.total || "0.00")}</td>
+              <td class="text-end fw-bold">${this._formatAbsoluteCell(row.total || "0.00", totalFallout)}</td>
             </tr>
           `;
         })

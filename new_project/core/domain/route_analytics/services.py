@@ -9,7 +9,7 @@ from calculations.domain.units import RUB_PER_BLN, TKM_PER_BLN, TONS_PER_MLN
 from core.domain.route.repositories import RouteRepository
 from core.models import RouteSet
 
-from .dimensions import VALID_METRICS, DimensionSpec, get_dimension
+from .dimensions import KPI_FIELDS_BY_YEAR, VALID_KPI_YEARS, DimensionSpec, get_dimension
 from .dto import (
     METRIC_LABELS,
     RouteAnalyticsRequestDTO,
@@ -55,12 +55,13 @@ def _format_turnover(value: Decimal) -> tuple[str, str]:
     return f"{format(_quantize(bln, 2), 'f')}", "млрд т·км"
 
 
-def _metric_formatters() -> dict[str, tuple]:
+def _metric_formatters(kpi_year: int = 2025) -> dict[str, tuple]:
+    fields = KPI_FIELDS_BY_YEAR[kpi_year]
     return {
         "count": (_format_count, Count("id")),
-        "money": (_format_money, Sum("freight_charge_rub")),
-        "volume": (_format_volume, Sum("transport_volume_tons")),
-        "turnover": (_format_turnover, Sum("freight_turnover_tkm")),
+        "money": (_format_money, Sum(fields["money"])),
+        "volume": (_format_volume, Sum(fields["volume"])),
+        "turnover": (_format_turnover, Sum(fields["turnover"])),
     }
 
 
@@ -101,7 +102,7 @@ class RouteAnalyticsService:
         spec = get_dimension(request_dto.dimension)
         assert spec is not None
 
-        formatter, agg_expr = _metric_formatters()[request_dto.metric]
+        formatter, agg_expr = _metric_formatters(request_dto.kpi_year)[request_dto.metric]
 
         qs = self.route_repository.list_operational_queryset(request_dto.route_set_id)
         qs = _annotate_dimension(qs, spec)
@@ -163,16 +164,20 @@ class RouteAnalyticsService:
     def aggregate_totals(
         self,
         route_set_id: int,
+        *,
+        kpi_year: int = 2025,
     ) -> tuple[RouteSetTotalsDTO | None, list[str]]:
         if not isinstance(route_set_id, int) or route_set_id <= 0:
             return None, ["Некорректный route_set_id"]
+        if kpi_year not in VALID_KPI_YEARS:
+            return None, ["Некорректный kpi_year"]
 
         try:
             route_set = RouteSet.objects.get(pk=route_set_id)
         except RouteSet.DoesNotExist:
             return None, ["Набор маршрутов не найден"]
 
-        formatters = _metric_formatters()
+        formatters = _metric_formatters(kpi_year)
         agg_kwargs = {metric: expr for metric, (_fmt, expr) in formatters.items()}
         qs = self.route_repository.list_operational_queryset(route_set_id)
         raw = qs.aggregate(**agg_kwargs)

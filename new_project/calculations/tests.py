@@ -906,6 +906,29 @@ class ScenarioAbsoluteServiceTests(TariffLoadServiceTestMixin, TestCase):
         self.assertEqual(total_row.years["2025"], "1.50")
         self.assertEqual(total_row.total, "3.00")
 
+    def test_include_fallout_requires_elasticity_flag(self) -> None:
+        self._setup_btd("1.1000")
+
+        compute_result, _ = self.effects_service.compute(
+            scenario=self.scenario,
+            user_id=self.user.id,
+        )
+        assert compute_result is not None
+
+        response, errors = self.absolute_service.aggregate_revenues(
+            scenario=self.scenario,
+            user_id=self.user.id,
+            request=ScenarioAbsoluteRequestDTO(
+                cache_key=compute_result.cache_key,
+                group_by="cargo_group",
+                include_fallout=True,
+            ),
+        )
+
+        self.assertIsNone(response)
+        self.assertEqual(len(errors), 1)
+        self.assertIn("эластичности", errors[0].lower())
+
     def test_nested_group_by_holding(self) -> None:
         self._setup_btd("1.0000")
         shipper_alpha, _ = Shipper.objects.get_or_create(

@@ -654,6 +654,27 @@ class Route(models.Model):
         null=True,
         blank=True,
     )
+    transport_volume_tons_plan_2026 = models.DecimalField(
+        "Плановая погрузка 2026, т",
+        max_digits=18,
+        decimal_places=4,
+        null=True,
+        blank=True,
+    )
+    freight_turnover_tkm_plan_2026 = models.DecimalField(
+        "Плановый грузооборот 2026, т·км",
+        max_digits=22,
+        decimal_places=4,
+        null=True,
+        blank=True,
+    )
+    freight_charge_rub_plan_2026 = models.DecimalField(
+        "Плановые доходы 2026, руб.",
+        max_digits=20,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
     enterprise_load_coefficient = models.DecimalField(
         "Коэффициент загрузки предприятия",
         max_digits=6,

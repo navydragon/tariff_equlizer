@@ -15,8 +15,9 @@ import {
     return;
   }
 
-  const METRICS = ROUTE_ANALYTICS_METRICS;
+  const METRICS = ROUTE_ANALYTICS_METRICS.filter((metric) => metric !== "count");
   const DIMENSION = "cargo_group";
+  const KPI_YEAR = "2026";
 
   class HomeDatabaseController extends Stimulus.Controller {
     static targets = ["kpiRow", "tabPanel", "tableWrap", "chartCanvas"];
@@ -35,11 +36,11 @@ import {
       this.state = {
         loadedTabs: new Set(),
         charts: {},
-        activeMetric: "count",
+        activeMetric: "money",
       };
 
       this._loadTotals();
-      this._loadMetric("count");
+      this._loadMetric("money");
     }
 
     disconnect() {
@@ -70,8 +71,7 @@ import {
         </div>
       `;
 
-      const params = new URLSearchParams();
-      params.set("route_set_id", String(this.routeSetIdValue));
+      const params = this._analyticsParams();
 
       try {
         const { data } = await fetchJson(
@@ -89,7 +89,9 @@ import {
           return;
         }
 
-        const cards = Array.isArray(data.cards) ? data.cards : [];
+        const cards = Array.isArray(data.cards)
+          ? data.cards.filter((card) => card.metric !== "count")
+          : [];
         if (!cards.length) {
           this.kpiRowTarget.innerHTML = `
             <div class="col-12 text-muted text-center py-3">Нет данных для отображения.</div>
@@ -139,8 +141,7 @@ import {
 
       renderLoadingTable(tableWrap);
 
-      const params = new URLSearchParams();
-      params.set("route_set_id", String(this.routeSetIdValue));
+      const params = this._analyticsParams();
       params.set("dimension", DIMENSION);
       params.set("metric", metric);
 
@@ -169,6 +170,13 @@ import {
         tableWrap.innerHTML =
           '<div class="text-danger py-4 text-center">Не удалось загрузить данные.</div>';
       }
+    }
+
+    _analyticsParams() {
+      const params = new URLSearchParams();
+      params.set("route_set_id", String(this.routeSetIdValue));
+      params.set("kpi_year", KPI_YEAR);
+      return params;
     }
 
     _findPanel(metric) {

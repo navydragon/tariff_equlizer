@@ -17,6 +17,7 @@ from core.domain.cargo.services import CargoService
 from core.domain.route_analysis.dto import RouteAnalysisRequestDTO
 from core.domain.route_analysis.services import RouteAnalysisService
 from core.domain.route_analytics.dimensions import RZD_2026_ROUTE_SET_CODE
+from core.domain.route_analytics.dimensions import VALID_KPI_YEARS
 from core.domain.route_analytics.dto import RouteAnalyticsRequestDTO
 from core.domain.route_analytics.services import RouteAnalyticsService
 from core.domain.services.app_settings import AppSettingsService
@@ -2193,6 +2194,19 @@ def route_analysis_api(request):
     )
 
 
+def _parse_kpi_year_param(request) -> tuple[int | None, list[str]]:
+    raw = request.GET.get("kpi_year")
+    if raw is None or not str(raw).strip():
+        return 2025, []
+    try:
+        year = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return None, ["Некорректный kpi_year"]
+    if year not in VALID_KPI_YEARS:
+        return None, ["Некорректный kpi_year"]
+    return year, []
+
+
 @login_required
 @require_http_methods(["GET"])
 def route_analytics_aggregate_api(request):
@@ -2203,11 +2217,15 @@ def route_analytics_aggregate_api(request):
 
     dimension = (request.GET.get("dimension") or "").strip()
     metric = (request.GET.get("metric") or "").strip()
+    kpi_year, kpi_errors = _parse_kpi_year_param(request)
+    if kpi_errors:
+        return JsonResponse({"success": False, "errors": kpi_errors}, status=400)
 
     dto = RouteAnalyticsRequestDTO(
         route_set_id=route_set_id,
         dimension=dimension,
         metric=metric,
+        kpi_year=kpi_year,
     )
 
     service = RouteAnalyticsService()
@@ -2228,8 +2246,12 @@ def route_analytics_totals_api(request):
     except (TypeError, ValueError):
         route_set_id = 0
 
+    kpi_year, kpi_errors = _parse_kpi_year_param(request)
+    if kpi_errors:
+        return JsonResponse({"success": False, "errors": kpi_errors}, status=400)
+
     service = RouteAnalyticsService()
-    result, errors = service.aggregate_totals(route_set_id)
+    result, errors = service.aggregate_totals(route_set_id, kpi_year=kpi_year)
     if errors:
         status = 404 if "не найден" in errors[0] else 400
         return JsonResponse({"success": False, "errors": errors}, status=status)

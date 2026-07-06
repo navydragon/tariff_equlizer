@@ -74,15 +74,13 @@
   data-home-database-route-set-id-value="{{ rzd_route_set_id }}"
 >
   <div class="home-database-section-title">
-    <h3 class="mb-1">Актуальная версия базы</h3>
-    <div class="text-muted">РЖД, версия базы 2026 года</div>
+    <h3 class="mb-1">Параметры финансового плана ОАО «РЖД» на 2026 г.</h3>
     <div class="text-muted home-database-source-columns mt-1">
       Данные столбцов таблицы «ИХ_ГП»:
       <ul class="mb-0 ps-3">
-        <li>«2025 Погрузка,т» — погрузка</li>
-        <li>«2025 Грузоб,ткм» — грузооборот</li>
-        <li>«2025 Доходы,руб» — доходы</li>
-        <li>количество маршрутов — по всем строкам выгрузки</li>
+        <li>«2026 Погрузка,т» — погрузка</li>
+        <li>«2026 Грузоб,ткм» — грузооборот</li>
+        <li>«2026 Доходы,руб» — доходы</li>
       </ul>
     </div>
   </div>
@@ -101,29 +99,13 @@
         <li class="nav-item" role="presentation">
           <button
             class="nav-link active"
-            id="home-database-tab-count"
-            data-bs-toggle="tab"
-            data-bs-target="#home-database-pane-count"
-            type="button"
-            role="tab"
-            aria-controls="home-database-pane-count"
-            aria-selected="true"
-            data-home-database-metric-param="count"
-            data-action="shown.bs.tab->home-database#onTabShown"
-          >
-            Количество
-          </button>
-        </li>
-        <li class="nav-item" role="presentation">
-          <button
-            class="nav-link"
             id="home-database-tab-money"
             data-bs-toggle="tab"
             data-bs-target="#home-database-pane-money"
             type="button"
             role="tab"
             aria-controls="home-database-pane-money"
-            aria-selected="false"
+            aria-selected="true"
             data-home-database-metric-param="money"
             data-action="shown.bs.tab->home-database#onTabShown"
           >
@@ -168,37 +150,6 @@
       <div class="tab-content">
         <div
           class="tab-pane fade show active"
-          id="home-database-pane-count"
-          role="tabpanel"
-          aria-labelledby="home-database-tab-count"
-          data-home-database-target="tabPanel"
-          data-metric="count"
-        >
-          <div class="route-analytics-pane-placeholder text-muted py-4 text-center d-none">
-            Загрузка...
-          </div>
-          <div class="row g-3 route-analytics-pane-content">
-            <div class="col-lg-6">
-              <div
-                class="route-analytics-table-wrap"
-                data-home-database-target="tableWrap"
-                data-metric="count"
-              ></div>
-            </div>
-            <div class="col-lg-6">
-              <div class="route-analytics-chart-wrap">
-                <canvas
-                  data-home-database-target="chartCanvas"
-                  data-metric="count"
-                  aria-label="Диаграмма: количество маршрутов"
-                ></canvas>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div
-          class="tab-pane fade"
           id="home-database-pane-money"
           role="tabpanel"
           aria-labelledby="home-database-tab-money"
@@ -208,7 +159,7 @@
           <div class="route-analytics-pane-placeholder text-muted py-4 text-center d-none">
             Загрузка...
           </div>
-          <div class="row g-3 route-analytics-pane-content d-none">
+          <div class="row g-3 route-analytics-pane-content">
             <div class="col-lg-6">
               <div
                 class="route-analytics-table-wrap"

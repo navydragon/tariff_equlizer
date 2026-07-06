@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
 
-from .dimensions import VALID_METRICS, get_dimension
+from .dimensions import VALID_KPI_YEARS, VALID_METRICS, get_dimension
 
 
 @dataclass(frozen=True)
@@ -12,6 +12,7 @@ class RouteAnalyticsRequestDTO:
     route_set_id: int
     dimension: str
     metric: str
+    kpi_year: int = 2025
 
     def validate(self) -> list[str]:
         errors: list[str] = []
@@ -21,6 +22,8 @@ class RouteAnalyticsRequestDTO:
             errors.append("Некорректный параметр группировки")
         if self.metric not in VALID_METRICS:
             errors.append("Некорректная метрика")
+        if self.kpi_year not in VALID_KPI_YEARS:
+            errors.append("Некорректный kpi_year")
         return errors
 
 

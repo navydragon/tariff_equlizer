@@ -367,6 +367,7 @@ def _parse_absolute_request(data: dict) -> tuple[ScenarioAbsoluteRequestDTO | No
         cache_key=data.get("cache_key") or "",
         group_by=data.get("group_by") or "cargo_group",
         group_by_inner=data.get("group_by_inner") or "none",
+        include_fallout=bool(data.get("include_fallout")),
     )
     errors = dto.validate()
     if errors:

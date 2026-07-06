@@ -100,6 +100,9 @@ class RouteAnalyticsServiceTests(TestCase):
             freight_charge_rub=Decimal("1000000.00"),
             transport_volume_tons=Decimal("1000.00"),
             freight_turnover_tkm=Decimal("5000000.00"),
+            freight_charge_rub_plan_2026=Decimal("1100000.00"),
+            transport_volume_tons_plan_2026=Decimal("1100.00"),
+            freight_turnover_tkm_plan_2026=Decimal("5500000.00"),
         )
 
         Route.objects.create(
@@ -115,6 +118,9 @@ class RouteAnalyticsServiceTests(TestCase):
             freight_charge_rub=Decimal("2000000.00"),
             transport_volume_tons=Decimal("2000.00"),
             freight_turnover_tkm=Decimal("10000000.00"),
+            freight_charge_rub_plan_2026=Decimal("2200000.00"),
+            transport_volume_tons_plan_2026=Decimal("2200.00"),
+            freight_turnover_tkm_plan_2026=Decimal("11000000.00"),
             route_set=self.route_set,
             origin_station=origin,
             destination_station=destination,
@@ -129,6 +135,9 @@ class RouteAnalyticsServiceTests(TestCase):
             freight_charge_rub=Decimal("3000000.00"),
             transport_volume_tons=Decimal("3000.00"),
             freight_turnover_tkm=Decimal("15000000.00"),
+            freight_charge_rub_plan_2026=Decimal("3300000.00"),
+            transport_volume_tons_plan_2026=Decimal("3300.00"),
+            freight_turnover_tkm_plan_2026=Decimal("16500000.00"),
             route_set=self.route_set,
             origin_station=origin,
             destination_station=destination,
@@ -137,11 +146,18 @@ class RouteAnalyticsServiceTests(TestCase):
             message_type=message_type,
         )
 
-    def _request(self, *, dimension: str, metric: str) -> RouteAnalyticsRequestDTO:
+    def _request(
+        self,
+        *,
+        dimension: str,
+        metric: str,
+        kpi_year: int = 2025,
+    ) -> RouteAnalyticsRequestDTO:
         return RouteAnalyticsRequestDTO(
             route_set_id=self.route_set.id,
             dimension=dimension,
             metric=metric,
+            kpi_year=kpi_year,
         )
 
     def test_count_by_cargo_group(self) -> None:
@@ -223,6 +239,44 @@ class RouteAnalyticsServiceTests(TestCase):
         result, errors = self.service.aggregate_totals(999999)
         self.assertIsNone(result)
         self.assertIn("Набор маршрутов не найден", errors)
+
+    def test_aggregate_totals_kpi_year_2026(self) -> None:
+        result, errors = self.service.aggregate_totals(self.route_set.id, kpi_year=2026)
+        self.assertEqual(errors, [])
+        assert result is not None
+        cards_by_metric = {card.metric: card for card in result.cards}
+        self.assertEqual(cards_by_metric["count"].value, Decimal("3"))
+        self.assertEqual(cards_by_metric["money"].value, Decimal("6600000.00"))
+        self.assertEqual(cards_by_metric["volume"].value, Decimal("6600.00"))
+        self.assertEqual(cards_by_metric["turnover"].value, Decimal("33000000.00"))
+
+    def test_money_by_cargo_group_kpi_year_2026(self) -> None:
+        result, errors = self.service.aggregate(
+            self._request(dimension="cargo_group", metric="money", kpi_year=2026),
+        )
+        self.assertEqual(errors, [])
+        assert result is not None
+        coal = next(row for row in result.rows if row.label == "Уголь" and not row.is_total)
+        oil = next(row for row in result.rows if row.label == "Нефть" and not row.is_total)
+        self.assertEqual(coal.value, Decimal("3300000.00"))
+        self.assertEqual(oil.value, Decimal("3300000.00"))
+        self.assertEqual(result.total, Decimal("6600000.00"))
+
+    def test_invalid_kpi_year(self) -> None:
+        result, errors = self.service.aggregate_totals(self.route_set.id, kpi_year=2024)
+        self.assertIsNone(result)
+        self.assertIn("Некорректный kpi_year", errors)
+
+        result, errors = self.service.aggregate(
+            RouteAnalyticsRequestDTO(
+                route_set_id=self.route_set.id,
+                dimension="cargo_group",
+                metric="money",
+                kpi_year=2024,
+            )
+        )
+        self.assertIsNone(result)
+        self.assertIn("Некорректный kpi_year", errors)
 
     def test_excludes_ipem_model_routes_from_analytics(self) -> None:
         cargo = Cargo.objects.get(code=3001)

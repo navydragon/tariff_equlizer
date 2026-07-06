@@ -1,6 +1,7 @@
-.decision-effects-toast-container {
-  z-index: 1090;
-  max-width: min(420px, calc(100vw - 1.5rem));
+.decision-effects-fallout-hint {
+  font-size: 0.85em;
+  font-weight: 500;
+  white-space: nowrap;
 }
 
 .decision-effects-toast-container .toast {

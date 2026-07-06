@@ -27,6 +27,9 @@ from scenarios.models import Scenario
 
 _VOLUME_QUANT = Decimal("0.01")
 _BLN_QUANT = Decimal("0.01")
+_ERR_FALLOUT_PENDING = (
+    "Расчёт выпадения ещё выполняется. Повторите запрос через несколько секунд."
+)
 
 
 class ScenarioAbsoluteService:
@@ -47,6 +50,8 @@ class ScenarioAbsoluteService:
             return None, errors
 
         if self._can_use_early_snapshot(payload, request):
+            if request.include_fallout:
+                return None, [_ERR_FALLOUT_PENDING]
             year_values = self._year_values_from_early_snapshot(
                 payload.early_group_snapshot,
                 years=payload.years,
@@ -59,12 +64,33 @@ class ScenarioAbsoluteService:
                 value_fn=lambda fact, year: fact.charge_by_year.get(year, Decimal("0")),
                 values_matrix=payload.compact.charge_by_year if payload.compact else None,
             )
+
+        fallout_year_values = None
+        if request.include_fallout:
+            fallout_errors = self._require_fallout_arrays(
+                scenario=scenario,
+                payload=payload,
+            )
+            if fallout_errors:
+                return None, fallout_errors
+            assert payload.compact is not None
+            fallout_year_values = aggregate_compact_year_values(
+                payload.compact,
+                group_by=request.group_by,
+                group_by_inner=request.group_by_inner,
+                cargo_groups=[],
+                holdings=[],
+                values_by_year=payload.compact.money_fallout_by_year,
+            )
+
         rows = self._format_rows(
             year_values,
             years=payload.years,
             group_by=request.group_by,
             group_by_inner=request.group_by_inner,
             format_value=_format_bln,
+            fallout_year_values=fallout_year_values,
+            format_fallout=_format_bln,
         )
 
         return (
@@ -73,6 +99,7 @@ class ScenarioAbsoluteService:
                 total_column_label=_total_label(payload.years),
                 unit="млрд руб.",
                 rows=rows,
+                show_fallout_adjusted=bool(fallout_year_values),
             ),
             [],
         )
@@ -93,7 +120,17 @@ class ScenarioAbsoluteService:
         if errors:
             return None, errors
 
+        if request.include_fallout:
+            fallout_errors = self._require_fallout_arrays(
+                scenario=scenario,
+                payload=payload,
+            )
+            if fallout_errors:
+                return None, fallout_errors
+
         if self._can_use_early_snapshot(payload, request):
+            if request.include_fallout:
+                return None, [_ERR_FALLOUT_PENDING]
             year_values = self._year_values_from_early_snapshot(
                 payload.early_group_snapshot,
                 years=payload.years,
@@ -134,12 +171,26 @@ class ScenarioAbsoluteService:
                 for key, volume in volume_buckets.items()
             }
 
+        fallout_year_values = None
+        if request.include_fallout:
+            assert payload.compact is not None
+            fallout_year_values = aggregate_compact_year_values(
+                payload.compact,
+                group_by=request.group_by,
+                group_by_inner=request.group_by_inner,
+                cargo_groups=[],
+                holdings=[],
+                values_by_year=payload.compact.volume_fallout_by_year,
+            )
+
         rows = self._format_rows(
             year_values,
             years=payload.years,
             group_by=request.group_by,
             group_by_inner=request.group_by_inner,
             format_value=_format_volume,
+            fallout_year_values=fallout_year_values,
+            format_fallout=_format_volume,
         )
 
         return (
@@ -148,9 +199,29 @@ class ScenarioAbsoluteService:
                 total_column_label=_total_label(payload.years),
                 unit="млн т",
                 rows=rows,
+                show_fallout_adjusted=bool(fallout_year_values),
             ),
             [],
         )
+
+    @staticmethod
+    def _require_fallout_arrays(
+        *,
+        scenario: Scenario,
+        payload: ScenarioEffectsCachePayload,
+    ) -> list[str]:
+        if not scenario.consider_demand_elasticity:
+            return ["У сценария не включён учёт эластичности спроса."]
+        if payload.compact is None:
+            if payload.compact_pending:
+                return [_ERR_FALLOUT_PENDING]
+            return ["Кэш расчёта устарел. Выберите сценарий заново."]
+        if (
+            payload.compact.volume_fallout_by_year is None
+            or payload.compact.money_fallout_by_year is None
+        ):
+            return [_ERR_FALLOUT_PENDING]
+        return []
 
     def _load_payload(
         self,
@@ -176,6 +247,8 @@ class ScenarioAbsoluteService:
             return None, access_errors
 
         if payload.compact is None and payload.compact_pending:
+            if request.include_fallout:
+                return None, [_ERR_FALLOUT_PENDING]
             if self._can_use_early_snapshot(payload, request):
                 return payload, []
             return None, ["Расчёт ещё выполняется. Повторите запрос через несколько секунд."]
@@ -259,10 +332,13 @@ class ScenarioAbsoluteService:
         group_by: str,
         group_by_inner: str,
         format_value,
+        fallout_year_values: dict[tuple[str, ...], dict[int, Decimal]] | None = None,
+        format_fallout=None,
     ) -> list[AbsoluteTableRowDTO]:
         rows: list[AbsoluteTableRowDTO] = []
 
         grand_years: dict[int, Decimal] = {year: Decimal("0") for year in years}
+        grand_fallout: dict[int, Decimal] = {year: Decimal("0") for year in years}
         for key, values in year_values.items():
             if group_by_inner != "none":
                 if len(key) != 2 or key[1] != "ИТОГО":
@@ -270,7 +346,12 @@ class ScenarioAbsoluteService:
             elif len(key) != 1:
                 continue
             for year in years:
-                grand_years[year] += values.get(year, Decimal("0"))
+                gross = values.get(year, Decimal("0"))
+                fallout = Decimal("0")
+                if fallout_year_values is not None:
+                    fallout = fallout_year_values.get(key, {}).get(year, Decimal("0"))
+                grand_years[year] += gross + fallout
+                grand_fallout[year] += fallout
 
         rows.append(
             _row_from_values(
@@ -279,6 +360,8 @@ class ScenarioAbsoluteService:
                 years=years,
                 format_value=format_value,
                 is_subtotal=True,
+                fallout_values=grand_fallout if fallout_year_values is not None else None,
+                format_fallout=format_fallout,
             ),
         )
 
@@ -295,10 +378,18 @@ class ScenarioAbsoluteService:
                 rows.append(
                     _row_from_values(
                         key[0],
-                        year_values[key],
+                        _net_year_values(
+                            year_values.get(key, {}),
+                            fallout_year_values.get(key, {}) if fallout_year_values else None,
+                            years=years,
+                        ),
                         years=years,
                         format_value=format_value,
                         is_subtotal=False,
+                        fallout_values=(
+                            fallout_year_values.get(key) if fallout_year_values else None
+                        ),
+                        format_fallout=format_fallout,
                     ),
                 )
             return rows
@@ -313,10 +404,24 @@ class ScenarioAbsoluteService:
                 rows.append(
                     _row_from_values(
                         outer,
-                        year_values[subtotal_key],
+                        _net_year_values(
+                            year_values.get(subtotal_key, {}),
+                            (
+                                fallout_year_values.get(subtotal_key)
+                                if fallout_year_values
+                                else None
+                            ),
+                            years=years,
+                        ),
                         years=years,
                         format_value=format_value,
                         is_subtotal=True,
+                        fallout_values=(
+                            fallout_year_values.get(subtotal_key)
+                            if fallout_year_values
+                            else None
+                        ),
+                        format_fallout=format_fallout,
                     ),
                 )
 
@@ -336,14 +441,37 @@ class ScenarioAbsoluteService:
                 rows.append(
                     _row_from_values(
                         f"  {key[1]}",
-                        year_values[key],
+                        _net_year_values(
+                            year_values.get(key, {}),
+                            fallout_year_values.get(key) if fallout_year_values else None,
+                            years=years,
+                        ),
                         years=years,
                         format_value=format_value,
                         is_subtotal=False,
+                        fallout_values=(
+                            fallout_year_values.get(key) if fallout_year_values else None
+                        ),
+                        format_fallout=format_fallout,
                     ),
                 )
 
         return rows
+
+
+def _net_year_values(
+    gross_values: dict[int, Decimal],
+    fallout_values: dict[int, Decimal] | None,
+    *,
+    years: list[int],
+) -> dict[int, Decimal]:
+    if fallout_values is None:
+        return gross_values
+    return {
+        year: gross_values.get(year, Decimal("0"))
+        + fallout_values.get(year, Decimal("0"))
+        for year in years
+    }
 
 
 def _row_from_values(
@@ -353,17 +481,52 @@ def _row_from_values(
     years: list[int],
     format_value,
     is_subtotal: bool,
+    fallout_values: dict[int, Decimal] | None = None,
+    format_fallout=None,
 ) -> AbsoluteTableRowDTO:
-    year_str = {
-        str(year): format_value(values.get(year, Decimal("0"))) for year in years
-    }
+    year_str: dict[str, str] = {}
+    years_fallout: dict[str, str] | None = {} if fallout_values is not None else None
+
+    for year in years:
+        net = values.get(year, Decimal("0"))
+        year_str[str(year)] = format_value(net)
+        if fallout_values is not None and format_fallout is not None:
+            display = _fallout_display_magnitude(
+                fallout_values.get(year, Decimal("0")),
+                format_fallout,
+            )
+            if display is not None:
+                years_fallout[str(year)] = display
+
     total = sum((values.get(year, Decimal("0")) for year in years), Decimal("0"))
+    total_fallout_display = None
+    if fallout_values is not None and format_fallout is not None:
+        total_fallout = sum(
+            (fallout_values.get(year, Decimal("0")) for year in years),
+            Decimal("0"),
+        )
+        total_fallout_display = _fallout_display_magnitude(total_fallout, format_fallout)
+
+    if years_fallout is not None and not years_fallout:
+        years_fallout = None
+
     return AbsoluteTableRowDTO(
         label=label,
         is_subtotal=is_subtotal,
         years=year_str,
         total=format_value(total),
+        years_fallout=years_fallout,
+        total_fallout=total_fallout_display,
     )
+
+
+def _fallout_display_magnitude(
+    fallout: Decimal,
+    format_value,
+) -> str | None:
+    if fallout >= 0:
+        return None
+    return format_value(abs(fallout))
 
 
 def _format_bln(value: Decimal) -> str:
