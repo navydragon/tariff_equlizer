@@ -10,6 +10,7 @@ class Scenario(models.Model):
         BY_FX = "by_fx", "По курсу $"
 
     class RetentionCoefficientMode(models.TextChoices):
+        COMBINED = "combined", "Комбинированный (как в IPEM)"
         ABSOLUTE = "absolute", "По текущей маржинальности"
         RELATIVE_TO_BASE = "relative_to_base", "Относительно базовой маржинальности"
 
@@ -64,7 +65,7 @@ class Scenario(models.Model):
         default=True,
     )
     consider_turnover_changes = models.BooleanField(
-        "Учитывать изменения грузооборота",
+        "Учитывать изменения погрузки",
         default=False,
     )
     consider_demand_elasticity = models.BooleanField(
@@ -79,7 +80,7 @@ class Scenario(models.Model):
         "Прогноз коэффициента сохранения грузовой базы",
         max_length=32,
         choices=RetentionCoefficientMode.choices,
-        default=RetentionCoefficientMode.RELATIVE_TO_BASE,
+        default=RetentionCoefficientMode.COMBINED,
     )
 
     class Meta:
@@ -441,6 +442,7 @@ class TariffRule(models.Model):
         default=100,
     )
     position = models.PositiveIntegerField("Позиция", default=0)
+    is_enabled = models.BooleanField("Включено", default=True)
     created_at = models.DateTimeField("Создано", auto_now_add=True)
     updated_at = models.DateTimeField("Обновлено", auto_now=True)
 

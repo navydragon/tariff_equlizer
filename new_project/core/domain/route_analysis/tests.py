@@ -354,6 +354,28 @@ class RouteAnalysisServiceTests(TestCase):
         self.assertEqual(response.kpi.by_year[0].elasticity.pct, "1.0000")
         self.assertEqual(response.kpi.by_year[0].elasticity.rub, "0.00")
 
+    def test_kpi_retention_coefficient_combined_mode_tariff_increase(self) -> None:
+        self._attach_elasticity_rule()
+        BTDCategoryValue.objects.filter(
+            scenario=self.scenario,
+            year=2026,
+        ).update(value=Decimal("1.1000"))
+        self.scenario.retention_coefficient_mode = (
+            Scenario.RetentionCoefficientMode.COMBINED
+        )
+        self.scenario.save(update_fields=["retention_coefficient_mode"])
+        self.route.transport_volume_tons = Decimal("1000000")
+        self.route.save(update_fields=["transport_volume_tons"])
+
+        response = self.service.calculate(
+            request_dto=self._request(),
+            scenario=self.scenario,
+            route=self.route,
+        )
+
+        coefficient = Decimal(response.kpi.by_year[0].elasticity.pct)
+        self.assertLessEqual(coefficient, Decimal("1"))
+
     def test_kpi_retention_coefficient_without_elasticity_set(self) -> None:
         response = self.service.calculate(
             request_dto=self._request(),
@@ -393,6 +415,10 @@ class RouteAnalysisServiceTests(TestCase):
 
     def test_kpi_retention_coefficient_enterprise_load_from_model_route(self) -> None:
         self._attach_elasticity_rule()
+        self.scenario.retention_coefficient_mode = (
+            Scenario.RetentionCoefficientMode.ABSOLUTE
+        )
+        self.scenario.save(update_fields=["retention_coefficient_mode"])
         rule = ElasticityRule.objects.get(
             elasticity_set=self.scenario.elasticity_set,
             name="Internal KPI rule",

@@ -23,6 +23,8 @@ from scenarios.domain.utils.elasticity_matching import (
     build_float_points_index,
     build_points_index,
     build_rule_index,
+    compute_retention_at_charge_ratio_float,
+    compute_retention_at_charge_ratio_from_margin,
     lookup_coefficient_for_marginality,
     lookup_coefficient_for_marginality_float,
     select_rule_for_keys_indexed,
@@ -295,6 +297,13 @@ def _retention_coefficient_float(
     scenario: Scenario,
     rule_index: RuleIndex,
     float_points_index: FloatPointsIndex,
+    charge_ratio: float = 1.0,
+    market: float | None = None,
+    production: float | None = None,
+    total: float | None = None,
+    rzd: float | None = None,
+    operators: float | None = None,
+    transshipment: float | None = None,
 ) -> float | None:
     rule = select_rule_for_keys_indexed(
         rule_index,
@@ -304,6 +313,31 @@ def _retention_coefficient_float(
     )
     if rule is None:
         return None
+
+    if scenario.retention_coefficient_mode == Scenario.RetentionCoefficientMode.COMBINED:
+        if base_margin is None or market is None or rzd is None:
+            return None
+
+        def margin_fn(tariff_change: float) -> float:
+            return _marginality_from_values(
+                market=market,
+                production=production or 0.0,
+                total=total or 0.0,
+                rzd=rzd,
+                operators=operators or 0.0,
+                transshipment=transshipment or 0.0,
+                charge_ratio=1.0 + tariff_change,
+            )
+
+        return compute_retention_at_charge_ratio_float(
+            charge_ratio=charge_ratio,
+            margin_fn=margin_fn,
+            base_margin=base_margin,
+            rule_id=rule.id,
+            enterprise=enterprise,
+            scenario=scenario,
+            float_points_index=float_points_index,
+        )
 
     current_coefficient = lookup_coefficient_for_marginality_float(
         rule.id,
@@ -384,6 +418,13 @@ def _weighted_retention_numpy(
             scenario=scenario,
             rule_index=rule_index,
             float_points_index=float_points_index,
+            charge_ratio=charge_ratio,
+            market=market,
+            production=production,
+            total=total,
+            rzd=rzd,
+            operators=operators,
+            transshipment=transshipment,
         )
         if coefficient is None:
             continue
@@ -496,10 +537,33 @@ def _retention_for_proxy(
     rule_index,
     points_index,
     base_marginality_ratio: Decimal | None = None,
+    charge_ratio: Decimal | float = Decimal("1"),
 ) -> Decimal | None:
     rule = select_rule_for_route_indexed(proxy, rule_index)  # type: ignore[arg-type]
     if rule is None:
         return None
+
+    mode = scenario.retention_coefficient_mode
+    if mode == Scenario.RetentionCoefficientMode.COMBINED:
+        base_marginality = base_marginality_ratio
+        if base_marginality is None:
+            base_marginality = _marginality_decimal(proxy, charge_ratio=1.0)
+
+        charge_ratio_decimal = Decimal(str(charge_ratio))
+
+        def margin_fn(tariff_change: Decimal) -> Decimal:
+            step_ratio = Decimal("1") + tariff_change
+            return _marginality_decimal(proxy, charge_ratio=float(step_ratio))
+
+        return compute_retention_at_charge_ratio_from_margin(
+            charge_ratio=charge_ratio_decimal,
+            margin_fn=margin_fn,
+            base_margin=base_marginality,
+            rule=rule,
+            enterprise_load=proxy.enterprise_load_coefficient,
+            scenario=scenario,
+            points_index=points_index,
+        )
 
     current_coefficient = lookup_coefficient_for_marginality(
         rule,
@@ -509,7 +573,6 @@ def _retention_for_proxy(
     if current_coefficient is None:
         return None
 
-    mode = scenario.retention_coefficient_mode
     if mode == "relative_to_base":
         base_marginality = base_marginality_ratio
         if base_marginality is None:
@@ -559,6 +622,7 @@ def _weighted_retention(
             rule_index=rule_index,
             points_index=points_index,
             base_marginality_ratio=base_margin,
+            charge_ratio=charge_ratio,
         )
         if k is None:
             continue
@@ -761,6 +825,13 @@ def compute_fallout_arrays(
                     scenario=scenario,
                     rule_index=rule_index,
                     float_points_index=float_points_index,
+                    charge_ratio=charge_ratio,
+                    market=market,
+                    production=production,
+                    total=total,
+                    rzd=rzd,
+                    operators=operators,
+                    transshipment=transshipment,
                 )
             elif source == "holding_aggregate":
                 key = (

@@ -11,6 +11,11 @@ from scenarios.domain.repositories.elasticity import (
 )
 from scenarios.models import ElasticityRule, Scenario
 
+TARIFF_CHANGE_STEP = Decimal("0.005")
+POSITIVE_TARIFF_SMOOTHING_STEP = Decimal("0.05")
+TARIFF_CHANGE_STEP_FLOAT = 0.005
+POSITIVE_TARIFF_SMOOTHING_STEP_FLOAT = 0.05
+
 
 RuleKey = tuple[int | None, int | None, int | None]
 RuleIndex = dict[RuleKey, list[ElasticityRule]]
@@ -301,16 +306,368 @@ def route_base_marginality_ratio(route: Route) -> Decimal:
     return marginality_rub / price
 
 
+def marginality_ratio_for_tariff_change(
+    route: Route,
+    tariff_change: Decimal,
+) -> Decimal:
+    price = _to_decimal_or_zero(route.market_price_per_ton)
+    if price <= 0:
+        return Decimal("0")
+    cost = _route_cost_baseline(route)
+    rzd_base = _to_decimal_or_zero(route.rzd_cost_total_per_ton)
+    oper = _to_decimal_or_zero(route.operators_cost_per_ton)
+    per = _to_decimal_or_zero(route.transshipment_cost_per_ton)
+    rzd = rzd_base * (Decimal("1") + tariff_change)
+    marginality_rub = price - cost - rzd - oper - per
+    return marginality_rub / price
+
+
+def _iter_tariff_change_steps(tariff_change_target: Decimal) -> list[Decimal]:
+    if tariff_change_target == 0:
+        return []
+    step = TARIFF_CHANGE_STEP
+    steps: list[Decimal] = []
+    current = Decimal("0")
+    if tariff_change_target > 0:
+        while current < tariff_change_target:
+            current += step
+            if current > tariff_change_target:
+                current = tariff_change_target
+            steps.append(current)
+    else:
+        while current > tariff_change_target:
+            current -= step
+            if current < tariff_change_target:
+                current = tariff_change_target
+            steps.append(current)
+    return steps
+
+
+def compute_retention_at_tariff_change(
+    *,
+    route: Route,
+    scenario: Scenario,
+    tariff_change: Decimal,
+    previous_coefficient: Decimal | None,
+    rule: ElasticityRule,
+    point_repo: ElasticityRulePointRepository | None = None,
+    points_index: PointsIndex | None = None,
+) -> Decimal | None:
+    margin = marginality_ratio_for_tariff_change(route, tariff_change)
+    current_lookup = lookup_coefficient_for_marginality(
+        rule,
+        margin,
+        point_repo=point_repo,
+        points_index=points_index,
+    )
+    if current_lookup is None:
+        return None
+
+    if tariff_change > 0:
+        previous = (
+            previous_coefficient
+            if previous_coefficient is not None
+            else Decimal("1")
+        )
+        return min(
+            Decimal("1"),
+            max(current_lookup, previous - POSITIVE_TARIFF_SMOOTHING_STEP),
+        )
+
+    if tariff_change == 0:
+        return Decimal("1")
+
+    enterprise_load = resolve_enterprise_load_coefficient(route)
+    if enterprise_load is not None and enterprise_load >= 1:
+        return Decimal("1")
+
+    base_margin = route_base_marginality_ratio(route)
+    base_lookup = lookup_coefficient_for_marginality(
+        rule,
+        base_margin,
+        point_repo=point_repo,
+        points_index=points_index,
+    )
+    if base_lookup is None:
+        return None
+
+    coefficient = Decimal("1") + current_lookup - base_lookup
+    return apply_enterprise_load_cap(
+        coefficient,
+        enterprise_load,
+        enabled=bool(scenario.consider_enterprise_load),
+    )
+
+
+def compute_retention_at_charge_ratio(
+    route: Route,
+    scenario: Scenario,
+    charge_ratio: Decimal,
+    *,
+    rule_repo: ElasticityRuleRepository | None = None,
+    point_repo: ElasticityRulePointRepository | None = None,
+    points_index: PointsIndex | None = None,
+) -> Decimal | None:
+    if not scenario.elasticity_set_id:
+        return None
+
+    rules = (rule_repo or ElasticityRuleRepository()).list_by_set(
+        scenario.elasticity_set_id,
+    )
+    rule = select_rule_for_route(route, rules)
+    if rule is None:
+        return None
+
+    tariff_change_target = charge_ratio - Decimal("1")
+    if tariff_change_target == 0:
+        return Decimal("1")
+
+    repo = point_repo or ElasticityRulePointRepository()
+    previous_coefficient: Decimal | None = None
+    for tariff_change in _iter_tariff_change_steps(tariff_change_target):
+        previous_coefficient = compute_retention_at_tariff_change(
+            route=route,
+            scenario=scenario,
+            tariff_change=tariff_change,
+            previous_coefficient=previous_coefficient,
+            rule=rule,
+            point_repo=repo,
+            points_index=points_index,
+        )
+        if previous_coefficient is None:
+            return None
+
+    if previous_coefficient is None:
+        return None
+    return max(Decimal("0"), previous_coefficient)
+
+
+def compute_retention_at_tariff_change_from_margin(
+    *,
+    scenario: Scenario,
+    tariff_change: Decimal,
+    previous_coefficient: Decimal | None,
+    margin: Decimal,
+    base_margin: Decimal,
+    rule: ElasticityRule,
+    enterprise_load: Decimal | None,
+    point_repo: ElasticityRulePointRepository | None = None,
+    points_index: PointsIndex | None = None,
+) -> Decimal | None:
+    current_lookup = lookup_coefficient_for_marginality(
+        rule,
+        margin,
+        point_repo=point_repo,
+        points_index=points_index,
+    )
+    if current_lookup is None:
+        return None
+
+    if tariff_change > 0:
+        previous = (
+            previous_coefficient
+            if previous_coefficient is not None
+            else Decimal("1")
+        )
+        return min(
+            Decimal("1"),
+            max(current_lookup, previous - POSITIVE_TARIFF_SMOOTHING_STEP),
+        )
+
+    if tariff_change == 0:
+        return Decimal("1")
+
+    if enterprise_load is not None and enterprise_load >= 1:
+        return Decimal("1")
+
+    base_lookup = lookup_coefficient_for_marginality(
+        rule,
+        base_margin,
+        point_repo=point_repo,
+        points_index=points_index,
+    )
+    if base_lookup is None:
+        return None
+
+    coefficient = Decimal("1") + current_lookup - base_lookup
+    return apply_enterprise_load_cap(
+        coefficient,
+        enterprise_load,
+        enabled=bool(scenario.consider_enterprise_load),
+    )
+
+
+def compute_retention_at_charge_ratio_from_margin(
+    *,
+    charge_ratio: Decimal,
+    margin_fn,
+    base_margin: Decimal,
+    rule: ElasticityRule,
+    enterprise_load: Decimal | None,
+    scenario: Scenario,
+    point_repo: ElasticityRulePointRepository | None = None,
+    points_index: PointsIndex | None = None,
+) -> Decimal | None:
+    tariff_change_target = charge_ratio - Decimal("1")
+    if tariff_change_target == 0:
+        return Decimal("1")
+
+    repo = point_repo or ElasticityRulePointRepository()
+    previous_coefficient: Decimal | None = None
+    for tariff_change in _iter_tariff_change_steps(tariff_change_target):
+        margin = margin_fn(tariff_change)
+        previous_coefficient = compute_retention_at_tariff_change_from_margin(
+            scenario=scenario,
+            tariff_change=tariff_change,
+            previous_coefficient=previous_coefficient,
+            margin=margin,
+            base_margin=base_margin,
+            rule=rule,
+            enterprise_load=enterprise_load,
+            point_repo=repo,
+            points_index=points_index,
+        )
+        if previous_coefficient is None:
+            return None
+
+    if previous_coefficient is None:
+        return None
+    return max(Decimal("0"), previous_coefficient)
+
+
+def _iter_tariff_change_steps_float(tariff_change_target: float) -> list[float]:
+    if tariff_change_target == 0.0:
+        return []
+    step = TARIFF_CHANGE_STEP_FLOAT
+    steps: list[float] = []
+    current = 0.0
+    if tariff_change_target > 0.0:
+        while current < tariff_change_target:
+            current += step
+            if current > tariff_change_target:
+                current = tariff_change_target
+            steps.append(current)
+    else:
+        while current > tariff_change_target:
+            current -= step
+            if current < tariff_change_target:
+                current = tariff_change_target
+            steps.append(current)
+    return steps
+
+
+def compute_retention_at_tariff_change_float(
+    *,
+    tariff_change: float,
+    previous_coefficient: float | None,
+    margin: float,
+    base_margin: float,
+    rule_id: int,
+    enterprise: float,
+    scenario: Scenario,
+    float_points_index: FloatPointsIndex,
+) -> float | None:
+    current_lookup = lookup_coefficient_for_marginality_float(
+        rule_id,
+        margin,
+        float_points_index,
+    )
+    if current_lookup is None:
+        return None
+
+    if tariff_change > 0.0:
+        previous = (
+            previous_coefficient
+            if previous_coefficient is not None
+            else 1.0
+        )
+        return min(
+            1.0,
+            max(current_lookup, previous - POSITIVE_TARIFF_SMOOTHING_STEP_FLOAT),
+        )
+
+    if tariff_change == 0.0:
+        return 1.0
+
+    if enterprise >= 1.0:
+        return 1.0
+
+    base_lookup = lookup_coefficient_for_marginality_float(
+        rule_id,
+        base_margin,
+        float_points_index,
+    )
+    if base_lookup is None:
+        return None
+
+    coefficient = 1.0 + current_lookup - base_lookup
+    return apply_enterprise_load_cap_float(
+        coefficient,
+        enterprise,
+        enabled=bool(scenario.consider_enterprise_load),
+    )
+
+
+def compute_retention_at_charge_ratio_float(
+    *,
+    charge_ratio: float,
+    margin_fn,
+    base_margin: float,
+    rule_id: int,
+    enterprise: float,
+    scenario: Scenario,
+    float_points_index: FloatPointsIndex,
+) -> float | None:
+    tariff_change_target = charge_ratio - 1.0
+    if tariff_change_target == 0.0:
+        return 1.0
+
+    previous_coefficient: float | None = None
+    for tariff_change in _iter_tariff_change_steps_float(tariff_change_target):
+        margin = margin_fn(tariff_change)
+        previous_coefficient = compute_retention_at_tariff_change_float(
+            tariff_change=tariff_change,
+            previous_coefficient=previous_coefficient,
+            margin=margin,
+            base_margin=base_margin,
+            rule_id=rule_id,
+            enterprise=enterprise,
+            scenario=scenario,
+            float_points_index=float_points_index,
+        )
+        if previous_coefficient is None:
+            return None
+
+    if previous_coefficient is None:
+        return None
+    return max(0.0, previous_coefficient)
+
+
 def compute_retention_coefficient(
     route: Route,
     scenario: Scenario,
     current_marginality_ratio: Decimal,
     *,
+    charge_ratio: Decimal | None = None,
     rule_repo: ElasticityRuleRepository | None = None,
     point_repo: ElasticityRulePointRepository | None = None,
+    points_index: PointsIndex | None = None,
 ) -> Decimal | None:
     if not scenario.elasticity_set_id:
         return None
+
+    mode = scenario.retention_coefficient_mode
+    if mode == Scenario.RetentionCoefficientMode.COMBINED:
+        if charge_ratio is None:
+            charge_ratio = Decimal("1")
+        return compute_retention_at_charge_ratio(
+            route,
+            scenario,
+            charge_ratio,
+            rule_repo=rule_repo,
+            point_repo=point_repo,
+            points_index=points_index,
+        )
 
     rules = (rule_repo or ElasticityRuleRepository()).list_by_set(
         scenario.elasticity_set_id,
@@ -324,17 +681,18 @@ def compute_retention_coefficient(
         rule,
         current_marginality_ratio,
         point_repo=repo,
+        points_index=points_index,
     )
     if current_coefficient is None:
         return None
 
-    mode = scenario.retention_coefficient_mode
     if mode == Scenario.RetentionCoefficientMode.RELATIVE_TO_BASE:
         base_marginality = route_base_marginality_ratio(route)
         base_coefficient = lookup_coefficient_for_marginality(
             rule,
             base_marginality,
             point_repo=repo,
+            points_index=points_index,
         )
         if base_coefficient is None:
             return None

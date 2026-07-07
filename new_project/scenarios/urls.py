@@ -54,6 +54,11 @@ urlpatterns = [
         name="tariff_rule_delete",
     ),
     path(
+        "api/tariff-rules/<int:rule_id>/set-enabled/",
+        views.tariff_rule_set_enabled_api,
+        name="tariff_rule_set_enabled",
+    ),
+    path(
         "api/<int:scenario_id>/tariff-rule-options/",
         views.tariff_rule_options_api,
         name="tariff_rule_options",

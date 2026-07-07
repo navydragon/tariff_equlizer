@@ -1,4 +1,9 @@
-"""Коэффициенты изменения грузооборота по годам (колонки % L из выгрузки РЖД)."""
+"""Коэффициенты изменения погрузки по годам.
+
+Коэффициент года Y рассчитывается как отношение
+`Y Погрузка,т / 2025 Погрузка,т`
+в строке ИХ_ГП (РЖД). Значения квантуются до 3 знаков после запятой.
+"""
 
 from __future__ import annotations
 
@@ -6,6 +11,7 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any, Iterable
 
 TURNOVER_COEF_YEARS: tuple[int, ...] = tuple(range(2025, 2031))
+LOADING_BASE_YEAR: int = 2025
 
 _COEF_QUANT = Decimal("0.001")
 _COEF_MIN = Decimal("-99.999")
@@ -18,6 +24,10 @@ _ROUTE_FIELD_BY_YEAR: dict[int, str] = {
 
 def sqlite_column_for_year(year: int) -> str:
     return f"{year}_% L год\\год"
+
+
+def sqlite_loading_column_for_year(year: int) -> str:
+    return f"{year} Погрузка,т"
 
 
 def route_field_for_year(year: int) -> str:
@@ -39,6 +49,19 @@ def quantize_coef(value: Any) -> Decimal | None:
     elif parsed > _COEF_MAX:
         parsed = _COEF_MAX
     return parsed.quantize(_COEF_QUANT, rounding=ROUND_HALF_UP)
+
+
+def _parse_number(value: Any) -> Decimal | None:
+    """Парсит число из SQLite без ограничений диапазона."""
+    if value is None:
+        return None
+    raw = str(value).strip().replace(" ", "").replace(",", ".")
+    if not raw:
+        return None
+    try:
+        return Decimal(raw)
+    except InvalidOperation:
+        return None
 
 
 def coef_for_year(
@@ -72,18 +95,36 @@ def coefs_from_row(
     *,
     available_columns: Iterable[str] | None = None,
 ) -> dict[int, Decimal | None]:
-    available = set(available_columns) if available_columns is not None else None
-    result: dict[int, Decimal | None] = {}
-    for year in TURNOVER_COEF_YEARS:
-        column = sqlite_column_for_year(year)
+    available = (
+        set(available_columns) if available_columns is not None else None
+    )
+    result: dict[int, Decimal | None] = dict.fromkeys(TURNOVER_COEF_YEARS, None)
+
+    def _read_loading(year: int) -> Decimal | None:
+        column = sqlite_loading_column_for_year(year)
         if available is not None and column not in available:
-            result[year] = None
+            return None
+        return _parse_number(_row_value(row, column))
+
+    base = _read_loading(LOADING_BASE_YEAR)
+
+    base_ok = base is not None and base > 0
+    if not base_ok:
+        return result
+
+    result[LOADING_BASE_YEAR] = Decimal("1.000")
+    for year in TURNOVER_COEF_YEARS:
+        if year == LOADING_BASE_YEAR:
             continue
-        result[year] = quantize_coef(_row_value(row, column))
+        loading = _read_loading(year)
+        if loading is not None:
+            result[year] = quantize_coef(loading / base)
     return result
 
 
-def coefs_to_route_kwargs(coefs: dict[int, Decimal | None]) -> dict[str, Decimal | None]:
+def coefs_to_route_kwargs(
+    coefs: dict[int, Decimal | None],
+) -> dict[str, Decimal | None]:
     return {
         route_field_for_year(year): coefs.get(year)
         for year in TURNOVER_COEF_YEARS

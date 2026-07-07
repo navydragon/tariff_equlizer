@@ -43,6 +43,7 @@ class TariffRuleDTO:
     name: str
     base_percent: str
     position: int
+    is_enabled: bool
     conditions: list[TariffRuleConditionDTO]
     year_values: list[TariffRuleYearValueDTO]
 
@@ -54,6 +55,7 @@ class TariffRuleDTO:
             name=rule.name,
             base_percent=str(rule.base_percent),
             position=rule.position,
+            is_enabled=bool(rule.is_enabled),
             conditions=[TariffRuleConditionDTO.from_model(c) for c in rule.conditions.all()],
             year_values=[TariffRuleYearValueDTO.from_model(v) for v in rule.year_values.all()],
         )
@@ -65,6 +67,7 @@ class CreateTariffRuleDTO:
     name: str
     base_percent: Optional[str] = None
     position: Optional[int] = None
+    is_enabled: Optional[bool] = None
     conditions: Optional[list[dict]] = None
     year_values: Optional[dict] = None  # {year: coefficient}
 
@@ -82,6 +85,7 @@ class UpdateTariffRuleDTO:
     name: Optional[str] = None
     base_percent: Optional[str] = None
     position: Optional[int] = None
+    is_enabled: Optional[bool] = None
     conditions: Optional[list[dict]] = None
     year_values: Optional[dict] = None  # {year: coefficient}
 

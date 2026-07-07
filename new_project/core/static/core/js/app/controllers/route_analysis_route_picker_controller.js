@@ -385,6 +385,7 @@ import { persistActiveScenario } from "../lib/scenario_active.js";
       }
 
       const prevId = this.state.selectedScenarioId;
+      const hadSelectedRoute = Boolean(this.state.selectedRoute);
       try {
         await this._loadScenarios();
         if (prevId != null && this.state.scenarioById.has(prevId)) {
@@ -395,7 +396,17 @@ import { persistActiveScenario } from "../lib/scenario_active.js";
         } else {
           this._selectDefaultScenario();
         }
-        this._renderDiagram();
+
+        this.state.routeAnalysisCache.clear();
+        this.state.equalizerOverrides = {};
+
+        if (hadSelectedRoute && this.state.selectedRoute) {
+          await this._loadEqualizerBaseline();
+        } else {
+          this._resetEqualizer();
+        }
+
+        await this._renderDiagram();
       } catch (e) {
         // eslint-disable-next-line no-console
         console.error("[route-analysis] scenario list refresh failed", e);

@@ -13,6 +13,7 @@
   data-effects-cube-scenarios-url-value="{% url 'scenarios:api_list' %}"
   data-effects-cube-compute-url-value="{% url 'calculations:scenario_effects_compute_api' %}"
   data-effects-cube-compute-pandas-url-value="{% url 'calculations:scenario_effects_compute_pandas_api' %}"
+  data-effects-cube-cache-readiness-url-value="{% url 'calculations:cache_readiness_api' %}"
   data-effects-cube-warm-status-url-value="{% url 'calculations:scenario_warm_status_api' %}"
   data-effects-cube-compact-status-url-value="{% url 'calculations:scenario_effects_compact_status_api' %}"
   data-effects-cube-cube-url-value="{% url 'calculations:scenario_effects_cube_api' %}"
@@ -39,6 +40,37 @@
       </div>
     </div>
   </div>
+
+  <div
+    class="d-none"
+    data-effects-cube-target="rebuildStatus"
+  ></div>
+
+<div
+  class="modal modal-blur fade"
+  id="routeMartRebuildModal"
+  tabindex="-1"
+  aria-hidden="true"
+  data-bs-backdrop="static"
+  data-bs-keyboard="false"
+>
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-body text-center py-5">
+        <div
+          class="spinner-border text-primary"
+          aria-hidden="true"
+        ></div>
+        <div class="mt-4">
+          <h4 class="mb-1">Пересборка витрины маршрутов</h4>
+          <div class="text-muted" id="routeMartRebuildMessage">
+            Подождите, пожалуйста.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 
   <div class="card mt-4">
     <div class="card-header">

@@ -129,6 +129,11 @@
   font-weight: 600;
 }
 
+.decision-effects-kpi-card__total-caption-pct.is-negative {
+  color: #dc2626;
+  font-weight: 600;
+}
+
 .decision-effects-kpi-card__split {
   margin: 0;
   width: 100%;
@@ -204,7 +209,15 @@
   font-size: 0.9rem;
   line-height: 1.2;
   font-weight: 400;
+  color: #6b7280;
+}
+
+.decision-effects-kpi-card__split-pct.is-positive {
   color: #02c94f;
+}
+
+.decision-effects-kpi-card__split-pct.is-negative {
+  color: #dc2626;
 }
 
 @media (max-width: 767.98px) {
@@ -228,13 +241,36 @@
 }
 
 .decision-effects-table-wrap .cell-pct {
-  color: #059669;
+  color: #6b7280;
   font-size: 0.8125rem;
+}
+
+.decision-effects-table-wrap .cell-pct.is-positive {
+  color: #059669;
+}
+
+.decision-effects-table-wrap .cell-pct.is-negative {
+  color: #dc2626;
 }
 
 .decision-effects-chart-wrap {
   position: relative;
   height: 420px;
+}
+
+.decision-effects-chart-wrap--loading canvas {
+  opacity: 0.35;
+}
+
+.decision-effects-chart-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.78);
 }
 
 .decision-effects-absolute-table-wrap {

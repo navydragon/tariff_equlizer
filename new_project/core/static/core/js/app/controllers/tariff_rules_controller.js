@@ -186,6 +186,7 @@ import { renderErrors } from "../lib/errors.js";
       detailUrlTemplate: String,
       updateUrlTemplate: String,
       deleteUrlTemplate: String,
+      setEnabledUrlTemplate: String,
       optionsUrlTemplate: String,
       statsUrl: String,
       warmStatusUrl: String,
@@ -200,6 +201,7 @@ import { renderErrors } from "../lib/errors.js";
         optionLabels: new Map(),
         editLoadId: 0,
         suppressCoverageRefresh: false,
+        togglingRuleIds: new Set(),
       };
       this.statsDebounceTimer = null;
       this.rebuildPollTimer = null;
@@ -389,6 +391,11 @@ import { renderErrors } from "../lib/errors.js";
       this.tbodyTarget.innerHTML = this.state.rules
         .map((r, idx) => {
           const bp = r.base_percent != null ? String(r.base_percent) : "";
+          const isEnabled = r.is_enabled !== false;
+          const rowClass = isEnabled ? "" : "tariff-rule-disabled";
+          const disabledBadge = isEnabled
+            ? ""
+            : '<span class="badge bg-secondary-lt ms-2">Выключено</span>';
           const conditionsHtml = formatConditionsSummary(
             r.conditions || [],
             (parameter, value) => this.resolveOptionLabel(parameter, value),
@@ -398,23 +405,34 @@ import { renderErrors } from "../lib/errors.js";
             startYear,
             endYear,
           );
+          const isToggling = this.state.togglingRuleIds.has(r.id);
           return `
-            <tr data-rule-id="${r.id}">
+            <tr data-rule-id="${r.id}" class="${rowClass}">
               <td class="text-muted">${idx + 1}</td>
-              <td class="fw-medium">${escapeHtml(r.name || "")}</td>
+              <td class="fw-medium">${escapeHtml(r.name || "")}${disabledBadge}</td>
               <td class="small">${conditionsHtml}</td>
               <td class="small">${yearsHtml}</td>
               <td>${escapeHtml(bp)}</td>
               <td class="text-end">
-                <div class="btn-list justify-content-end">
-                  <button type="button" class="btn btn-sm btn-outline-primary" data-action="tariff-rules#openEdit" data-rule-id="${r.id}">
-                    <i class="ti ti-edit"></i>
-                    Редактировать
-                  </button>
-                  <button type="button" class="btn btn-sm btn-outline-danger" data-action="tariff-rules#deleteRule" data-rule-id="${r.id}">
-                    <i class="ti ti-trash"></i>
-                    Удалить
-                  </button>
+                <div class="tariff-rule-actions">
+                  <label class="form-check form-switch tariff-rule-enable-switch mb-0" title="${isEnabled ? "Выключить правило" : "Включить правило"}">
+                    <input
+                      class="form-check-input"
+                      type="checkbox"
+                      ${isEnabled ? "checked" : ""}
+                      ${isToggling ? "disabled" : ""}
+                      data-action="change->tariff-rules#toggleEnabled"
+                      data-rule-id="${r.id}"
+                    />
+                  </label>
+                  <div class="btn-group" role="group" aria-label="Действия">
+                    <button type="button" class="btn btn-sm btn-outline-primary" data-action="tariff-rules#openEdit" data-rule-id="${r.id}" title="Редактировать">
+                      <i class="ti ti-edit"></i>
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-danger" data-action="tariff-rules#deleteRule" data-rule-id="${r.id}" title="Удалить">
+                      <i class="ti ti-trash"></i>
+                    </button>
+                  </div>
                 </div>
               </td>
             </tr>
@@ -890,13 +908,63 @@ import { renderErrors } from "../lib/errors.js";
       this._dispatchTariffRulesChanged();
     }
 
+    async toggleEnabled(event) {
+      const input = event.currentTarget;
+      const ruleId = parseInt(input.dataset.ruleId || "0", 10);
+      if (!ruleId) return;
+
+      const rule = this.state.rules.find((item) => item.id === ruleId);
+      const previousEnabled = rule ? rule.is_enabled !== false : true;
+      const nextEnabled = !!input.checked;
+
+      if (previousEnabled === nextEnabled) {
+        return;
+      }
+
+      this.state.togglingRuleIds.add(ruleId);
+      this.renderTable();
+
+      const url = buildUrl(this.setEnabledUrlTemplateValue, ruleId);
+      const { data } = await fetchJson(url, {
+        method: "POST",
+        body: { is_enabled: nextEnabled },
+      });
+
+      this.state.togglingRuleIds.delete(ruleId);
+
+      if (!data || !data.success) {
+        if (rule) {
+          rule.is_enabled = previousEnabled;
+        }
+        this.renderTable();
+        this.showToast("error", "Не удалось изменить состояние правила");
+        return;
+      }
+
+      if (data.rule) {
+        const index = this.state.rules.findIndex((item) => item.id === ruleId);
+        if (index >= 0) {
+          this.state.rules[index] = data.rule;
+        }
+      }
+      this.renderTable();
+      this.showToast("success", nextEnabled ? "Правило включено" : "Правило выключено");
+      this._startRebuildTracking(data.rebuild);
+      this._dispatchTariffRulesChanged();
+    }
+
     _dispatchTariffRulesChanged() {
       if (!this.hasScenarioIdValue) return;
+      const detail = { scenarioId: this.scenarioIdValue };
       document.dispatchEvent(
-        new CustomEvent("tariff-rules-changed", {
-          detail: { scenarioId: this.scenarioIdValue },
-        }),
+        new CustomEvent("tariff-rules-changed", { detail }),
       );
+      if (window.parent !== window) {
+        window.parent.postMessage(
+          { type: "tariff-rules-changed", scenarioId: this.scenarioIdValue },
+          window.location.origin,
+        );
+      }
     }
 
     showToast(type, message) {

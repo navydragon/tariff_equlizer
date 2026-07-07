@@ -22,7 +22,7 @@ from core.domain.route.turnover_coefficients import (
     TURNOVER_COEF_YEARS,
     coefs_from_row,
     coefs_to_route_kwargs,
-    sqlite_column_for_year,
+    sqlite_loading_column_for_year,
 )
 from core.management.reference_clear import clear_routes_for_route_set
 from core.management.rzd_paths import RZD_TABLE, get_rzd_db_path
@@ -88,8 +88,11 @@ _BASE_SELECT_COLS = [
     COL_CHARGE_RUB,
 ]
 
-_TURNOVER_COEF_OPTIONAL_COLS = tuple(
-    sqlite_column_for_year(year) for year in TURNOVER_COEF_YEARS
+_TURNOVER_COEF_OPTIONAL_COLS = (
+    sqlite_loading_column_for_year(2027),
+    sqlite_loading_column_for_year(2028),
+    sqlite_loading_column_for_year(2029),
+    sqlite_loading_column_for_year(2030),
 )
 
 _PLAN_2026_OPTIONAL_COLS = (
@@ -699,7 +702,9 @@ class Command(BaseCommand):
 
         distance_belt = (row[COL_DISTANCE_BELT] or "").strip()
 
-        turnover_coefs = coefs_to_route_kwargs(coefs_from_row(row))
+        turnover_coefs = coefs_to_route_kwargs(
+            coefs_from_row(row, available_columns=row.keys()),
+        )
 
         return Route(
             route_set=route_set,

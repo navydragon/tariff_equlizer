@@ -1,4 +1,9 @@
 import { fetchBlob, fetchJson } from "../lib/http.js";
+import {
+  cacheReadinessMessage,
+  cacheReadinessVariant,
+  pollCacheReadiness,
+} from "../lib/cache_readiness.js";
 import { escapeHtml } from "../lib/dom.js";
 import { persistActiveScenario } from "../lib/scenario_active.js";
 import { clearToasts, showToast } from "../lib/toast.js";
@@ -19,12 +24,14 @@ import { clearToasts, showToast } from "../lib/toast.js";
       "holdingFilterSelect",
       "tableWrap",
       "toastContainer",
+      "rebuildStatus",
     ];
 
     static values = {
       scenariosUrl: String,
       computeUrl: String,
       computePandasUrl: String,
+      cacheReadinessUrl: String,
       warmStatusUrl: String,
       compactStatusUrl: String,
       cubeUrl: String,
@@ -50,13 +57,35 @@ import { clearToasts, showToast } from "../lib/toast.js";
       };
 
       this._onTariffRulesChanged = this._onTariffRulesChanged.bind(this);
+      this._onTariffRulesMessage = this._onTariffRulesMessage.bind(this);
       document.addEventListener("tariff-rules-changed", this._onTariffRulesChanged);
+      window.addEventListener("message", this._onTariffRulesMessage);
+
+      this.state.routeMartRebuildModalEl = document.getElementById(
+        "routeMartRebuildModal",
+      );
+      this.state.routeMartRebuildMessageEl = document.getElementById(
+        "routeMartRebuildMessage",
+      );
+      if (
+        this.state.routeMartRebuildModalEl &&
+        typeof bootstrap !== "undefined"
+      ) {
+        this.state.routeMartRebuildModal =
+          bootstrap.Modal.getOrCreateInstance(
+            this.state.routeMartRebuildModalEl,
+            { backdrop: "static", keyboard: false },
+          );
+      } else {
+        this.state.routeMartRebuildModal = null;
+      }
 
       this._loadScenarios();
     }
 
     disconnect() {
       document.removeEventListener("tariff-rules-changed", this._onTariffRulesChanged);
+      window.removeEventListener("message", this._onTariffRulesMessage);
       this._destroyTomSelects();
     }
 
@@ -179,6 +208,12 @@ import { clearToasts, showToast } from "../lib/toast.js";
       }
     }
 
+    _onTariffRulesMessage(event) {
+      if (event.origin !== window.location.origin) return;
+      if (!event.data || event.data.type !== "tariff-rules-changed") return;
+      this._onTariffRulesChanged({ detail: { scenarioId: event.data.scenarioId } });
+    }
+
     async _waitForWarmKpi(scenarioId, startedAt = Date.now()) {
       if (!this.hasWarmStatusUrlValue || !scenarioId) {
         return;
@@ -249,6 +284,15 @@ import { clearToasts, showToast } from "../lib/toast.js";
       if (!computeUrl || !this.state.selectedScenarioId) return;
 
       this._clearToasts();
+      const readiness = await this._waitForCacheReadiness(
+        this.state.selectedScenarioId,
+      );
+      if (
+        readiness &&
+        (readiness.mart_phase === "error" || readiness.scenario_phase === "error")
+      ) {
+        return;
+      }
       this._setTableLoading(true, "Расчёт данных…");
       this.state.computing = true;
 
@@ -264,6 +308,21 @@ import { clearToasts, showToast } from "../lib/toast.js";
         });
 
         if (!response.ok || !data || !data.success) {
+          if (response.status === 409 && data && data.code === "mart_rebuilding") {
+            this._hideRebuildStatus();
+            this._showRouteMartRebuildModal(cacheReadinessMessage(data));
+            const waited = await this._waitForCacheReadiness(
+              this.state.selectedScenarioId,
+            );
+            if (
+              !waited ||
+              waited.mart_phase === "error" ||
+              waited.scenario_phase === "error"
+            ) {
+              return;
+            }
+            return this._computeEffects();
+          }
           this.state.cacheKey = null;
           this._setTableMessage("—");
           this._showError(
@@ -296,6 +355,106 @@ import { clearToasts, showToast } from "../lib/toast.js";
       } finally {
         this.state.computing = false;
       }
+    }
+
+    _hideRebuildStatus() {
+      if (!this.hasRebuildStatusTarget) return;
+      this.rebuildStatusTarget.classList.add("d-none");
+      this.rebuildStatusTarget.innerHTML = "";
+    }
+
+    _showRebuildStatus(message, variant = "info") {
+      if (!this.hasRebuildStatusTarget) return;
+      const alertClass =
+        variant === "danger"
+          ? "alert-danger"
+          : variant === "success"
+            ? "alert-success"
+            : "alert-info";
+      this.rebuildStatusTarget.classList.remove("d-none");
+      this.rebuildStatusTarget.innerHTML = `
+        <div class="alert ${alertClass} py-2 px-3 mb-3" role="status">
+          ${
+            variant === "danger" || variant === "success"
+              ? ""
+              : '<span class="spinner-border spinner-border-sm text-primary me-2" role="status"></span>'
+          }
+          ${escapeHtml(message)}
+        </div>
+      `;
+    }
+
+    _showRouteMartRebuildModal(message) {
+      if (!this.state?.routeMartRebuildModal) return;
+      if (this.state?.routeMartRebuildMessageEl) {
+        this.state.routeMartRebuildMessageEl.textContent =
+          message || "Пересборка витрины маршрутов";
+      }
+      this.state.routeMartRebuildModal.show();
+    }
+
+    _hideRouteMartRebuildModal() {
+      if (!this.state?.routeMartRebuildModal) return;
+      this.state.routeMartRebuildModal.hide();
+    }
+
+    async _waitForCacheReadiness(scenarioId) {
+      if (!scenarioId || !this.cacheReadinessUrlValue) {
+        return;
+      }
+      const status = await pollCacheReadiness({
+        scenarioId,
+        cacheReadinessUrl: this.cacheReadinessUrlValue,
+        timeoutMs: 15 * 60 * 1000,
+        onStatus: (payload) => {
+          if (payload.mart_phase === "queued" || payload.mart_phase === "building") {
+            this._hideRebuildStatus();
+            this._showRouteMartRebuildModal(cacheReadinessMessage(payload));
+            return;
+          }
+
+          if (
+            payload.ready_for_compute ||
+            (!payload.mart_phase && !payload.scenario_phase)
+          ) {
+            this._hideRebuildStatus();
+            this._hideRouteMartRebuildModal();
+            return;
+          }
+
+          this._hideRouteMartRebuildModal();
+          this._showRebuildStatus(
+            cacheReadinessMessage(payload),
+            cacheReadinessVariant(payload),
+          );
+        },
+      });
+      if (
+        status &&
+        (status.ready_for_compute ||
+          (!status.mart_phase && !status.scenario_phase))
+      ) {
+        this._hideRebuildStatus();
+        this._hideRouteMartRebuildModal();
+      } else if (
+        status &&
+        (status.mart_phase === "queued" || status.mart_phase === "building")
+      ) {
+        this._hideRebuildStatus();
+        this._showRouteMartRebuildModal(cacheReadinessMessage(status));
+      } else if (status) {
+        this._showRebuildStatus(
+          cacheReadinessMessage(status),
+          cacheReadinessVariant(status),
+        );
+      } else {
+        this._hideRouteMartRebuildModal();
+        this._showRebuildStatus(
+          "Пересборка витрины занимает больше ожидаемого времени. Попробуйте обновить страницу через пару минут.",
+          "danger",
+        );
+      }
+      return status;
     }
 
     _cubeLoadingMessage() {

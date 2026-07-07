@@ -235,6 +235,25 @@ class TariffLoadBtdAndRulesTests(TariffLoadServiceTestMixin, TestCase):
         self.assertEqual(result.rzd_by_year[2026], Decimal("1150.00"))
         self.assertEqual(result.rules_coefficient_by_year[2026], Decimal("1.0500"))
 
+    def test_disabled_rule_not_applied(self) -> None:
+        rule = TariffRule.objects.create(
+            scenario=self.scenario,
+            name="Disabled rule",
+            base_percent=Decimal("100"),
+            position=1,
+            is_enabled=False,
+        )
+        TariffRuleYearValue.objects.create(
+            tariff_rule=rule,
+            year=2026,
+            coefficient=Decimal("1.5000"),
+        )
+
+        result = self.service.calculate_route(scenario=self.scenario, route=self.route)
+
+        self.assertEqual(result.rzd_by_year[2026], Decimal("1100.00"))
+        self.assertEqual(result.rules_coefficient_by_year[2026], Decimal("1"))
+
     def test_rule_not_applied_when_condition_mismatch(self) -> None:
         rule = TariffRule.objects.create(
             scenario=self.scenario,
@@ -259,6 +278,74 @@ class TariffLoadBtdAndRulesTests(TariffLoadServiceTestMixin, TestCase):
 
         self.assertEqual(result.rzd_by_year[2026], Decimal("1100.00"))
         self.assertEqual(result.rules_coefficient_by_year[2026], Decimal("1"))
+
+
+class TariffRuleEnabledTests(TariffLoadServiceTestMixin, TestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        category = BTDCategory.objects.create(
+            name="Индексация",
+            scenario=self.scenario,
+            position=1,
+        )
+        BTDCategoryValue.objects.create(
+            scenario=self.scenario,
+            category=category,
+            year=2025,
+            value=Decimal("1.0000"),
+        )
+        BTDCategoryValue.objects.create(
+            scenario=self.scenario,
+            category=category,
+            year=2026,
+            value=Decimal("1.1000"),
+        )
+
+    def test_compute_scenario_data_version_changes_when_rule_disabled(self) -> None:
+        from calculations.domain.services.scenario_effects_cache import (
+            compute_scenario_data_version,
+        )
+        from scenarios.domain.services import TariffRuleService
+
+        rule = TariffRule.objects.create(
+            scenario=self.scenario,
+            name="Toggle rule",
+            base_percent=Decimal("100"),
+            position=1,
+            is_enabled=True,
+        )
+        TariffRuleYearValue.objects.create(
+            tariff_rule=rule,
+            year=2026,
+            coefficient=Decimal("1.0500"),
+        )
+
+        context_enabled = self.service.build_scenario_context(self.scenario)
+        version_enabled = compute_scenario_data_version(
+            scenario=self.scenario,
+            base_coef_by_year=context_enabled.base_coef_by_year,
+            rules=context_enabled.rules,
+        )
+
+        tariff_rule_service = TariffRuleService()
+        updated, errors = tariff_rule_service.set_rule_enabled(
+            rule.id,
+            False,
+            self.user,
+        )
+        self.assertEqual(errors, [])
+        assert updated is not None
+        self.assertFalse(updated.is_enabled)
+
+        context_disabled = self.service.build_scenario_context(self.scenario)
+        version_disabled = compute_scenario_data_version(
+            scenario=self.scenario,
+            base_coef_by_year=context_disabled.base_coef_by_year,
+            rules=context_disabled.rules,
+        )
+        self.assertNotEqual(version_enabled, version_disabled)
+        self.assertEqual(len(context_enabled.rules), 1)
+        self.assertEqual(len(context_disabled.rules), 0)
 
 
 class TariffLoadMiscTests(TariffLoadServiceTestMixin, TestCase):
@@ -798,6 +885,56 @@ class ScenarioEffectsApiTests(TariffLoadServiceTestMixin, TestCase):
         self.assertTrue(payload["success"])
         self.assertIn("kpi_ready", payload)
         self.assertIn("compact_ready", payload)
+
+    def test_cache_readiness_api_success(self) -> None:
+        from calculations.domain.services.route_effects_loader import (
+            fetch_routes_dataframe_cached_timed,
+        )
+
+        fetch_routes_dataframe_cached_timed(self.scenario.route_set_id)
+
+        url = reverse("calculations:cache_readiness_api")
+        response = self.client.get(url, {"scenario_id": self.scenario.id})
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["success"])
+        self.assertTrue(payload["mart_ready"])
+        self.assertEqual(payload["route_set_id"], self.scenario.route_set_id)
+        self.assertIn("ready_for_compute", payload)
+
+    def test_compute_pandas_api_returns_409_while_mart_rebuilding(self) -> None:
+        import shutil
+
+        from calculations.domain.services.route_mart_store import (
+            get_route_mart_refs_version,
+            route_mart_cache_dir,
+        )
+        from calculations.domain.services.route_mart_warm_status import (
+            init_route_mart_warm_status,
+        )
+
+        shutil.rmtree(
+            route_mart_cache_dir(route_set_id=self.scenario.route_set_id),
+            ignore_errors=True,
+        )
+        init_route_mart_warm_status(
+            route_set_id=self.scenario.route_set_id,
+            refs_version=get_route_mart_refs_version(),
+            phase="queued",
+        )
+
+        url = reverse("calculations:scenario_effects_compute_pandas_api")
+        response = self.client.post(
+            url,
+            data=json.dumps({"scenario_id": self.scenario.id}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 409)
+        payload = response.json()
+        self.assertFalse(payload["success"])
+        self.assertEqual(payload["code"], "mart_rebuilding")
+        self.assertFalse(payload["mart_ready"])
 
     def test_api_requires_login(self) -> None:
         client = Client()
@@ -1804,6 +1941,31 @@ class ScenarioRuleWarmTests(TariffLoadServiceTestMixin, TestCase):
         )
 
         fetch_routes_dataframe_cached_timed(self.scenario.route_set_id)
+
+    def test_route_mart_warm_scheduler_builds_status_and_warms_scenarios(self) -> None:
+        from calculations.domain.services.route_mart_warm_scheduler import (
+            schedule_debounced_route_mart_warm,
+        )
+        from calculations.domain.services.route_mart_warm_status import (
+            get_route_mart_warm_status,
+        )
+        from calculations.domain.services.scenario_warm_status import get_warm_status
+
+        self._setup_btd()
+
+        with self.captureOnCommitCallbacks(execute=True):
+            schedule_debounced_route_mart_warm(route_set_id=self.scenario.route_set_id)
+
+        mart_status = get_route_mart_warm_status(route_set_id=self.scenario.route_set_id)
+        self.assertIsNotNone(mart_status)
+        assert mart_status is not None
+        self.assertTrue(mart_status["mart_ready"])
+        self.assertEqual(mart_status["phase"], "done")
+
+        warm_status = get_warm_status(scenario_id=self.scenario.id)
+        self.assertIsNotNone(warm_status)
+        assert warm_status is not None
+        self.assertTrue(warm_status["kpi_ready"])
 
     def test_warm_after_rule_create_saves_kpi_snapshot(self) -> None:
         from calculations.domain.services.scenario_effects_cache import (

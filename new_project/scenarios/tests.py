@@ -851,6 +851,7 @@ class ScenarioCopyTests(TestCase):
         self.assertEqual(len(copied_rules), 1)
         self.assertEqual(copied_rules[0].name, "Льгота уголь")
         self.assertEqual(copied_rules[0].base_percent, Decimal("50.0000"))
+        self.assertTrue(copied_rules[0].is_enabled)
         self.assertNotEqual(copied_rules[0].id, self.tariff_rule.id)
 
         conditions = list(copied_rules[0].conditions.all())
@@ -1660,6 +1661,80 @@ class RetentionCoefficientModeTests(TestCase):
         )
         self.assertEqual(coefficient, Decimal("1.1"))
 
+    def test_compute_retention_coefficient_combined_mode_unchanged_tariff(self) -> None:
+        from scenarios.models import Scenario
+
+        self.scenario.retention_coefficient_mode = (
+            Scenario.RetentionCoefficientMode.COMBINED
+        )
+        self.scenario.save(update_fields=["retention_coefficient_mode"])
+
+        coefficient = self.compute_retention_coefficient(
+            self.route,
+            self.scenario,
+            Decimal("0.175"),
+            charge_ratio=Decimal("1"),
+        )
+        self.assertEqual(coefficient, Decimal("1"))
+
+    def test_compute_retention_coefficient_combined_mode_tariff_increase_capped(self) -> None:
+        from scenarios.models import Scenario
+
+        self.scenario.retention_coefficient_mode = (
+            Scenario.RetentionCoefficientMode.COMBINED
+        )
+        self.scenario.save(update_fields=["retention_coefficient_mode"])
+
+        coefficient = self.compute_retention_coefficient(
+            self.route,
+            self.scenario,
+            Decimal("0.125"),
+            charge_ratio=Decimal("1.10"),
+        )
+        self.assertIsNotNone(coefficient)
+        assert coefficient is not None
+        self.assertLessEqual(coefficient, Decimal("1"))
+
+        self.scenario.retention_coefficient_mode = (
+            Scenario.RetentionCoefficientMode.RELATIVE_TO_BASE
+        )
+        self.scenario.save(update_fields=["retention_coefficient_mode"])
+        relative = self.compute_retention_coefficient(
+            self.route,
+            self.scenario,
+            Decimal("0.125"),
+        )
+        self.assertNotEqual(coefficient, relative)
+
+    def test_compute_retention_coefficient_combined_mode_tariff_decrease_matches_relative(
+        self,
+    ) -> None:
+        from scenarios.models import Scenario
+
+        self.scenario.retention_coefficient_mode = (
+            Scenario.RetentionCoefficientMode.COMBINED
+        )
+        self.scenario.save(update_fields=["retention_coefficient_mode"])
+
+        combined = self.compute_retention_coefficient(
+            self.route,
+            self.scenario,
+            Decimal("0.225"),
+            charge_ratio=Decimal("0.90"),
+        )
+
+        self.scenario.retention_coefficient_mode = (
+            Scenario.RetentionCoefficientMode.RELATIVE_TO_BASE
+        )
+        self.scenario.save(update_fields=["retention_coefficient_mode"])
+        relative = self.compute_retention_coefficient(
+            self.route,
+            self.scenario,
+            Decimal("0.225"),
+        )
+
+        self.assertEqual(combined, relative)
+
 
 class EnterpriseLoadCapTests(TestCase):
     def test_apply_enterprise_load_cap_limits_growth(self) -> None:
@@ -2043,3 +2118,69 @@ class ScenarioCopyElasticityTests(TestCase):
         )
         self.assertIsNotNone(copied)
         self.assertEqual(copied.elasticity_set_id, elasticity_set.id)
+
+
+class TariffRuleSetEnabledApiTests(TestCase):
+    def setUp(self) -> None:
+        import json
+
+        from django.test import Client
+        from django.urls import reverse
+
+        self.client = Client()
+        self.user = User.objects.create_user(login="toggle_user", password="test_pass")
+        self.client.force_login(self.user)
+        self.route_set = RouteSet.objects.create(name="RS_TOGGLE", code="RS_TOGGLE")
+        self.scenario = Scenario.objects.create(
+            name="Toggle scenario",
+            start_year=2025,
+            end_year=2026,
+            route_set=self.route_set,
+            author=self.user,
+        )
+        self.rule = TariffRule.objects.create(
+            scenario=self.scenario,
+            name="Rule toggle",
+            base_percent=Decimal("100"),
+            position=1,
+            is_enabled=True,
+        )
+        self.reverse = reverse
+        self.json = json
+
+    def test_list_api_returns_is_enabled(self) -> None:
+        url = self.reverse("scenarios:tariff_rule_list", args=[self.scenario.id])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["success"])
+        self.assertEqual(len(payload["rules"]), 1)
+        self.assertTrue(payload["rules"][0]["is_enabled"])
+
+    def test_set_enabled_api_disables_rule(self) -> None:
+        url = self.reverse("scenarios:tariff_rule_set_enabled", args=[self.rule.id])
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                url,
+                data=self.json.dumps({"is_enabled": False}),
+                content_type="application/json",
+            )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["success"])
+        self.assertFalse(payload["rule"]["is_enabled"])
+        self.assertTrue(payload["rebuild"]["started"])
+
+        self.rule.refresh_from_db()
+        self.assertFalse(self.rule.is_enabled)
+
+    def test_set_enabled_api_requires_flag(self) -> None:
+        url = self.reverse("scenarios:tariff_rule_set_enabled", args=[self.rule.id])
+        response = self.client.post(
+            url,
+            data=self.json.dumps({}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+        payload = response.json()
+        self.assertFalse(payload["success"])

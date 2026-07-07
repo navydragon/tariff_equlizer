@@ -5,7 +5,12 @@ from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
 from django.utils import timezone
 
-from calculations.domain.services.route_mart_store import bump_route_mart_refs_version
+from calculations.domain.services.route_mart_store import (
+    invalidate_route_mart_and_schedule_warm,
+)
+from calculations.domain.services.route_mart_warm_scheduler import (
+    schedule_route_mart_warm_by_route_set,
+)
 from core.domain.cargo.ordering import clear_cargo_group_position_cache
 from core.models import (
     Cargo,
@@ -28,17 +33,35 @@ def _touch_route_set(route_set_id: int | None) -> None:
 
 
 @receiver(post_save, sender=Route)
-def route_mart_touch_routeset_on_save(sender, instance: Route, **kwargs) -> None:  # noqa: ARG001
+def route_mart_touch_routeset_on_save(
+    sender,
+    instance: Route,
+    **kwargs,
+) -> None:  # noqa: ARG001
     _touch_route_set(instance.route_set_id)
+    transaction.on_commit(
+        lambda route_set_id=instance.route_set_id: (
+            schedule_route_mart_warm_by_route_set(route_set_id=route_set_id)
+        ),
+    )
 
 
 @receiver(post_delete, sender=Route)
-def route_mart_touch_routeset_on_delete(sender, instance: Route, **kwargs) -> None:  # noqa: ARG001
+def route_mart_touch_routeset_on_delete(
+    sender,
+    instance: Route,
+    **kwargs,
+) -> None:  # noqa: ARG001
     _touch_route_set(instance.route_set_id)
+    transaction.on_commit(
+        lambda route_set_id=instance.route_set_id: (
+            schedule_route_mart_warm_by_route_set(route_set_id=route_set_id)
+        ),
+    )
 
 
 def _bump_refs_on_commit() -> None:
-    transaction.on_commit(bump_route_mart_refs_version)
+    transaction.on_commit(invalidate_route_mart_and_schedule_warm)
 
 
 @receiver(post_save, sender=Cargo)
@@ -61,4 +84,3 @@ def route_mart_bump_refs_version(sender, instance, **kwargs) -> None:  # noqa: A
     if sender is CargoGroup:
         clear_cargo_group_position_cache()
     _bump_refs_on_commit()
-

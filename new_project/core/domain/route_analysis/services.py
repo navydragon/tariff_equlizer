@@ -7,6 +7,7 @@ from calculations.domain.services.tariff_load import TariffLoadService
 from core.models import Route
 from scenarios.domain.services.price_change import PriceChangeSettingService
 from scenarios.domain.utils.elasticity_matching import (
+    compute_retention_at_charge_ratio,
     compute_retention_coefficient,
     marginality_ratio_from_percent,
 )
@@ -655,11 +656,27 @@ class RouteAnalysisService:
             rzd_rub = rzd_values[index]
             margin_rub = marginality_values[index]["rub"]
             margin_pct = marginality_values[index]["pct"]
-            retention_coefficient = compute_retention_coefficient(
-                route,
-                scenario,
-                marginality_ratio_from_percent(Decimal(margin_pct)),
-            )
+            if (
+                scenario.retention_coefficient_mode
+                == Scenario.RetentionCoefficientMode.COMBINED
+            ):
+                baseline_rzd = rzd_values[0] if rzd_values else Decimal("0")
+                charge_ratio = (
+                    rzd_rub / baseline_rzd
+                    if baseline_rzd > 0
+                    else Decimal("1")
+                )
+                retention_coefficient = compute_retention_at_charge_ratio(
+                    route,
+                    scenario,
+                    charge_ratio,
+                )
+            else:
+                retention_coefficient = compute_retention_coefficient(
+                    route,
+                    scenario,
+                    marginality_ratio_from_percent(Decimal(margin_pct)),
+                )
             retention_pct = (
                 _format_decimal(_quantize_coefficient(retention_coefficient))
                 if retention_coefficient is not None

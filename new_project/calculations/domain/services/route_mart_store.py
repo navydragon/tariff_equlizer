@@ -173,6 +173,16 @@ def bump_route_mart_refs_version() -> str:
     return new_value
 
 
+def invalidate_route_mart_and_schedule_warm(*, route_set_id: int | None = None) -> str:
+    refs_version = bump_route_mart_refs_version()
+    from calculations.domain.services.route_mart_warm_scheduler import (
+        schedule_route_mart_warm_by_route_set,
+    )
+
+    schedule_route_mart_warm_by_route_set(route_set_id=route_set_id)
+    return refs_version
+
+
 def _format_updated_at(updated_at) -> str:
     if updated_at is None:
         return "0"

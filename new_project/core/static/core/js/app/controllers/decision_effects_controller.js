@@ -1,4 +1,9 @@
 import { fetchBlob, fetchJson } from "../lib/http.js";
+import {
+  cacheReadinessMessage,
+  cacheReadinessVariant,
+  pollCacheReadiness,
+} from "../lib/cache_readiness.js";
 import { escapeHtml } from "../lib/dom.js";
 import { persistActiveScenario } from "../lib/scenario_active.js";
 import { clearToasts, showToast } from "../lib/toast.js";
@@ -21,6 +26,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
       "holdingFilterSelect",
       "yearSelect",
       "tableWrap",
+      "chartWrap",
       "chartCanvas",
       "toastContainer",
       "revenuesGroupBySelect",
@@ -35,6 +41,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
       "revenuesFalloutDisabledHint",
       "volumesFalloutControl",
       "volumesFalloutDisabledHint",
+      "rebuildStatus",
     ];
 
     static values = {
@@ -43,6 +50,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
       computePandasUrl: String,
       aggregateUrl: String,
       revisionUrl: String,
+      cacheReadinessUrl: String,
       warmStatusUrl: String,
       compactStatusUrl: String,
       revenuesUrl: String,
@@ -103,12 +111,33 @@ import { clearToasts, showToast } from "../lib/toast.js";
 
       this._onVisibilityChange = this._onVisibilityChange.bind(this);
       this._onTariffRulesChanged = this._onTariffRulesChanged.bind(this);
+      this._onTariffRulesMessage = this._onTariffRulesMessage.bind(this);
       document.addEventListener("visibilitychange", this._onVisibilityChange);
       document.addEventListener("tariff-rules-changed", this._onTariffRulesChanged);
+      window.addEventListener("message", this._onTariffRulesMessage);
       this.state.revisionTimer = setInterval(
         () => this._checkRevision(),
         30000,
       );
+
+      this.state.routeMartRebuildModalEl = document.getElementById(
+        "routeMartRebuildModal",
+      );
+      this.state.routeMartRebuildMessageEl = document.getElementById(
+        "routeMartRebuildMessage",
+      );
+      if (
+        this.state.routeMartRebuildModalEl &&
+        typeof bootstrap !== "undefined"
+      ) {
+        this.state.routeMartRebuildModal =
+          bootstrap.Modal.getOrCreateInstance(
+            this.state.routeMartRebuildModalEl,
+            { backdrop: "static", keyboard: false },
+          );
+      } else {
+        this.state.routeMartRebuildModal = null;
+      }
 
       this._loadScenarios();
     }
@@ -116,6 +145,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
     disconnect() {
       document.removeEventListener("visibilitychange", this._onVisibilityChange);
       document.removeEventListener("tariff-rules-changed", this._onTariffRulesChanged);
+      window.removeEventListener("message", this._onTariffRulesMessage);
       if (
         this.state?.scenarioEditModalEl &&
         this.state?.boundScenarioEditModalHiddenHandler
@@ -413,7 +443,17 @@ import { clearToasts, showToast } from "../lib/toast.js";
       if (!computeUrl || !this.state.selectedScenarioId) return;
 
       this._clearToasts();
+      const readiness = await this._waitForCacheReadiness(
+        this.state.selectedScenarioId,
+      );
+      if (
+        readiness &&
+        (readiness.mart_phase === "error" || readiness.scenario_phase === "error")
+      ) {
+        return;
+      }
       this._setKpiLoading(true);
+      this._setChartLoading(true, "Расчёт данных…");
       this._setRevenuesTableLoading(true, "Расчёт данных…");
       this._setVolumesTableLoading(true, "Расчёт данных…");
       this.state.computing = true;
@@ -428,8 +468,24 @@ import { clearToasts, showToast } from "../lib/toast.js";
         });
 
         if (!response.ok || !data || !data.success) {
+          if (response.status === 409 && data && data.code === "mart_rebuilding") {
+            this._hideRebuildStatus();
+            this._showRouteMartRebuildModal(cacheReadinessMessage(data));
+            const waited = await this._waitForCacheReadiness(
+              this.state.selectedScenarioId,
+            );
+            if (
+              !waited ||
+              waited.mart_phase === "error" ||
+              waited.scenario_phase === "error"
+            ) {
+              return;
+            }
+            return this._computeEffects();
+          }
           this.state.cacheKey = null;
           this._renderKpiCards([]);
+          this._setChartLoading(false);
           this._setRevenuesTableLoading(false);
           this._setVolumesTableLoading(false);
           if (this.hasRevenuesTableWrapTarget) {
@@ -484,7 +540,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
 
         if (this.state.awaitingCompact) {
           if (useEarlyAbsolute) {
-            void this._refreshAbsoluteWhenCompactReady();
+            await this._refreshAbsoluteWhenCompactReady();
           } else {
             await this._ensureCompactReady();
             await Promise.all([
@@ -505,6 +561,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
         console.error("[decision-effects] compute failed", error);
         this.state.cacheKey = null;
         this._renderKpiCards([]);
+        this._setChartLoading(false);
         this._setRevenuesTableLoading(false);
         this._setVolumesTableLoading(false);
         if (this.hasRevenuesTableWrapTarget) {
@@ -522,6 +579,106 @@ import { clearToasts, showToast } from "../lib/toast.js";
         this.state.computing = false;
         this._setKpiLoading(false);
       }
+    }
+
+    _hideRebuildStatus() {
+      if (!this.hasRebuildStatusTarget) return;
+      this.rebuildStatusTarget.classList.add("d-none");
+      this.rebuildStatusTarget.innerHTML = "";
+    }
+
+    _showRebuildStatus(message, variant = "info") {
+      if (!this.hasRebuildStatusTarget) return;
+      const alertClass =
+        variant === "danger"
+          ? "alert-danger"
+          : variant === "success"
+            ? "alert-success"
+            : "alert-info";
+      this.rebuildStatusTarget.classList.remove("d-none");
+      this.rebuildStatusTarget.innerHTML = `
+        <div class="alert ${alertClass} py-2 px-3 mb-3" role="status">
+          ${
+            variant === "danger" || variant === "success"
+              ? ""
+              : '<span class="spinner-border spinner-border-sm text-primary me-2" role="status"></span>'
+          }
+          ${escapeHtml(message)}
+        </div>
+      `;
+    }
+
+    _showRouteMartRebuildModal(message) {
+      if (!this.state?.routeMartRebuildModal) return;
+      if (this.state?.routeMartRebuildMessageEl) {
+        this.state.routeMartRebuildMessageEl.textContent =
+          message || "Пересборка витрины маршрутов";
+      }
+      this.state.routeMartRebuildModal.show();
+    }
+
+    _hideRouteMartRebuildModal() {
+      if (!this.state?.routeMartRebuildModal) return;
+      this.state.routeMartRebuildModal.hide();
+    }
+
+    async _waitForCacheReadiness(scenarioId) {
+      if (!scenarioId || !this.cacheReadinessUrlValue) {
+        return;
+      }
+      const status = await pollCacheReadiness({
+        scenarioId,
+        cacheReadinessUrl: this.cacheReadinessUrlValue,
+        timeoutMs: 15 * 60 * 1000,
+        onStatus: (payload) => {
+          if (payload.mart_phase === "queued" || payload.mart_phase === "building") {
+            this._hideRebuildStatus();
+            this._showRouteMartRebuildModal(cacheReadinessMessage(payload));
+            return;
+          }
+
+          if (
+            payload.ready_for_compute ||
+            (!payload.mart_phase && !payload.scenario_phase)
+          ) {
+            this._hideRebuildStatus();
+            this._hideRouteMartRebuildModal();
+            return;
+          }
+
+          this._hideRouteMartRebuildModal();
+          this._showRebuildStatus(
+            cacheReadinessMessage(payload),
+            cacheReadinessVariant(payload),
+          );
+        },
+      });
+      if (
+        status &&
+        (status.ready_for_compute ||
+          (!status.mart_phase && !status.scenario_phase))
+      ) {
+        this._hideRebuildStatus();
+        this._hideRouteMartRebuildModal();
+      } else if (
+        status &&
+        (status.mart_phase === "queued" || status.mart_phase === "building")
+      ) {
+        this._hideRebuildStatus();
+        this._showRouteMartRebuildModal(cacheReadinessMessage(status));
+      } else if (status) {
+        this._showRebuildStatus(
+          cacheReadinessMessage(status),
+          cacheReadinessVariant(status),
+        );
+      } else {
+        this._hideRouteMartRebuildModal();
+        this._showRebuildStatus(
+          "Пересборка витрины занимает больше ожидаемого времени. Попробуйте обновить страницу через пару минут.",
+          "danger",
+        );
+      }
+      return status;
     }
 
     async _aggregateEffects({ showTableLoading = false, attempt = 0 } = {}) {
@@ -544,6 +701,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
 
       if (showTableLoading && attempt === 0) {
         this._setTableLoading(true);
+        this._setChartLoading(true, "Обновление диаграммы…");
       }
 
       const maxAttempts = this.state.effectsCompactPending ? 45 : 5;
@@ -594,6 +752,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
           this._showError(message);
           if (showTableLoading) {
             this._setTableLoading(false);
+            this._setChartLoading(false);
           }
           return;
         }
@@ -610,6 +769,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
         this._renderChart(data.chart || null);
         if (showTableLoading) {
           this._setTableLoading(false);
+          this._setChartLoading(false);
         }
       } catch (error) {
         console.error("[decision-effects] aggregate failed", error);
@@ -623,6 +783,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
         this._showError("Не удалось обновить таблицу и график.");
         if (showTableLoading) {
           this._setTableLoading(false);
+          this._setChartLoading(false);
         }
       }
     }
@@ -725,6 +886,12 @@ import { clearToasts, showToast } from "../lib/toast.js";
       ) {
         this._handleTariffRulesChanged();
       }
+    }
+
+    _onTariffRulesMessage(event) {
+      if (event.origin !== window.location.origin) return;
+      if (!event.data || event.data.type !== "tariff-rules-changed") return;
+      this._onTariffRulesChanged({ detail: { scenarioId: event.data.scenarioId } });
     }
 
     async _handleTariffRulesChanged() {
@@ -831,6 +998,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
           "Обновление детализации…",
         );
       }
+      this._setChartLoading(true, "Обновление детализации…");
       this._setRevenuesTableLoading(true, "Обновление детализации…");
       this._setVolumesTableLoading(true, "Обновление детализации…");
     }
@@ -852,6 +1020,39 @@ import { clearToasts, showToast } from "../lib/toast.js";
       this.tableWrapTarget.innerHTML = this._tableLoadingHtml(
         "Обновление таблицы…",
       );
+    }
+
+    _setChartLoading(isLoading, message = "Обновление диаграммы…") {
+      if (!this.hasChartWrapTarget) return;
+
+      const wrap = this.chartWrapTarget;
+      let overlay = wrap.querySelector("[data-chart-loading]");
+
+      if (!isLoading) {
+        wrap.classList.remove("decision-effects-chart-wrap--loading");
+        if (overlay) {
+          overlay.remove();
+        }
+        return;
+      }
+
+      wrap.classList.add("decision-effects-chart-wrap--loading");
+      if (overlay) {
+        const messageEl = overlay.querySelector("[data-chart-loading-message]");
+        if (messageEl) {
+          messageEl.textContent = message;
+        }
+        return;
+      }
+
+      overlay = document.createElement("div");
+      overlay.dataset.chartLoading = "1";
+      overlay.className = "decision-effects-chart-loading";
+      overlay.innerHTML = `
+        <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+        <div class="mt-2 text-muted" data-chart-loading-message>${escapeHtml(message)}</div>
+      `;
+      wrap.appendChild(overlay);
     }
 
     _tableLoadingHtml(message) {
@@ -1126,18 +1327,16 @@ import { clearToasts, showToast } from "../lib/toast.js";
 
       this.kpiCardsTarget.innerHTML = cards
         .map((card) => {
-          const totalPct = this._formatPct(card.total_pct);
-          const basePct = this._formatPct(card.base_pct);
-          const rulesPct = this._formatPct(card.rules_pct);
-          const totalPctNum = Number(String(card.total_pct).replace(",", "."));
-          const totalPctPositive = Number.isFinite(totalPctNum) && totalPctNum > 0;
+          const totalPct = this._formatSignedPct(card.total_pct);
+          const basePct = this._formatSignedPct(card.base_pct);
+          const rulesPct = this._formatSignedPct(card.rules_pct);
 
           const baseBlnNum = Number(String(card.base_bln).replace(",", "."));
           const rulesBlnNum = Number(String(card.rules_bln).replace(",", "."));
           const showBaseSplit =
-            includeBase && Number.isFinite(baseBlnNum) && baseBlnNum > 0;
+            includeBase && Number.isFinite(baseBlnNum) && baseBlnNum !== 0;
           const showRulesSplit =
-            includeBase && Number.isFinite(rulesBlnNum) && rulesBlnNum > 0;
+            includeBase && Number.isFinite(rulesBlnNum) && rulesBlnNum !== 0;
           const showSplit = showBaseSplit || showRulesSplit;
           return `
             <article class="decision-effects-kpi-card">
@@ -1147,7 +1346,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
                   <div class="decision-effects-kpi-card__count">
                     <span class="decision-effects-kpi-card__total-value">${escapeHtml(card.total_bln)}</span>
                     <span class="decision-effects-kpi-card__total-unit">млрд</span>
-                    <span class="decision-effects-kpi-card__total-caption-pct ${totalPctPositive ? "is-positive" : ""}">(${totalPctPositive ? "+" : ""}${escapeHtml(totalPct)}%)</span>
+                    <span class="decision-effects-kpi-card__total-caption-pct ${escapeHtml(totalPct.className)}">${escapeHtml(totalPct.text)}</span>
                   </div>
                 </div>
                 ${
@@ -1161,7 +1360,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
                       <span class="decision-effects-kpi-card__split-value">${escapeHtml(card.base_bln)}</span>
                       <span class="decision-effects-kpi-card__split-unit">млрд</span>
                     </div>
-                    <span class="decision-effects-kpi-card__split-pct">(+${escapeHtml(basePct)}%)</span>
+                    <span class="decision-effects-kpi-card__split-pct ${escapeHtml(basePct.className)}">${escapeHtml(basePct.text)}</span>
                   </div>`
                       : ""
                   }
@@ -1173,7 +1372,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
                       <span class="decision-effects-kpi-card__split-value">${escapeHtml(card.rules_bln)}</span>
                       <span class="decision-effects-kpi-card__split-unit">млрд</span>
                     </div>
-                    <span class="decision-effects-kpi-card__split-pct">(+${escapeHtml(rulesPct)}%)</span>
+                    <span class="decision-effects-kpi-card__split-pct ${escapeHtml(rulesPct.className)}">${escapeHtml(rulesPct.text)}</span>
                   </div>`
                       : ""
                   }
@@ -1186,6 +1385,34 @@ import { clearToasts, showToast } from "../lib/toast.js";
         .join("");
     }
 
+    _formatSignedMagnitude(value) {
+      const raw = String(value ?? "").trim();
+      if (!raw || raw === "0" || raw === "0.0") {
+        return { text: raw || "0.0", className: "text-muted" };
+      }
+      const num = Number(raw.replace(",", "."));
+      if (!Number.isFinite(num) || num === 0) {
+        return { text: raw, className: "text-muted" };
+      }
+      const sign = num > 0 ? "+" : "-";
+      return {
+        text: `${sign}${raw.replace(/^[-+]/, "")}`,
+        className: num > 0 ? "text-success" : "text-danger",
+      };
+    }
+
+    _formatEffectsFalloutCell(row) {
+      if (row.fallout_bln == null) {
+        return '<td class="text-end text-muted">—</td>';
+      }
+      const money = this._formatSignedMagnitude(row.fallout_bln);
+      const volume = this._formatSignedMagnitude(row.fallout_volume_mln_t || "0.0");
+      return `<td class="text-end">
+        <span class="${escapeHtml(money.className)}">${escapeHtml(money.text)} млрд</span><br />
+        <span class="cell-pct ${escapeHtml(volume.className)}">(${escapeHtml(volume.text)} млн т)</span>
+      </td>`;
+    }
+
     _renderTable(rows, showFallout = false) {
       if (!this.hasTableWrapTarget) return;
 
@@ -1196,36 +1423,32 @@ import { clearToasts, showToast } from "../lib/toast.js";
       }
 
       const falloutHeader = showFallout
-        ? '<th class="text-end">Выпадение</th>'
+        ? '<th class="text-end" title="Δ дохода и объёма от эластичности спроса; «+» — рост, «−» — снижение">Δ эластичности</th>'
         : "";
 
       const body = rows
         .map((row) => {
           const rowClass = row.is_subtotal ? "fw-subtotal fw-bold" : "";
-          const falloutCell =
-            showFallout && row.fallout_bln != null
-              ? `<td class="text-end">
-                ${escapeHtml(row.fallout_bln)} млрд<br />
-                <span class="cell-pct">(${escapeHtml(row.fallout_volume_mln_t || "0.0")} млн т)</span>
-              </td>`
-              : showFallout
-                ? '<td class="text-end text-muted">—</td>'
-                : "";
+          const falloutCell = showFallout ? this._formatEffectsFalloutCell(row) : "";
+
+          const basePct = this._formatSignedPct(row.base_pct);
+          const rulesPct = this._formatSignedPct(row.rules_pct);
+          const totalPct = this._formatSignedPct(row.total_pct);
 
           return `
             <tr class="${rowClass}">
               <td>${escapeHtml(row.label || "")}</td>
               <td class="text-end">
                 ${escapeHtml(this._formatBlnFromRub(row.base_rub))}<br />
-                <span class="cell-pct">(+${escapeHtml(this._formatPct(row.base_pct))}%)</span>
+                <span class="cell-pct ${escapeHtml(basePct.className)}">${escapeHtml(basePct.text)}</span>
               </td>
               <td class="text-end">
                 ${escapeHtml(this._formatBlnFromRub(row.rules_rub))}<br />
-                <span class="cell-pct">(+${escapeHtml(this._formatPct(row.rules_pct))}%)</span>
+                <span class="cell-pct ${escapeHtml(rulesPct.className)}">${escapeHtml(rulesPct.text)}</span>
               </td>
               <td class="text-end">
                 ${escapeHtml(this._formatBlnFromRub(row.total_rub))}<br />
-                <span class="cell-pct">(+${escapeHtml(this._formatPct(row.total_pct))}%)</span>
+                <span class="cell-pct ${escapeHtml(totalPct.className)}">${escapeHtml(totalPct.text)}</span>
               </td>
               ${falloutCell}
             </tr>
@@ -1367,6 +1590,21 @@ import { clearToasts, showToast } from "../lib/toast.js";
       const num = Number(String(value).replace(",", "."));
       if (!Number.isFinite(num)) return "0.0";
       return num.toFixed(1);
+    }
+
+    _formatSignedPct(value) {
+      const num = Number(String(value).replace(",", "."));
+      if (!Number.isFinite(num)) {
+        return { text: "(0.0%)", className: "" };
+      }
+      const abs = Math.abs(num).toFixed(1);
+      if (num > 0) {
+        return { text: `(+${abs}%)`, className: "is-positive" };
+      }
+      if (num < 0) {
+        return { text: `(-${abs}%)`, className: "is-negative" };
+      }
+      return { text: "(0.0%)", className: "" };
     }
 
     _formatBlnFromRub(rubValue) {
@@ -1517,18 +1755,12 @@ import { clearToasts, showToast } from "../lib/toast.js";
 
         const rows = (data.table && data.table.rows) || [];
         if (
-          !rows.length &&
+          (this._absoluteRowsLookEmpty(rows) || !rows.length) &&
           (needsCompactWait || includeFallout) &&
           attempt + 1 < maxAttempts
         ) {
           await this._waitForCompactReady();
           return this._aggregateAbsoluteTable(kind, { attempt: attempt + 1 });
-        }
-
-        if (rows.length) {
-          this.state.compactPending = false;
-          this.state.awaitingCompact = false;
-          this._setCompactPendingIndicator(false);
         }
 
         this._renderAbsoluteTable(wrapTarget, data);
@@ -1551,7 +1783,26 @@ import { clearToasts, showToast } from "../lib/toast.js";
       if (!fallout) {
         return main;
       }
-      return `${main} <span class="decision-effects-fallout-hint text-danger">(${escapeHtml(fallout)})</span>`;
+      const raw = String(fallout);
+      const cls = raw.trim().startsWith("-") ? "text-danger" : "text-success";
+      return `${main} <span class="decision-effects-fallout-hint ${cls}">(${escapeHtml(raw)})</span>`;
+    }
+
+    _absoluteRowsLookEmpty(rows) {
+      if (!rows.length) {
+        return true;
+      }
+      return !rows.some((row) => {
+        const total = Number(String(row.total || "0").replace(",", "."));
+        if (Number.isFinite(total) && Math.abs(total) > 0) {
+          return true;
+        }
+        const yearValues = row.years || {};
+        return Object.values(yearValues).some((value) => {
+          const num = Number(String(value).replace(",", "."));
+          return Number.isFinite(num) && Math.abs(num) > 0;
+        });
+      });
     }
 
     _renderAbsoluteTable(wrapEl, data) {

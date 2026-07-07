@@ -8,13 +8,16 @@ from core.domain.route.turnover_coefficients import (
     coefs_to_route_kwargs,
     quantize_coef,
     route_field_for_year,
-    sqlite_column_for_year,
+    sqlite_loading_column_for_year,
 )
 
 
 class TurnoverCoefficientsTests(SimpleTestCase):
     def test_sqlite_column_name_for_year(self) -> None:
-        self.assertEqual(sqlite_column_for_year(2025), "2025_% L год\\год")
+        self.assertEqual(
+            sqlite_loading_column_for_year(2025),
+            "2025 Погрузка,т",
+        )
 
     def test_quantize_coef_rounds_to_three_decimals(self) -> None:
         self.assertEqual(quantize_coef("1.002631652"), Decimal("1.003"))
@@ -26,11 +29,27 @@ class TurnoverCoefficientsTests(SimpleTestCase):
         self.assertIsNone(stored.get(2030))
 
     def test_coefs_from_row_reads_available_columns(self) -> None:
-        column = sqlite_column_for_year(2026)
-        row = {column: "0.912"}
-        coefs = coefs_from_row(row, available_columns={column})
-        self.assertEqual(coefs[2026], Decimal("0.912"))
+        base = sqlite_loading_column_for_year(2025)
+        col_2026 = sqlite_loading_column_for_year(2026)
+        row = {base: "1000", col_2026: "920"}
+        coefs = coefs_from_row(row, available_columns={base, col_2026})
+        self.assertEqual(coefs[2025], Decimal("1.000"))
+        self.assertEqual(coefs[2026], Decimal("0.920"))
+
+    def test_coefs_from_row_base_zero_makes_coefs_empty(self) -> None:
+        base = sqlite_loading_column_for_year(2025)
+        col_2026 = sqlite_loading_column_for_year(2026)
+        row = {base: "0", col_2026: "920"}
+        coefs = coefs_from_row(row, available_columns={base, col_2026})
         self.assertIsNone(coefs[2025])
+        self.assertIsNone(coefs[2026])
+
+    def test_coefs_from_row_missing_year_column_is_none(self) -> None:
+        base = sqlite_loading_column_for_year(2025)
+        row = {base: "1000"}
+        coefs = coefs_from_row(row, available_columns={base})
+        self.assertEqual(coefs[2025], Decimal("1.000"))
+        self.assertIsNone(coefs[2027])
 
     def test_coefs_to_route_kwargs(self) -> None:
         kwargs = coefs_to_route_kwargs({2025: Decimal("1.010")})

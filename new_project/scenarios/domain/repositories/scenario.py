@@ -120,6 +120,7 @@ class ScenarioRepository:
                 name=rule.name,
                 base_percent=rule.base_percent,
                 position=rule.position,
+                is_enabled=rule.is_enabled,
             )
             conditions = [
                 TariffRuleCondition(

@@ -35,6 +35,7 @@
   data-decision-effects-compute-pandas-url-value="{% url 'calculations:scenario_effects_compute_pandas_api' %}"
   data-decision-effects-aggregate-url-value="{% url 'calculations:scenario_effects_aggregate_api' %}"
   data-decision-effects-revision-url-value="{% url 'calculations:scenario_effects_revision_api' %}"
+  data-decision-effects-cache-readiness-url-value="{% url 'calculations:cache_readiness_api' %}"
   data-decision-effects-warm-status-url-value="{% url 'calculations:scenario_warm_status_api' %}"
   data-decision-effects-compact-status-url-value="{% url 'calculations:scenario_effects_compact_status_api' %}"
   data-decision-effects-revenues-url-value="{% url 'calculations:scenario_absolute_revenues_api' %}"
@@ -75,6 +76,37 @@
       </div>
     </div>
   </div>
+
+<div
+  class="d-none"
+  data-decision-effects-target="rebuildStatus"
+></div>
+
+<div
+  class="modal modal-blur fade"
+  id="routeMartRebuildModal"
+  tabindex="-1"
+  aria-hidden="true"
+  data-bs-backdrop="static"
+  data-bs-keyboard="false"
+>
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-body text-center py-5">
+        <div
+          class="spinner-border text-primary"
+          aria-hidden="true"
+        ></div>
+        <div class="mt-4">
+          <h4 class="mb-1">Пересборка витрины маршрутов</h4>
+          <div class="text-muted" id="routeMartRebuildMessage">
+            Подождите, пожалуйста.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 
   <div class="mt-4">
     <h3 class="h4 mb-3">Оценка мер покрытия дефицита</h3>
@@ -163,7 +195,11 @@
           </div>
         </div>
         <div class="col-lg-6">
-          <div class="decision-effects-chart-wrap" style="min-height: 420px;">
+          <div
+            class="decision-effects-chart-wrap"
+            style="min-height: 420px;"
+            data-decision-effects-target="chartWrap"
+          >
             <canvas
               data-decision-effects-target="chartCanvas"
               aria-label="Диаграмма эффектов"

@@ -27,7 +27,7 @@ class ScenarioDTO:
     consider_turnover_changes: bool = False
     consider_demand_elasticity: bool = False
     consider_enterprise_load: bool = True
-    retention_coefficient_mode: str = "relative_to_base"
+    retention_coefficient_mode: str = "combined"
 
     @classmethod
     def from_model(
@@ -145,7 +145,7 @@ class UpdateScenarioDTO:
             self.consider_turnover_changes,
             bool,
         ):
-            errors.append("Некорректное значение флага учета изменений грузооборота")
+            errors.append("Некорректное значение флага учета изменений погрузки")
         if self.consider_demand_elasticity is not None and not isinstance(
             self.consider_demand_elasticity,
             bool,
@@ -192,7 +192,7 @@ class ScenarioListDTO:
     consider_turnover_changes: bool = False
     consider_demand_elasticity: bool = False
     consider_enterprise_load: bool = True
-    retention_coefficient_mode: str = "relative_to_base"
+    retention_coefficient_mode: str = "combined"
 
     @classmethod
     def from_model(cls, scenario):

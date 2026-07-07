@@ -102,7 +102,7 @@ class TariffLoadService:
 
     def _load_tariff_rules(self, scenario_id: int) -> list[TariffRule]:
         return list(
-            TariffRule.objects.filter(scenario_id=scenario_id)
+            TariffRule.objects.filter(scenario_id=scenario_id, is_enabled=True)
             .prefetch_related(
                 Prefetch(
                     "conditions",

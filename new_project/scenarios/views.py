@@ -501,6 +501,39 @@ def tariff_rule_delete_api(request, rule_id):
 
 
 @login_required
+@require_http_methods(["POST"])
+def tariff_rule_set_enabled_api(request, rule_id):
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"success": False, "error": "Неверный формат JSON"}, status=400)
+
+    if "is_enabled" not in data:
+        return JsonResponse(
+            {"success": False, "errors": ["Не указан is_enabled"]},
+            status=400,
+        )
+
+    service = TariffRuleService()
+    rule, errors = service.set_rule_enabled(
+        rule_id,
+        bool(data.get("is_enabled")),
+        request.user,
+    )
+    if errors:
+        return JsonResponse({"success": False, "errors": errors}, status=400)
+    from calculations.domain.services.scenario_warm_status import build_rebuild_meta
+
+    rebuild = build_rebuild_meta(
+        scenario_id=rule.scenario_id if rule is not None else 0,
+        rule_id=rule.id if rule is not None else None,
+        mask_changed=False,
+        warm_scheduled=rule is not None,
+    )
+    return JsonResponse({"success": True, "rule": asdict(rule), "rebuild": rebuild})
+
+
+@login_required
 @require_http_methods(["GET"])
 def tariff_rule_options_api(request, scenario_id):
     parameter = (request.GET.get("parameter") or "").strip()

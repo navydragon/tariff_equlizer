@@ -49,6 +49,7 @@ class _ElasticityScenarioStub:
     consider_enterprise_load: bool
 
     class RetentionCoefficientMode:
+        COMBINED = "combined"
         RELATIVE_TO_BASE = "relative_to_base"
         ABSOLUTE = "absolute"
 
@@ -82,7 +83,7 @@ class DeferredFullComputeJob:
     consider_turnover_changes: bool = False
     consider_demand_elasticity: bool = False
     elasticity_set_id: int | None = None
-    retention_coefficient_mode: str = "relative_to_base"
+    retention_coefficient_mode: str = "combined"
     consider_enterprise_load: bool = True
     model_rows: list = None
 

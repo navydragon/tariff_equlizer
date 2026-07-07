@@ -20,6 +20,14 @@ from core.domain.route.dto import (
 from core.domain.route.repositories import RouteRepository, RouteSetRepository
 
 
+def _schedule_route_mart_warm(*, route_set_id: int | None) -> None:
+    from calculations.domain.services.route_mart_warm_scheduler import (
+        schedule_route_mart_warm_by_route_set,
+    )
+
+    schedule_route_mart_warm_by_route_set(route_set_id=route_set_id)
+
+
 class RouteSetService:
     def __init__(self) -> None:
         self.repository = RouteSetRepository()
@@ -167,13 +175,19 @@ class RouteService:
             try:
                 int(filters.origin_esr)
             except (TypeError, ValueError):
-                return None, ["Код ЕСР станции отправления должен быть целым числом"]
+                return (
+                    None,
+                    ["Код ЕСР станции отправления должен быть целым числом"],
+                )
 
         if filters.destination_esr:
             try:
                 int(filters.destination_esr)
             except (TypeError, ValueError):
-                return None, ["Код ЕСР станции назначения должен быть целым числом"]
+                return (
+                    None,
+                    ["Код ЕСР станции назначения должен быть целым числом"],
+                )
 
         page = filters.page if filters.page > 0 else 1
         page_size = filters.page_size if filters.page_size > 0 else 20
@@ -203,7 +217,7 @@ class RouteService:
             )
 
         offset = (page - 1) * page_size
-        chunk = list(qs[offset : offset + page_size + 1])
+        chunk = list(qs[offset: offset + page_size + 1])
         has_next = len(chunk) > page_size
         page_items = chunk[:page_size]
         items = [RouteDTO.from_model(route) for route in page_items]
@@ -231,7 +245,9 @@ class RouteService:
             dimension=request.dimension,
             cargo_group_name=(request.cargo_group_name or "").strip() or None,
             cargo_code=(request.cargo_code or "").strip() or None,
-            message_type_name=(request.message_type_name or "").strip() or None,
+            message_type_name=(
+                (request.message_type_name or "").strip() or None
+            ),
             holding=(request.holding or "").strip() or None,
             economics_filled=request.economics_filled,
             search=(request.search or "").strip() or None,
@@ -260,6 +276,11 @@ class RouteService:
 
         route = self.repository.get_by_id(route.pk)
         assert route is not None
+        transaction.on_commit(
+            lambda route_set_id=route.route_set_id: _schedule_route_mart_warm(
+                route_set_id=route_set_id,
+            )
+        )
         return RouteDTO.from_model(route), []
 
     @transaction.atomic
@@ -280,6 +301,11 @@ class RouteService:
 
         route = self.repository.get_by_id(route.pk)
         assert route is not None
+        transaction.on_commit(
+            lambda route_set_id=route.route_set_id: _schedule_route_mart_warm(
+                route_set_id=route_set_id,
+            )
+        )
         return RouteDTO.from_model(route), []
 
     @transaction.atomic
@@ -287,5 +313,9 @@ class RouteService:
         route = self.repository.get_by_id_for_update(pk)
         if not route:
             return False, ["Маршрут не найден"]
+        route_set_id = route.route_set_id
         self.repository.delete(route)
+        transaction.on_commit(
+            lambda: _schedule_route_mart_warm(route_set_id=route_set_id),
+        )
         return True, []

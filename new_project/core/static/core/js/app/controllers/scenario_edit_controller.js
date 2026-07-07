@@ -162,7 +162,7 @@ import { renderErrors } from "../lib/errors.js";
       const checked = this.element.querySelector(
         'input.btn-check[name="retention_coefficient_mode"]:checked',
       );
-      return checked ? checked.value : "relative_to_base";
+      return checked ? checked.value : "combined";
     }
 
     collectPriceChangeSettings() {

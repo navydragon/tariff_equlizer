@@ -59,6 +59,51 @@ def _get_user_scenario(request, scenario_id: int):
     return scenario, None
 
 
+def _build_cache_readiness_payload(*, scenario) -> dict[str, object]:
+    from calculations.domain.services.route_mart_warm_status import (
+        get_route_mart_warm_status,
+        is_route_mart_ready,
+    )
+    from calculations.domain.services.scenario_warm_status import get_warm_status
+
+    mart_status = get_route_mart_warm_status(route_set_id=scenario.route_set_id)
+    scenario_status = get_warm_status(scenario_id=scenario.id)
+    mart_ready = is_route_mart_ready(route_set_id=scenario.route_set_id)
+    mart_phase = mart_status["phase"] if mart_status else None
+    scenario_phase = scenario_status["phase"] if scenario_status else None
+    kpi_ready = bool(scenario_status and scenario_status.get("kpi_ready"))
+    compact_ready = bool(scenario_status and scenario_status.get("compact_ready"))
+    ready_for_compute = mart_ready and (
+        scenario_status is None or kpi_ready or scenario_phase == "done"
+    )
+
+    if not mart_ready and mart_phase in {"queued", "building"}:
+        message = "Пересборка витрины маршрутов…"
+    elif scenario_phase == "mask":
+        message = "Пересборка масок сценария…"
+    elif scenario_phase == "kpi":
+        message = "Обновление итогов сценария…"
+    elif scenario_phase == "compact":
+        message = "Детализация в фоне…"
+    elif mart_phase == "error":
+        message = mart_status.get("error") or "Ошибка пересборки витрины"
+    elif scenario_phase == "error":
+        message = scenario_status.get("error") or "Ошибка пересчёта сценария"
+    else:
+        message = "Данные обновляются…"
+
+    return {
+        "route_set_id": scenario.route_set_id,
+        "mart_phase": mart_phase,
+        "mart_ready": mart_ready,
+        "scenario_phase": scenario_phase,
+        "kpi_ready": kpi_ready,
+        "compact_ready": compact_ready,
+        "ready_for_compute": ready_for_compute,
+        "message": message,
+    }
+
+
 @login_required
 @require_http_methods(["POST"])
 def tariff_load_api(request):
@@ -153,6 +198,20 @@ def scenario_effects_compute_pandas_api(request):
 
     scenario = Scenario.objects.select_related("route_set").get(pk=scenario.pk)
 
+    readiness = _build_cache_readiness_payload(scenario=scenario)
+    if (
+        readiness["mart_phase"] in {"queued", "building"}
+        and not readiness["mart_ready"]
+    ):
+        return JsonResponse(
+            {
+                "success": False,
+                "code": "mart_rebuilding",
+                **readiness,
+            },
+            status=409,
+        )
+
     service = ScenarioEffectsPandasService()
     response_dto, calc_errors, meta = service.compute_pandas(
         scenario=scenario,
@@ -160,6 +219,15 @@ def scenario_effects_compute_pandas_api(request):
         include_rule_breakdown=dto.include_rule_breakdown,
     )
     if calc_errors:
+        if meta.get("code") == "mart_rebuilding":
+            return JsonResponse(
+                {
+                    "success": False,
+                    "code": "mart_rebuilding",
+                    **_build_cache_readiness_payload(scenario=scenario),
+                },
+                status=409,
+            )
         return JsonResponse({"success": False, "errors": calc_errors}, status=400)
 
     return JsonResponse(
@@ -175,6 +243,31 @@ def scenario_effects_compute_pandas_api(request):
             "early_group_ready": meta.get("early_group_ready", meta.get("compact_ready", True)),
             "data_version": meta.get("data_version"),
             "timings": meta.get("timings"),
+        },
+    )
+
+
+@login_required
+@require_http_methods(["GET"])
+def cache_readiness_api(request):
+    scenario_id_raw = request.GET.get("scenario_id")
+    try:
+        scenario_id = int(scenario_id_raw)
+    except (TypeError, ValueError):
+        return JsonResponse(
+            {"success": False, "errors": ["Некорректный scenario_id"]},
+            status=400,
+        )
+
+    scenario, error_response = _get_user_scenario(request, scenario_id)
+    if error_response:
+        return error_response
+
+    scenario = Scenario.objects.select_related("route_set").get(pk=scenario.pk)
+    return JsonResponse(
+        {
+            "success": True,
+            **_build_cache_readiness_payload(scenario=scenario),
         },
     )
 

@@ -192,7 +192,10 @@ class ScenarioEffectsCubeService:
                 slices.append(("volume_fallout", _EFFECT_VOLUME_FALLOUT))
                 slices.append(("money_fallout", _EFFECT_MONEY_FALLOUT))
         else:
-            rules = TariffRule.objects.filter(scenario_id=scenario.id).order_by(
+            rules = TariffRule.objects.filter(
+                scenario_id=scenario.id,
+                is_enabled=True,
+            ).order_by(
                 "position",
                 "id",
             )

@@ -4,7 +4,9 @@ from typing import Iterable
 
 from django.db import transaction
 
-from calculations.domain.services.route_mart_store import bump_route_mart_refs_version
+from calculations.domain.services.route_mart_store import (
+    invalidate_route_mart_and_schedule_warm,
+)
 from core.domain.cargo.etsng_categories import (
     classify_cargo_flags,
     clear_cargo_category_positions_cache,
@@ -16,7 +18,9 @@ from core.domain.cargo_category.dto import (
     CargoCategoryPositionDTO,
     CargoCategoryPositionListResultDTO,
 )
-from core.domain.cargo_category.repositories import CargoCategoryPositionRepository
+from core.domain.cargo_category.repositories import (
+    CargoCategoryPositionRepository,
+)
 from core.models import Cargo
 
 
@@ -128,6 +132,6 @@ class CargoCategoryService:
                 to_update,
                 ["is_consumer_goods", "is_food_goods"],
             )
-            transaction.on_commit(bump_route_mart_refs_version)
+            transaction.on_commit(invalidate_route_mart_and_schedule_warm)
 
         return len(to_update)

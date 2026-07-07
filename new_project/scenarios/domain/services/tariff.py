@@ -81,6 +81,7 @@ class TariffRuleService:
             return None, ["% покрытия базы должен быть в диапазоне 0–200"]
 
         position = int(dto.position) if dto.position is not None else 0
+        is_enabled = dto.is_enabled if dto.is_enabled is not None else True
 
         rule = self.repository.create(
             {
@@ -88,6 +89,7 @@ class TariffRuleService:
                 "name": dto.name.strip(),
                 "base_percent": base_percent_dec,
                 "position": position,
+                "is_enabled": is_enabled,
             }
         )
         if dto.conditions is not None:
@@ -139,6 +141,8 @@ class TariffRuleService:
             if base_percent_dec < 0 or base_percent_dec > 200:
                 return None, ["% покрытия базы должен быть в диапазоне 0–200"]
             update_data["base_percent"] = base_percent_dec
+        if dto.is_enabled is not None:
+            update_data["is_enabled"] = bool(dto.is_enabled)
 
         updated = self.repository.update(rule_id, update_data) if update_data else rule
         if not updated:
@@ -159,6 +163,7 @@ class TariffRuleService:
             dto.conditions is not None
             or dto.year_values is not None
             or dto.base_percent is not None
+            or dto.is_enabled is not None
         )
         if refreshed is not None and affects_compute:
             _schedule_scenario_warm(
@@ -166,6 +171,35 @@ class TariffRuleService:
                 change="update",
                 rule_id=refreshed.id,
                 mask_changed=dto.conditions is not None,
+            )
+        return TariffRuleDTO.from_model(refreshed), []
+
+    @transaction.atomic
+    def set_rule_enabled(
+        self, rule_id: int, is_enabled: bool, user: User
+    ) -> tuple[Optional[TariffRuleDTO], list[str]]:
+        rule = self.repository.get_by_id(rule_id)
+        if not rule:
+            return None, [ERR_RULE_NOT_FOUND]
+
+        scenario, errors = self._access.require_scenario_write(rule.scenario_id, user)
+        if errors:
+            return None, errors
+
+        if bool(rule.is_enabled) == bool(is_enabled):
+            return TariffRuleDTO.from_model(rule), []
+
+        updated = self.repository.update(rule_id, {"is_enabled": bool(is_enabled)})
+        if not updated:
+            return None, ["Ошибка при обновлении тарифного решения"]
+
+        refreshed = self.repository.get_by_id(rule_id)
+        if refreshed is not None:
+            _schedule_scenario_warm(
+                scenario_id=scenario.id,
+                change="update",
+                rule_id=refreshed.id,
+                mask_changed=False,
             )
         return TariffRuleDTO.from_model(refreshed), []
 

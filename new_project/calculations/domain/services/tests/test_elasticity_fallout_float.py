@@ -41,7 +41,7 @@ class WeightedRetentionFloatParityTests(TestCase):
         self.scenario = Scenario(
             consider_demand_elasticity=True,
             elasticity_set_id=1,
-            retention_coefficient_mode="relative_to_base",
+            retention_coefficient_mode="combined",
             consider_enterprise_load=True,
         )
         self.rule = ElasticityRule(
@@ -64,7 +64,12 @@ class WeightedRetentionFloatParityTests(TestCase):
             (),
             {"marginality": Decimal("0.15"), "coefficient": Decimal("0.85")},
         )()
-        self.points_index = build_points_index({1: [point, point2]})
+        point3 = type(
+            "Point",
+            (),
+            {"marginality": Decimal("0.00"), "coefficient": Decimal("0.90")},
+        )()
+        self.points_index = build_points_index({1: [point, point2, point3]})
         self.float_points_index = build_float_points_index(self.points_index)
         self.rows = [
             _model_row(transport_volume_tons=Decimal("700")),

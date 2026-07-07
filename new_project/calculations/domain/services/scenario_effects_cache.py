@@ -159,7 +159,7 @@ def compute_scenario_data_version(
         parts.append(f"base:{year}:{base_coef_by_year[year]}")
     for rule in rules:
         parts.append(
-            f"rule:{rule.id}:{rule.name}:{rule.position}:{rule.base_percent}",
+            f"rule:{rule.id}:{rule.name}:{rule.position}:{rule.base_percent}:{rule.is_enabled}",
         )
         for condition in rule.conditions.all():
             parts.append(
@@ -276,11 +276,15 @@ def _hydrate_payload_from_disk(
 
     compact = bundle.compact
     compact_pending = payload.compact_pending
-    if compact is not None:
-        if compact.rule_meta and compact.rule_by_year is None:
-            compact_pending = True
-        else:
-            compact_pending = False
+    if compact is not None and compact.rule_meta and compact.rule_by_year is None:
+        compact_pending = True
+
+    early_group_snapshot = load_early_group_snapshot(
+        scenario_id=payload.scenario_id,
+        data_version=payload.data_version,
+    )
+    if compact is not None and not compact_pending:
+        early_group_snapshot = None
 
     return ScenarioEffectsCachePayload(
         user_id=payload.user_id,
@@ -293,12 +297,7 @@ def _hydrate_payload_from_disk(
         compact=compact,
         compact_pending=compact_pending,
         data_version=payload.data_version,
-        early_group_snapshot=load_early_group_snapshot(
-            scenario_id=payload.scenario_id,
-            data_version=payload.data_version,
-        )
-        if compact is None
-        else None,
+        early_group_snapshot=early_group_snapshot,
     )
 
 

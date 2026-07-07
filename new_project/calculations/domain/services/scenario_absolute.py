@@ -136,29 +136,10 @@ class ScenarioAbsoluteService:
                 years=payload.years,
                 metric="volume",
             )
+            if self._year_values_are_empty(year_values) and payload.compact is not None:
+                year_values = self._aggregate_volumes_from_compact(payload, request)
         elif payload.compact is not None:
-            if payload.compact.volume_by_year is not None:
-                year_values = aggregate_compact_year_values(
-                    payload.compact,
-                    group_by=request.group_by,
-                    group_by_inner=request.group_by_inner,
-                    cargo_groups=[],
-                    holdings=[],
-                    values_by_year=payload.compact.volume_by_year,
-                )
-            else:
-                volume_buckets = aggregate_compact_value(
-                    payload.compact,
-                    values=payload.compact.volume_tons,
-                    group_by=request.group_by,
-                    group_by_inner=request.group_by_inner,
-                    cargo_groups=[],
-                    holdings=[],
-                )
-                year_values = {
-                    key: {year: volume for year in payload.years}
-                    for key, volume in volume_buckets.items()
-                }
+            year_values = self._aggregate_volumes_from_compact(payload, request)
         else:
             volume_buckets = aggregate_by_groups(
                 payload.facts,
@@ -291,6 +272,48 @@ class ScenarioAbsoluteService:
                     values[year] = Decimal("0")
             year_values[(label,)] = values
         return year_values
+
+    def _aggregate_volumes_from_compact(
+        self,
+        payload: ScenarioEffectsCachePayload,
+        request: ScenarioAbsoluteRequestDTO,
+    ) -> dict[tuple[str, ...], dict[int, Decimal]]:
+        assert payload.compact is not None
+        compact = payload.compact
+        if compact.volume_by_year is not None:
+            return aggregate_compact_year_values(
+                compact,
+                group_by=request.group_by,
+                group_by_inner=request.group_by_inner,
+                cargo_groups=[],
+                holdings=[],
+                values_by_year=compact.volume_by_year,
+            )
+
+        volume_buckets = aggregate_compact_value(
+            compact,
+            values=compact.volume_tons,
+            group_by=request.group_by,
+            group_by_inner=request.group_by_inner,
+            cargo_groups=[],
+            holdings=[],
+        )
+        return {
+            key: {year: volume for year in payload.years}
+            for key, volume in volume_buckets.items()
+        }
+
+    @staticmethod
+    def _year_values_are_empty(
+        year_values: dict[tuple[str, ...], dict[int, Decimal]],
+    ) -> bool:
+        if not year_values:
+            return True
+        return all(
+            value == 0
+            for values in year_values.values()
+            for value in values.values()
+        )
 
     def _aggregate_year_values(
         self,
@@ -524,9 +547,10 @@ def _fallout_display_magnitude(
     fallout: Decimal,
     format_value,
 ) -> str | None:
-    if fallout >= 0:
+    if fallout == 0:
         return None
-    return format_value(abs(fallout))
+    sign = "+" if fallout > 0 else "-"
+    return f"{sign}{format_value(abs(fallout))}"
 
 
 def _format_bln(value: Decimal) -> str:

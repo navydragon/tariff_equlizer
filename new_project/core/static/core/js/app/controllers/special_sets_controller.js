@@ -1,6 +1,7 @@
 import { fetchJson } from "../lib/http.js";
 import { escapeHtml, setVisible } from "../lib/dom.js";
 import { renderErrors } from "../lib/errors.js";
+import { showToast } from "../lib/toast.js";
 
 (function () {
   const application = window.stimulusApp;
@@ -35,8 +36,72 @@ import { renderErrors } from "../lib/errors.js";
     };
 
     connect() {
+      this._bindModalCleanup("addConsumerPositionModal");
+      this._bindModalCleanup("addFoodPositionModal");
       this.loadConsumerItems();
       this.loadFoodItems();
+    }
+
+    _bindModalCleanup(modalId) {
+      const modalEl = document.getElementById(modalId);
+      if (!modalEl) {
+        return;
+      }
+      modalEl.addEventListener("hidden.bs.modal", () => {
+        setTimeout(() => this._cleanupModalState(modalEl), 50);
+      });
+    }
+
+    _cleanupModalState(modalEl) {
+      document.querySelectorAll(".modal-backdrop").forEach((backdrop) => {
+        backdrop.remove();
+      });
+      document.body.classList.remove("modal-open");
+      document.body.style.overflow = "";
+      document.body.style.paddingRight = "";
+      if (!modalEl) {
+        return;
+      }
+      modalEl.classList.remove("show");
+      modalEl.style.display = "none";
+      modalEl.setAttribute("aria-hidden", "true");
+      modalEl.removeAttribute("aria-modal");
+    }
+
+    _closeModal(modalId) {
+      const modalEl = document.getElementById(modalId);
+      if (!modalEl || typeof bootstrap === "undefined") {
+        return Promise.resolve();
+      }
+
+      if (!modalEl.classList.contains("show")) {
+        this._cleanupModalState(modalEl);
+        return Promise.resolve();
+      }
+
+      return new Promise((resolve) => {
+        modalEl.addEventListener(
+          "hidden.bs.modal",
+          () => {
+            setTimeout(() => {
+              this._cleanupModalState(modalEl);
+              resolve();
+            }, 50);
+          },
+          { once: true },
+        );
+
+        const dismissBtn = modalEl.querySelector('[data-bs-dismiss="modal"]');
+        if (dismissBtn) {
+          dismissBtn.click();
+          return;
+        }
+
+        const modal =
+          bootstrap.Modal.getInstance(modalEl) ||
+          bootstrap.Modal.getOrCreateInstance(modalEl);
+        modal.hide();
+      });
     }
 
     async loadConsumerItems() {
@@ -164,14 +229,9 @@ import { renderErrors } from "../lib/errors.js";
 
         refs.input.value = "";
         renderErrors(refs.errorsTarget, []);
-        const modalEl = document.getElementById(refs.modalId);
-        if (modalEl && window.bootstrap) {
-          const modal = window.bootstrap.Modal.getInstance(modalEl);
-          if (modal) {
-            modal.hide();
-          }
-        }
+        await this._closeModal(refs.modalId);
         await refs.reload();
+        this._showRebuildToast();
       } catch (error) {
         console.error(`Failed to add ${kind} position`, error);
         renderErrors(refs.errorsTarget, ["Ошибка сети при сохранении"]);
@@ -208,10 +268,21 @@ import { renderErrors } from "../lib/errors.js";
           return;
         }
         await reload();
+        this._showRebuildToast();
       } catch (error) {
         console.error("Failed to delete position", error);
         window.alert("Ошибка сети при удалении");
       }
+    }
+
+    _showRebuildToast() {
+      showToast(
+        "Данные обновляются в фоне. Расчёты эффектов будут готовы через несколько секунд.",
+        {
+          variant: "info",
+          title: "Пересборка витрины",
+        },
+      );
     }
   }
 

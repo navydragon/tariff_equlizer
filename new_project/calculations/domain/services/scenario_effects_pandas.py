@@ -48,6 +48,10 @@ from calculations.domain.services.route_mart_store import (
     resolve_light_mart_columns,
     resolve_mart_parquet_path,
 )
+from calculations.domain.services.route_mart_warm_status import (
+    get_route_mart_warm_status,
+    is_route_mart_ready,
+)
 from calculations.domain.services.tariff_load import TariffLoadService
 from core.domain.cargo.ordering import sort_cargo_group_names, normalize_filter_options
 from scenarios.models import Scenario
@@ -86,6 +90,19 @@ class ScenarioEffectsPandasService:
             base_coef_by_year=context.base_coef_by_year,
             rules=context.rules,
         )
+
+        mart_ready = is_route_mart_ready(route_set_id=scenario.route_set_id)
+        mart_status = get_route_mart_warm_status(route_set_id=scenario.route_set_id)
+        if not mart_ready and mart_status and mart_status.get("phase") in {
+            "queued",
+            "building",
+        }:
+            return None, ["mart_rebuilding"], {
+                "code": "mart_rebuilding",
+                "mart_phase": mart_status.get("phase"),
+                "mart_ready": False,
+                "data_version": data_version,
+            }
 
         t_snapshot_load = time.perf_counter()
         scenario_bundle = try_load_scenario_compute(
