@@ -42,6 +42,8 @@ from scenarios.domain.services.tariff_rule_options import (
     mask_sidecar_option_items,
 )
 
+_NO_REBUILD = {"started": False}
+
 
 def _tariff_rule_api_dict(rule, *, route_set_id: int) -> dict:
     return enrich_rule_dict_for_api(asdict(rule), route_set_id=route_set_id)
@@ -239,6 +241,26 @@ def scenario_update_api(request, scenario_id):
 
 @login_required
 @require_http_methods(["POST"])
+def scenario_recompute_api(request, scenario_id):
+    """AJAX endpoint (JSON) для ручного пересчёта сценария."""
+    service = ScenarioService()
+    ok, errors = service.recompute_scenario(scenario_id, request.user)
+    if errors:
+        return JsonResponse({"success": False, "errors": errors}, status=400)
+
+    from calculations.domain.services.scenario_warm_status import build_rebuild_meta
+
+    rebuild = build_rebuild_meta(
+        scenario_id=scenario_id,
+        rule_id=None,
+        mask_changed=False,
+        warm_scheduled=ok,
+    )
+    return JsonResponse({"success": True, "rebuild": rebuild})
+
+
+@login_required
+@require_http_methods(["POST"])
 def scenario_delete_api(request, scenario_id):
     """AJAX endpoint (JSON) для удаления сценария."""
     service = ScenarioService()
@@ -412,16 +434,8 @@ def tariff_rule_create_api(request, scenario_id):
     rule, errors = service.create_rule(dto, request.user)
     if errors:
         return JsonResponse({"success": False, "errors": errors}, status=400)
-    from calculations.domain.services.scenario_warm_status import build_rebuild_meta
-
-    rebuild = build_rebuild_meta(
-        scenario_id=scenario_id,
-        rule_id=rule.id if rule is not None else None,
-        mask_changed=True,
-        warm_scheduled=rule is not None,
-    )
     return JsonResponse(
-        {"success": True, "rule": asdict(rule), "rebuild": rebuild},
+        {"success": True, "rule": asdict(rule), "rebuild": _NO_REBUILD},
         status=201,
     )
 
@@ -464,19 +478,7 @@ def tariff_rule_update_api(request, rule_id):
     rule, errors = service.update_rule(rule_id, dto, request.user)
     if errors:
         return JsonResponse({"success": False, "errors": errors}, status=400)
-    from calculations.domain.services.scenario_warm_status import build_rebuild_meta
-
-    warm_scheduled = any(
-        data.get(field) is not None
-        for field in ("conditions", "year_values", "base_percent")
-    )
-    rebuild = build_rebuild_meta(
-        scenario_id=rule.scenario_id if rule is not None else 0,
-        rule_id=rule.id if rule is not None else None,
-        mask_changed=data.get("conditions") is not None,
-        warm_scheduled=warm_scheduled and rule is not None,
-    )
-    return JsonResponse({"success": True, "rule": asdict(rule), "rebuild": rebuild})
+    return JsonResponse({"success": True, "rule": asdict(rule), "rebuild": _NO_REBUILD})
 
 
 @login_required
@@ -489,15 +491,7 @@ def tariff_rule_delete_api(request, rule_id):
     ok, errors = service.delete_rule(rule_id, request.user)
     if errors:
         return JsonResponse({"success": False, "errors": errors}, status=400)
-    from calculations.domain.services.scenario_warm_status import build_rebuild_meta
-
-    rebuild = build_rebuild_meta(
-        scenario_id=existing.scenario_id if existing is not None else 0,
-        rule_id=None,
-        mask_changed=False,
-        warm_scheduled=ok and existing is not None,
-    )
-    return JsonResponse({"success": True, "deleted": ok, "rebuild": rebuild})
+    return JsonResponse({"success": True, "deleted": ok, "rebuild": _NO_REBUILD})
 
 
 @login_required
@@ -522,15 +516,7 @@ def tariff_rule_set_enabled_api(request, rule_id):
     )
     if errors:
         return JsonResponse({"success": False, "errors": errors}, status=400)
-    from calculations.domain.services.scenario_warm_status import build_rebuild_meta
-
-    rebuild = build_rebuild_meta(
-        scenario_id=rule.scenario_id if rule is not None else 0,
-        rule_id=rule.id if rule is not None else None,
-        mask_changed=False,
-        warm_scheduled=rule is not None,
-    )
-    return JsonResponse({"success": True, "rule": asdict(rule), "rebuild": rebuild})
+    return JsonResponse({"success": True, "rule": asdict(rule), "rebuild": _NO_REBUILD})
 
 
 @login_required

@@ -176,7 +176,6 @@ import { renderErrors } from "../lib/errors.js";
       "basePercentInput",
       "years",
       "saveBtn",
-      "rebuildStatus",
     ];
 
     static values = {
@@ -189,7 +188,6 @@ import { renderErrors } from "../lib/errors.js";
       setEnabledUrlTemplate: String,
       optionsUrlTemplate: String,
       statsUrl: String,
-      warmStatusUrl: String,
       startYear: Number,
       endYear: Number,
     };
@@ -204,7 +202,6 @@ import { renderErrors } from "../lib/errors.js";
         togglingRuleIds: new Set(),
       };
       this.statsDebounceTimer = null;
-      this.rebuildPollTimer = null;
 
       this.modalInstance = null;
       this.ensureModal();
@@ -214,143 +211,10 @@ import { renderErrors } from "../lib/errors.js";
     }
 
     disconnect() {
-      this._stopRebuildPolling();
-    }
-
-    _stopRebuildPolling() {
-      if (this.rebuildPollTimer) {
-        clearTimeout(this.rebuildPollTimer);
-        this.rebuildPollTimer = null;
+      if (this.statsDebounceTimer) {
+        clearTimeout(this.statsDebounceTimer);
+        this.statsDebounceTimer = null;
       }
-    }
-
-    _hideRebuildStatus() {
-      if (!this.hasRebuildStatusTarget) return;
-      this.rebuildStatusTarget.classList.add("d-none");
-      this.rebuildStatusTarget.innerHTML = "";
-    }
-
-    _showRebuildStatus(message, variant = "info") {
-      if (!this.hasRebuildStatusTarget) return;
-      const alertClass = variant === "success" ? "alert-success" : variant === "danger" ? "alert-danger" : "alert-info";
-      this.rebuildStatusTarget.classList.remove("d-none");
-      this.rebuildStatusTarget.innerHTML = `
-        <div class="alert ${alertClass} py-2 px-3 mb-3" role="status">
-          ${variant === "success" ? "" : '<span class="spinner-border spinner-border-sm text-primary me-2" role="status"></span>'}
-          ${escapeHtml(message)}
-        </div>
-      `;
-    }
-
-    _rebuildPhaseMessage(status) {
-      const ruleId = status?.rule_id;
-      const matched = status?.matched_routes;
-      const matchedSuffix =
-        matched != null && matched >= 0 ? ` (${matched} маршрутов)` : "";
-      switch (status?.phase) {
-        case "queued":
-          return "Подготовка пересчёта…";
-        case "mask":
-          return ruleId
-            ? `Пересборка маски правила #${ruleId}…`
-            : "Пересборка маски правила…";
-        case "kpi":
-          return `Обновление итогов сценария…${matchedSuffix}`;
-        case "compact":
-          return "Детализация в фоне…";
-        case "done":
-          return "Пересчёт завершён";
-        case "error":
-          return status?.error || "Ошибка пересчёта";
-        default:
-          return "Пересчёт сценария…";
-      }
-    }
-
-    async _pollRebuildStatus(rebuild, startedAt = Date.now()) {
-      if (!this.hasWarmStatusUrlValue || !this.hasScenarioIdValue) {
-        return;
-      }
-      const timeoutMs = 120000;
-      if (Date.now() - startedAt > timeoutMs) {
-        this._showRebuildStatus("Пересчёт занимает больше обычного, продолжаем в фоне…", "info");
-        this._stopRebuildPolling();
-        return;
-      }
-
-      const url = `${this.warmStatusUrlValue}?scenario_id=${encodeURIComponent(
-        String(this.scenarioIdValue),
-      )}`;
-      try {
-        const { data } = await fetchJson(url);
-        if (!data || !data.success) {
-          this.rebuildPollTimer = setTimeout(
-            () => this._pollRebuildStatus(rebuild, startedAt),
-            300,
-          );
-          return;
-        }
-
-        if (data.phase === "error") {
-          this._showRebuildStatus(this._rebuildPhaseMessage(data), "danger");
-          this._stopRebuildPolling();
-          return;
-        }
-
-        if (data.phase === "done" || data.compact_ready) {
-          this._showRebuildStatus(this._rebuildPhaseMessage({ phase: "done" }), "success");
-          this._stopRebuildPolling();
-          setTimeout(() => this._hideRebuildStatus(), 2500);
-          return;
-        }
-
-        if (rebuild?.data_version && data.data_version && data.data_version !== rebuild.data_version) {
-          this._showRebuildStatus(this._rebuildPhaseMessage(data));
-          this.rebuildPollTimer = setTimeout(
-            () => this._pollRebuildStatus(rebuild, startedAt),
-            300,
-          );
-          return;
-        }
-
-        this._showRebuildStatus(this._rebuildPhaseMessage(data));
-        if (data.kpi_ready && data.phase === "compact") {
-          this.rebuildPollTimer = setTimeout(
-            () => this._pollRebuildStatus(rebuild, startedAt),
-            300,
-          );
-          return;
-        }
-        if (!data.phase) {
-          this.rebuildPollTimer = setTimeout(
-            () => this._pollRebuildStatus(rebuild, startedAt),
-            300,
-          );
-          return;
-        }
-
-        this.rebuildPollTimer = setTimeout(
-          () => this._pollRebuildStatus(rebuild, startedAt),
-          300,
-        );
-      } catch (error) {
-        console.error("[tariff-rules] warm status poll failed", error);
-        this.rebuildPollTimer = setTimeout(
-          () => this._pollRebuildStatus(rebuild, startedAt),
-          500,
-        );
-      }
-    }
-
-    _startRebuildTracking(rebuild) {
-      if (!rebuild?.started) {
-        return;
-      }
-      this._stopRebuildPolling();
-      this._showRebuildStatus(
-        rebuild.mask_changed ? "Пересборка маски правила…" : "Подготовка пересчёта…",
-      );
-      this._pollRebuildStatus(rebuild);
     }
 
     // === List ===
@@ -887,8 +751,6 @@ import { renderErrors } from "../lib/errors.js";
       this.modalInstance.hide();
       await this.loadRules();
       this.showToast("success", "Сохранено");
-      this._startRebuildTracking(data.rebuild);
-      this._dispatchTariffRulesChanged();
     }
 
     async deleteRule(event) {
@@ -904,8 +766,6 @@ import { renderErrors } from "../lib/errors.js";
       }
       await this.loadRules();
       this.showToast("success", "Удалено");
-      this._startRebuildTracking(data.rebuild);
-      this._dispatchTariffRulesChanged();
     }
 
     async toggleEnabled(event) {
@@ -949,22 +809,6 @@ import { renderErrors } from "../lib/errors.js";
       }
       this.renderTable();
       this.showToast("success", nextEnabled ? "Правило включено" : "Правило выключено");
-      this._startRebuildTracking(data.rebuild);
-      this._dispatchTariffRulesChanged();
-    }
-
-    _dispatchTariffRulesChanged() {
-      if (!this.hasScenarioIdValue) return;
-      const detail = { scenarioId: this.scenarioIdValue };
-      document.dispatchEvent(
-        new CustomEvent("tariff-rules-changed", { detail }),
-      );
-      if (window.parent !== window) {
-        window.parent.postMessage(
-          { type: "tariff-rules-changed", scenarioId: this.scenarioIdValue },
-          window.location.origin,
-        );
-      }
     }
 
     showToast(type, message) {

@@ -13,6 +13,11 @@ urlpatterns = [
     path("api/<int:scenario_id>/", views.scenario_detail_api, name="api_detail"),
     path("api/create/", views.scenario_create_api, name="api_create"),
     path("api/<int:scenario_id>/update/", views.scenario_update_api, name="api_update"),
+    path(
+        "api/<int:scenario_id>/recompute/",
+        views.scenario_recompute_api,
+        name="api_recompute",
+    ),
     path("api/<int:scenario_id>/delete/", views.scenario_delete_api, name="api_delete"),
     path(
         "api/<int:scenario_id>/set-active/",

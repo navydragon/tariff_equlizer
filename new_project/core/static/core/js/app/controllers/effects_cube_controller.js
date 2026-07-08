@@ -56,10 +56,10 @@ import { clearToasts, showToast } from "../lib/toast.js";
         groupByLabel: "Группа груза",
       };
 
-      this._onTariffRulesChanged = this._onTariffRulesChanged.bind(this);
-      this._onTariffRulesMessage = this._onTariffRulesMessage.bind(this);
-      document.addEventListener("tariff-rules-changed", this._onTariffRulesChanged);
-      window.addEventListener("message", this._onTariffRulesMessage);
+      this._onScenarioRecalculated = this._onScenarioRecalculated.bind(this);
+      this._onScenarioEditMessage = this._onScenarioEditMessage.bind(this);
+      document.addEventListener("scenario-recalculated", this._onScenarioRecalculated);
+      window.addEventListener("message", this._onScenarioEditMessage);
 
       this.state.routeMartRebuildModalEl = document.getElementById(
         "routeMartRebuildModal",
@@ -84,8 +84,8 @@ import { clearToasts, showToast } from "../lib/toast.js";
     }
 
     disconnect() {
-      document.removeEventListener("tariff-rules-changed", this._onTariffRulesChanged);
-      window.removeEventListener("message", this._onTariffRulesMessage);
+      document.removeEventListener("scenario-recalculated", this._onScenarioRecalculated);
+      window.removeEventListener("message", this._onScenarioEditMessage);
       this._destroyTomSelects();
     }
 
@@ -196,22 +196,30 @@ import { clearToasts, showToast } from "../lib/toast.js";
       return this.computePandasUrlValue || this.computeUrlValue;
     }
 
-    _onTariffRulesChanged(event) {
+    _onScenarioRecalculated(event) {
       const scenarioId = event?.detail?.scenarioId;
       if (
         scenarioId &&
         this.state.selectedScenarioId &&
         Number(scenarioId) === Number(this.state.selectedScenarioId)
       ) {
-        this.state.cacheKey = null;
-        this._computeEffects();
+        this._handleScenarioRecalculated();
       }
     }
 
-    _onTariffRulesMessage(event) {
+    _onScenarioEditMessage(event) {
       if (event.origin !== window.location.origin) return;
-      if (!event.data || event.data.type !== "tariff-rules-changed") return;
-      this._onTariffRulesChanged({ detail: { scenarioId: event.data.scenarioId } });
+      if (!event.data || event.data.type !== "scenario-recalculated") return;
+      this._onScenarioRecalculated({ detail: { scenarioId: event.data.scenarioId } });
+    }
+
+    async _handleScenarioRecalculated() {
+      if (this.state.computing) {
+        return;
+      }
+      this.state.cacheKey = null;
+      await this._waitForWarmKpi(this.state.selectedScenarioId);
+      await this._computeEffects();
     }
 
     async _waitForWarmKpi(scenarioId, startedAt = Date.now()) {
@@ -738,20 +746,9 @@ import { clearToasts, showToast } from "../lib/toast.js";
       };
     }
 
-    _renderWarning(routesWithoutCharge, routesWithoutVolume, meta = {}) {
+    _renderWarning(routesWithoutCharge, routesWithoutVolume, _meta = {}) {
       const chargeCount = Number(routesWithoutCharge) || 0;
       const volumeCount = Number(routesWithoutVolume) || 0;
-
-      if (meta.elapsed_ms != null) {
-        showToast(
-          `Расчёт выполнен за ${meta.elapsed_ms} мс.`,
-          this._toastOptions({
-            variant: "info",
-            title: "Готово",
-            delay: 7000,
-          }),
-        );
-      }
 
       const warnings = [];
       if (chargeCount > 0) {

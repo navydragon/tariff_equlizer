@@ -110,11 +110,11 @@ import { clearToasts, showToast } from "../lib/toast.js";
       }
 
       this._onVisibilityChange = this._onVisibilityChange.bind(this);
-      this._onTariffRulesChanged = this._onTariffRulesChanged.bind(this);
-      this._onTariffRulesMessage = this._onTariffRulesMessage.bind(this);
+      this._onScenarioRecalculated = this._onScenarioRecalculated.bind(this);
+      this._onScenarioEditMessage = this._onScenarioEditMessage.bind(this);
       document.addEventListener("visibilitychange", this._onVisibilityChange);
-      document.addEventListener("tariff-rules-changed", this._onTariffRulesChanged);
-      window.addEventListener("message", this._onTariffRulesMessage);
+      document.addEventListener("scenario-recalculated", this._onScenarioRecalculated);
+      window.addEventListener("message", this._onScenarioEditMessage);
       this.state.revisionTimer = setInterval(
         () => this._checkRevision(),
         30000,
@@ -144,8 +144,8 @@ import { clearToasts, showToast } from "../lib/toast.js";
 
     disconnect() {
       document.removeEventListener("visibilitychange", this._onVisibilityChange);
-      document.removeEventListener("tariff-rules-changed", this._onTariffRulesChanged);
-      window.removeEventListener("message", this._onTariffRulesMessage);
+      document.removeEventListener("scenario-recalculated", this._onScenarioRecalculated);
+      window.removeEventListener("message", this._onScenarioEditMessage);
       if (
         this.state?.scenarioEditModalEl &&
         this.state?.boundScenarioEditModalHiddenHandler
@@ -877,24 +877,36 @@ import { clearToasts, showToast } from "../lib/toast.js";
       }
     }
 
-    _onTariffRulesChanged(event) {
+    _onScenarioRecalculated(event) {
       const scenarioId = event?.detail?.scenarioId;
       if (
         scenarioId &&
         this.state.selectedScenarioId &&
         Number(scenarioId) === Number(this.state.selectedScenarioId)
       ) {
-        this._handleTariffRulesChanged();
+        this._handleScenarioRecalculated();
       }
     }
 
-    _onTariffRulesMessage(event) {
+    _onScenarioEditMessage(event) {
       if (event.origin !== window.location.origin) return;
-      if (!event.data || event.data.type !== "tariff-rules-changed") return;
-      this._onTariffRulesChanged({ detail: { scenarioId: event.data.scenarioId } });
+      if (!event.data || !event.data.type) return;
+      if (event.data.type === "close-scenario-edit-modal") {
+        this._closeScenarioEditModal();
+        return;
+      }
+      if (event.data.type === "scenario-recalculated") {
+        this._onScenarioRecalculated({ detail: { scenarioId: event.data.scenarioId } });
+      }
     }
 
-    async _handleTariffRulesChanged() {
+    _closeScenarioEditModal() {
+      if (this.state.scenarioEditModal) {
+        this.state.scenarioEditModal.hide();
+      }
+    }
+
+    async _handleScenarioRecalculated() {
       if (this.state.computing) {
         return;
       }
@@ -1109,62 +1121,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
       );
     }
 
-    _renderWarning(_skippedCharge, _skippedVolume, meta = {}) {
-      if (meta.elapsed_ms != null || meta.timings) {
-        const elapsed =
-          meta.elapsed_ms === undefined || meta.elapsed_ms === null
-            ? ""
-            : ` за ${meta.elapsed_ms} мс`;
-        let timingDetails = "";
-        if (meta.timings) {
-          const partsTiming = [
-            ["контекст", meta.timings.context_ms],
-            ["снимок read", meta.timings.scenario_snapshot_load_ms],
-            ["снимок write", meta.timings.scenario_snapshot_save_ms],
-            ["загрузка", meta.timings.load_ms],
-            ["расчёт", meta.timings.compute_ms],
-            ["постобработка", meta.timings.post_compute_ms],
-            ["карточки", meta.timings.cards_ms],
-            ["кэш", meta.timings.cache_ms],
-            ["маски", meta.timings.masks_ms],
-            ["годы", meta.timings.years_loop_ms],
-            ["rule×год", meta.timings.rule_by_year_ms],
-            ["compact", meta.timings.compact_build_ms],
-            ["итоги", meta.timings.totals_ms],
-            ["charge npy", meta.timings.charge_npy_read_ms],
-            ["dims npy", meta.timings.dims_npz_read_ms],
-            ["masks npy", meta.timings.masks_npz_read_ms],
-            ["parquet read", meta.timings.parquet_read_ms],
-            ["parquet write", meta.timings.parquet_write_ms],
-            ["stats", meta.timings.stats_ms],
-            ["sql", meta.timings.routes_sql_execute_ms],
-            ["fetch", meta.timings.routes_fetch_ms],
-            ["df", meta.timings.dataframe_build_ms],
-          ]
-            .filter(([, value]) => value !== undefined && value !== null)
-            .map(([label, value]) => `${label} ${value} мс`);
-          if (partsTiming.length) {
-            timingDetails = ` (${partsTiming.join(", ")})`;
-          }
-        }
-        if (meta.scenario_compute_cache_hit) {
-          timingDetails += ", снимок сценария";
-        } else if (meta.cache_hit || meta.route_mart_cache_hit) {
-          timingDetails += ", витрина parquet";
-        }
-        if (meta.compact_ready === false) {
-          timingDetails += ", compact в фоне";
-        }
-        showToast(
-          `Расчёт выполнен${elapsed}${timingDetails}.`,
-          this._toastOptions({
-            variant: "info",
-            title: "Готово",
-            delay: 7000,
-          }),
-        );
-      }
-    }
+    _renderWarning(_skippedCharge, _skippedVolume, _meta = {}) {}
 
     _showError(message) {
       if (!message) {

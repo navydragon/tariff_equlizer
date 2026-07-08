@@ -161,6 +161,11 @@ import { persistActiveScenario } from "../lib/scenario_active.js";
       this._renderRouteDetails(null);
       this._updateEqualizerVisibility(false);
 
+      this._onScenarioRecalculated = this._onScenarioRecalculated.bind(this);
+      this._onScenarioEditMessage = this._onScenarioEditMessage.bind(this);
+      document.addEventListener("scenario-recalculated", this._onScenarioRecalculated);
+      window.addEventListener("message", this._onScenarioEditMessage);
+
       // Загружаем сценарии сразу при открытии страницы, чтобы верхний select
       // не был пустым и не зависел от открытия модалки.
       this._renderScenarioLoadingPlaceholder();
@@ -174,6 +179,8 @@ import { persistActiveScenario } from "../lib/scenario_active.js";
       clearTimeout(this.state.searchTimeout);
       clearTimeout(this.state.cascadeFilterTimeout);
       this._destroyCascadeTomSelects();
+      document.removeEventListener("scenario-recalculated", this._onScenarioRecalculated);
+      window.removeEventListener("message", this._onScenarioEditMessage);
       if (
         this.state.scenarioEditModalEl &&
         this.state.boundScenarioEditModalHiddenHandler
@@ -384,6 +391,39 @@ import { persistActiveScenario } from "../lib/scenario_active.js";
         this.state.scenarioEditFrame.src = "about:blank";
       }
 
+      await this._refreshAfterScenarioEdit();
+    }
+
+    _onScenarioRecalculated(event) {
+      const scenarioId = event?.detail?.scenarioId;
+      if (
+        scenarioId &&
+        this.state.selectedScenarioId &&
+        Number(scenarioId) === Number(this.state.selectedScenarioId)
+      ) {
+        void this._refreshAfterScenarioEdit();
+      }
+    }
+
+    _onScenarioEditMessage(event) {
+      if (event.origin !== window.location.origin) return;
+      if (!event.data || !event.data.type) return;
+      if (event.data.type === "close-scenario-edit-modal") {
+        this._closeScenarioEditModal();
+        return;
+      }
+      if (event.data.type === "scenario-recalculated") {
+        this._onScenarioRecalculated({ detail: { scenarioId: event.data.scenarioId } });
+      }
+    }
+
+    _closeScenarioEditModal() {
+      if (this.state.scenarioEditModal) {
+        this.state.scenarioEditModal.hide();
+      }
+    }
+
+    async _refreshAfterScenarioEdit() {
       const prevId = this.state.selectedScenarioId;
       const hadSelectedRoute = Boolean(this.state.selectedRoute);
       try {
@@ -409,7 +449,7 @@ import { persistActiveScenario } from "../lib/scenario_active.js";
         await this._renderDiagram();
       } catch (e) {
         // eslint-disable-next-line no-console
-        console.error("[route-analysis] scenario list refresh failed", e);
+        console.error("[route-analysis] scenario refresh failed", e);
       }
     }
 

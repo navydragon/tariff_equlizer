@@ -2173,7 +2173,7 @@ class TariffRuleSetEnabledApiTests(TestCase):
         payload = response.json()
         self.assertTrue(payload["success"])
         self.assertFalse(payload["rule"]["is_enabled"])
-        self.assertTrue(payload["rebuild"]["started"])
+        self.assertFalse(payload["rebuild"]["started"])
 
         self.rule.refresh_from_db()
         self.assertFalse(self.rule.is_enabled)
@@ -2188,3 +2188,35 @@ class TariffRuleSetEnabledApiTests(TestCase):
         self.assertEqual(response.status_code, 400)
         payload = response.json()
         self.assertFalse(payload["success"])
+
+
+class ScenarioRecomputeApiTests(TestCase):
+    def setUp(self) -> None:
+        import json
+
+        from django.test import Client
+        from django.urls import reverse
+
+        self.client = Client()
+        self.user = User.objects.create_user(login="recompute_user", password="test_pass")
+        self.client.force_login(self.user)
+        self.route_set = RouteSet.objects.create(name="RS_RECOMPUTE", code="RS_RECOMPUTE")
+        self.scenario = Scenario.objects.create(
+            name="Recompute scenario",
+            start_year=2025,
+            end_year=2026,
+            route_set=self.route_set,
+            author=self.user,
+        )
+        self.reverse = reverse
+        self.json = json
+
+    def test_recompute_api_starts_warm(self) -> None:
+        url = self.reverse("scenarios:api_recompute", args=[self.scenario.id])
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(url, content_type="application/json")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["success"])
+        self.assertTrue(payload["rebuild"]["started"])
+        self.assertIn("data_version", payload["rebuild"])

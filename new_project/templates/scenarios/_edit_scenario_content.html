@@ -1,9 +1,28 @@
 <div id="editScenarioErrors"></div>
 
+<style>
+  .scenario-edit-footer {
+    position: sticky;
+    bottom: 0;
+    z-index: 20;
+    margin-top: 1.5rem;
+    padding: 1rem 0;
+    background: var(--tblr-body-bg, #fff);
+    border-top: 1px solid var(--tblr-border-color, #e6e7e9);
+    box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.04);
+  }
+
+  .scenario-edit-footer .form-hint {
+    margin-top: 0.5rem;
+    margin-bottom: 0;
+  }
+</style>
+
 <div
   data-controller="scenario-edit"
   data-scenario-edit-scenario-id-value="{{ scenario.id }}"
   data-scenario-edit-update-url-value="{% url 'scenarios:api_update' scenario.id %}"
+  data-scenario-edit-recompute-url-value="{% url 'scenarios:api_recompute' scenario.id %}"
   data-scenario-edit-route-set-list-url-value="{% url 'route_set_list_api' %}"
   data-scenario-edit-route-sets-preloaded-value="true"
   data-scenario-edit-tabs-value='["tab-basic","tab-base","tab-fx","tab-inflation","tab-elasticity","tab-tariff"]'
@@ -130,6 +149,21 @@
       {% include "scenarios/parameters/tariff.html" %}
     </div>
   </div>
+
+  <div class="scenario-edit-footer">
+    <div class="d-none mb-2" data-scenario-edit-target="rebuildStatus" role="status"></div>
+    <button
+      type="button"
+      class="btn btn-primary w-100"
+      data-scenario-edit-target="recomputeBtn"
+      data-action="scenario-edit#recompute"
+    >
+      Пересчитать сценарий
+    </button>
+    <small class="form-hint text-muted d-block text-center">
+      Сохраните изменения на вкладках перед пересчётом
+    </small>
+  </div>
 </div>
 
 {# Контейнер для toast уведомлений в правом нижнем углу #}
@@ -138,7 +172,6 @@
     <div class="toast-header bg-success text-white">
       <i class="ti ti-check me-2"></i>
       <strong class="me-auto">Успешно</strong>
-      <small class="text-white-50 me-2" id="toastSuccessTime"></small>
       <button type="button" class="btn-close btn-close-white" data-bs-dismiss="toast" aria-label="Close"></button>
     </div>
     <div class="toast-body">

@@ -1765,7 +1765,6 @@ class ScenarioEffectsPandasParityTests(TariffLoadServiceTestMixin, TestCase):
             fetch_routes_dataframe_cached_timed,
         )
         from calculations.domain.services.route_mask_cache import try_load_rule_mask
-        from calculations.domain.services.rule_mask_prewarm import prewarm_rule_mask
         from calculations.domain.services.tariff_load import TariffLoadService
         from scenarios.domain.dto import CreateTariffRuleDTO
         from scenarios.domain.services import TariffRuleService
@@ -1805,7 +1804,7 @@ class ScenarioEffectsPandasParityTests(TariffLoadServiceTestMixin, TestCase):
             conditions=conditions,
             n_routes=len(df),
         )
-        self.assertIsNotNone(cached)
+        self.assertIsNone(cached)
 
     def test_compute_masks_cache_hit_after_prewarm(self) -> None:
         from calculations.domain.services.route_effects_loader import (
@@ -1942,6 +1941,14 @@ class ScenarioRuleWarmTests(TariffLoadServiceTestMixin, TestCase):
 
         fetch_routes_dataframe_cached_timed(self.scenario.route_set_id)
 
+    def _recompute_scenario(self, scenario) -> None:
+        from scenarios.domain.services import ScenarioService
+
+        with self.captureOnCommitCallbacks(execute=True):
+            ok, errors = ScenarioService().recompute_scenario(scenario.id, self.user)
+        self.assertEqual(errors, [])
+        self.assertTrue(ok)
+
     def test_route_mart_warm_scheduler_builds_status_and_warms_scenarios(self) -> None:
         from calculations.domain.services.route_mart_warm_scheduler import (
             schedule_debounced_route_mart_warm,
@@ -1991,6 +1998,7 @@ class ScenarioRuleWarmTests(TariffLoadServiceTestMixin, TestCase):
             created, errors = self.tariff_rule_service.create_rule(dto, self.user)
         self.assertEqual(errors, [])
         assert created is not None
+        self._recompute_scenario(scenario)
 
         context = self.pandas_service._tariff_load.build_scenario_context(scenario)
         data_version = compute_scenario_data_version(
@@ -2036,6 +2044,7 @@ class ScenarioRuleWarmTests(TariffLoadServiceTestMixin, TestCase):
     def test_warm_status_after_rule_create(self) -> None:
         from calculations.domain.services.scenario_warm_status import get_warm_status
         from scenarios.domain.dto import CreateTariffRuleDTO
+        from scenarios.domain.services import ScenarioService
 
         self._setup_btd()
         self._build_mart()
@@ -2045,13 +2054,7 @@ class ScenarioRuleWarmTests(TariffLoadServiceTestMixin, TestCase):
             name="Warm status rule",
             base_percent="100",
             position=1,
-            conditions=[
-                {
-                    "parameter": "wagon_kind",
-                    "operator": "include",
-                    "values": [str(self.route.wagon_kind_id)],
-                },
-            ],
+            conditions=[],
             year_values={"2026": "1.0500"},
         )
         with self.captureOnCommitCallbacks(execute=True):
@@ -2059,13 +2062,15 @@ class ScenarioRuleWarmTests(TariffLoadServiceTestMixin, TestCase):
         self.assertEqual(errors, [])
         assert created is not None
 
+        self.assertIsNone(get_warm_status(scenario_id=scenario.id))
+
+        self._recompute_scenario(scenario)
+
         status = get_warm_status(scenario_id=scenario.id)
         self.assertIsNotNone(status)
         assert status is not None
         self.assertTrue(status["kpi_ready"])
-        self.assertEqual(status["rule_id"], created.id)
-        self.assertTrue(status["mask_changed"])
-        self.assertGreaterEqual(status["matched_routes"], 1)
+        self.assertFalse(status["mask_changed"])
 
     def test_warm_status_skips_mask_phase_for_coef_only_update(self) -> None:
         from unittest.mock import patch
@@ -2104,6 +2109,10 @@ class ScenarioRuleWarmTests(TariffLoadServiceTestMixin, TestCase):
         self.assertEqual(errors, [])
         assert updated is not None
 
+        self.assertIsNone(get_warm_status(scenario_id=scenario.id))
+
+        self._recompute_scenario(scenario)
+
         status = get_warm_status(scenario_id=scenario.id)
         self.assertIsNotNone(status)
         assert status is not None
@@ -2126,6 +2135,7 @@ class ScenarioRuleWarmTests(TariffLoadServiceTestMixin, TestCase):
         )
         with self.captureOnCommitCallbacks(execute=True):
             self.tariff_rule_service.create_rule(dto, self.user)
+        self._recompute_scenario(scenario)
 
         _, _, meta = self.pandas_service.compute_pandas(
             scenario=scenario,
@@ -2168,7 +2178,7 @@ class ScenarioRuleWarmTests(TariffLoadServiceTestMixin, TestCase):
             conditions=conditions,
             n_routes=len(df),
         )
-        self.assertIsNotNone(cached)
+        self.assertIsNone(cached)
 
     def test_update_coef_triggers_kpi_warm_not_mask(self) -> None:
         from unittest.mock import patch
@@ -2202,6 +2212,7 @@ class ScenarioRuleWarmTests(TariffLoadServiceTestMixin, TestCase):
             created, errors = self.tariff_rule_service.create_rule(create_dto, self.user)
         self.assertEqual(errors, [])
         assert created is not None
+        self._recompute_scenario(scenario)
 
         context_before = self.pandas_service._tariff_load.build_scenario_context(scenario)
         version_before = compute_scenario_data_version(
@@ -2222,6 +2233,8 @@ class ScenarioRuleWarmTests(TariffLoadServiceTestMixin, TestCase):
         self.assertEqual(errors, [])
         assert updated is not None
         prewarm_mock.assert_not_called()
+
+        self._recompute_scenario(scenario)
 
         context_after = self.pandas_service._tariff_load.build_scenario_context(scenario)
         version_after = compute_scenario_data_version(
@@ -2265,6 +2278,7 @@ class ScenarioRuleWarmTests(TariffLoadServiceTestMixin, TestCase):
                 created, errors = self.tariff_rule_service.create_rule(dto, self.user)
         self.assertEqual(errors, [])
         assert created is not None
+        self._recompute_scenario(scenario)
 
         context = self.pandas_service._tariff_load.build_scenario_context(scenario)
         old_version = compute_scenario_data_version(
@@ -2285,9 +2299,13 @@ class ScenarioRuleWarmTests(TariffLoadServiceTestMixin, TestCase):
             )
         self.assertEqual(delete_errors, [])
         self.assertTrue(ok)
-        self.assertFalse(old_dir.is_dir())
+        self.assertTrue(old_dir.is_dir())
 
         scenario = Scenario.objects.select_related("route_set").get(pk=self.scenario.pk)
+        self._recompute_scenario(scenario)
+
+        self.assertFalse(old_dir.is_dir())
+
         context = self.pandas_service._tariff_load.build_scenario_context(scenario)
         new_version = compute_scenario_data_version(
             scenario=scenario,

@@ -26,28 +26,6 @@ def _schedule_scenario_compute_warm(*, scenario_id: int) -> None:
     schedule_scenario_compute_rebuild(scenario_id=scenario_id)
 
 
-def _compute_affecting_update(
-    scenario,
-    update_data: dict,
-    *,
-    route_set_changed: bool,
-) -> bool:
-    if route_set_changed:
-        return True
-    compute_fields = (
-        "start_year",
-        "end_year",
-        "consider_turnover_changes",
-        "consider_demand_elasticity",
-        "consider_enterprise_load",
-        "retention_coefficient_mode",
-    )
-    return any(
-        field in update_data and getattr(scenario, field) != update_data[field]
-        for field in compute_fields
-    )
-
-
 class ScenarioService:
     """Сервис для работы со сценариями."""
 
@@ -177,7 +155,6 @@ class ScenarioService:
         route_set, errors = self._get_route_set(dto.route_set_id)
         if errors:
             return None, errors
-        route_set_changed = route_set is not None and scenario.route_set_id != route_set.id
         if route_set is not None:
             update_data["route_set"] = route_set
 
@@ -196,13 +173,6 @@ class ScenarioService:
         updated_scenario = self.repository.update(scenario_id, update_data)
         if not updated_scenario:
             return None, ["Ошибка при обновлении сценария"]
-
-        if _compute_affecting_update(
-            scenario,
-            update_data,
-            route_set_changed=route_set_changed,
-        ):
-            _schedule_scenario_compute_warm(scenario_id=scenario_id)
 
         if dto.price_change_settings is not None:
             price_errors = self.price_change_service.save_settings(
@@ -273,4 +243,17 @@ class ScenarioService:
 
         user.active_scenario_id = scenario_id
         user.save(update_fields=["active_scenario"])
+        return True, []
+
+    def recompute_scenario(
+        self, scenario_id: int, user: User
+    ) -> tuple[bool, list[str]]:
+        scenario, errors = self._access.require_scenario_write(scenario_id, user)
+        if errors:
+            return False, errors
+
+        if not scenario.route_set_id:
+            return False, ["У сценария не выбран набор маршрутов"]
+
+        _schedule_scenario_compute_warm(scenario_id=scenario_id)
         return True, []

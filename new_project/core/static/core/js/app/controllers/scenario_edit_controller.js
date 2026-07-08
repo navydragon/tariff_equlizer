@@ -17,11 +17,14 @@ import { renderErrors } from "../lib/errors.js";
       "startYear",
       "endYear",
       "routeSetSelect",
+      "rebuildStatus",
+      "recomputeBtn",
     ];
 
     static values = {
       scenarioId: Number,
       updateUrl: String,
+      recomputeUrl: String,
       routeSetListUrl: String,
       routeSetsPreloaded: Boolean,
       tabs: Array,
@@ -31,6 +34,17 @@ import { renderErrors } from "../lib/errors.js";
       this.initTabs();
       if (!this.routeSetsPreloadedValue) {
         this.loadRouteSets();
+      }
+    }
+
+    disconnect() {
+      if (this.onShownTab) {
+        this.element
+          .querySelectorAll('[data-bs-toggle="tab"]')
+          .forEach((link) => link.removeEventListener("shown.bs.tab", this.onShownTab));
+      }
+      if (this.onPopState) {
+        window.removeEventListener("popstate", this.onPopState);
       }
     }
 
@@ -62,17 +76,6 @@ import { renderErrors } from "../lib/errors.js";
         this.activateTab(tab);
       };
       window.addEventListener("popstate", this.onPopState);
-    }
-
-    disconnect() {
-      if (this.onShownTab) {
-        this.element
-          .querySelectorAll('[data-bs-toggle="tab"]')
-          .forEach((link) => link.removeEventListener("shown.bs.tab", this.onShownTab));
-      }
-      if (this.onPopState) {
-        window.removeEventListener("popstate", this.onPopState);
-      }
     }
 
     getTabFromHash() {
@@ -231,25 +234,92 @@ import { renderErrors } from "../lib/errors.js";
       this.showToast("success", "Сценарий успешно обновлен");
     }
 
+    async recompute() {
+      if (!this.hasRecomputeUrlValue) return;
+
+      this._setRecomputeBusy(true);
+
+      const { data } = await fetchJson(this.recomputeUrlValue, {
+        method: "POST",
+        body: {},
+      });
+
+      if (!data || !data.success) {
+        const errs = (data && (data.errors || (data.error ? [data.error] : null))) || [
+          "Не удалось запустить пересчёт",
+        ];
+        this._showRebuildStatus(errs.join(", "), "danger");
+        this._setRecomputeBusy(false);
+        return;
+      }
+
+      if (!data.rebuild?.started) {
+        this._hideRebuildStatus();
+        this._setRecomputeBusy(false);
+        this.showToast("error", "Пересчёт не был запущен");
+        return;
+      }
+
+      this._notifyScenarioRecalculated();
+      this._requestCloseModal();
+    }
+
+    _setRecomputeBusy(isBusy) {
+      if (this.hasRecomputeBtnTarget) {
+        this.recomputeBtnTarget.disabled = isBusy;
+      }
+    }
+
+    _hideRebuildStatus() {
+      if (!this.hasRebuildStatusTarget) return;
+      this.rebuildStatusTarget.classList.add("d-none");
+      this.rebuildStatusTarget.innerHTML = "";
+    }
+
+    _showRebuildStatus(message, variant = "info") {
+      if (!this.hasRebuildStatusTarget) return;
+      const alertClass =
+        variant === "success"
+          ? "alert-success"
+          : variant === "danger"
+            ? "alert-danger"
+            : "alert-info";
+      this.rebuildStatusTarget.classList.remove("d-none");
+      this.rebuildStatusTarget.innerHTML = `
+        <div class="alert ${alertClass} py-2 px-3 mb-0" role="status">
+          ${variant === "danger" ? "" : '<span class="spinner-border spinner-border-sm text-primary me-2" role="status"></span>'}
+          ${escapeHtml(message)}
+        </div>
+      `;
+    }
+
+    _notifyScenarioRecalculated() {
+      if (!this.hasScenarioIdValue) return;
+      const detail = { scenarioId: this.scenarioIdValue };
+      document.dispatchEvent(
+        new CustomEvent("scenario-recalculated", { detail }),
+      );
+      if (window.parent !== window) {
+        window.parent.postMessage(
+          { type: "scenario-recalculated", scenarioId: this.scenarioIdValue },
+          window.location.origin,
+        );
+      }
+    }
+
+    _requestCloseModal() {
+      if (window.parent !== window) {
+        window.parent.postMessage(
+          { type: "close-scenario-edit-modal" },
+          window.location.origin,
+        );
+      }
+    }
+
     showToast(type, message) {
       let toastElement;
       if (type === "success") {
         toastElement = document.getElementById("toastSuccess");
-        const timeElement = document.getElementById("toastSuccessTime");
-        if (timeElement) {
-          const now = new Date();
-          const dateStr = now.toLocaleDateString("ru-RU", {
-            day: "2-digit",
-            month: "2-digit",
-            year: "numeric",
-          });
-          const timeStr = now.toLocaleTimeString("ru-RU", {
-            hour: "2-digit",
-            minute: "2-digit",
-            second: "2-digit",
-          });
-          timeElement.textContent = dateStr + " " + timeStr;
-        }
       } else {
         toastElement = document.getElementById("toastError");
         const toastBody = document.getElementById("toastErrorBody");
@@ -268,4 +338,3 @@ import { renderErrors } from "../lib/errors.js";
 
   application.register("scenario-edit", ScenarioEditController);
 })();
-
