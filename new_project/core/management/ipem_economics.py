@@ -74,7 +74,11 @@ EXPORT_CSV_COLUMNS: tuple[str, ...] = (
     "rzd_match_count",
 )
 
-IPEM_COAL_2026_SHEET = "Уголь_эластика"
+IPEM_COAL_2026_ROUTE_SHEETS: tuple[str, ...] = (
+    "Уголь_эластика_экспорт",
+    "Уголь_эластика_внутр",
+)
+IPEM_COAL_2026_XLSX_NAME = "Уголь_эластика_2026_5.xlsx"
 IPEM_COAL_2026_HEADER_ROW = 2
 IPEM_COAL_CARGO_GROUP_CODE = 1
 
@@ -116,6 +120,15 @@ IPEM_COAL_2026_COLUMN_BY_ROUTE_FIELD: dict[str, str] = {
     "production_cost_per_ton": "Себестоимость добычи/производства, руб. т.",
     "total_cost_per_ton": "Общие расходы, руб. за тонну",
     "market_price_per_ton": "Стоимость 1 тонны на рынке, руб./т.",
+}
+
+IPEM_COAL_2026_COLUMN_ALIASES: dict[str, tuple[str, ...]] = {
+    "rzd_cost_total_per_ton": (
+        (
+            "Расходы по оплате услуг ОАО 'РЖД', руб. за тонну общая стоимость "
+            "(тарифные условия 2026 года)"
+        ),
+    ),
 }
 
 MODEL_ROUTE_LINK_KEY_FIELDS: tuple[str, ...] = (
@@ -304,12 +317,15 @@ def parse_decimal_cell(raw: str) -> Optional[Decimal]:
 
 
 def parse_enterprise_load_coefficient(row: dict[str, str]) -> Optional[Decimal]:
-    raw = (
-        row.get("Коэффициент загрузки предприятия")
-        or row.get("Unnamed: 45")
-        or ""
-    )
-    return parse_decimal_cell(raw)
+    for key in (
+        "Коэффициент загрузки предприятия",
+        "Unnamed: 46",
+        "Unnamed: 45",
+    ):
+        raw = row.get(key) or ""
+        if raw:
+            return parse_decimal_cell(raw)
+    return None
 
 
 def parse_ipem_economics_row(row: dict[str, str]) -> dict[str, Optional[Decimal]]:
@@ -468,17 +484,18 @@ def resolve_message_type(
 def load_ipem_coal_2026_xlsx(path: Path) -> list[dict[str, str]]:
     import pandas as pd
 
-    df = pd.read_excel(
-        path,
-        sheet_name=IPEM_COAL_2026_SHEET,
-        header=IPEM_COAL_2026_HEADER_ROW,
-    )
     rows: list[dict[str, str]] = []
-    for _, series in df.iterrows():
-        row = {str(col): _ipem_cell_str(series[col]) for col in df.columns}
-        if not any(row.values()):
-            continue
-        rows.append(row)
+    for sheet_name in IPEM_COAL_2026_ROUTE_SHEETS:
+        df = pd.read_excel(
+            path,
+            sheet_name=sheet_name,
+            header=IPEM_COAL_2026_HEADER_ROW,
+        )
+        for _, series in df.iterrows():
+            row = {str(col): _ipem_cell_str(series[col]) for col in df.columns}
+            if not any(row.values()):
+                continue
+            rows.append(row)
     return rows
 
 
@@ -627,6 +644,11 @@ def parse_ipem_coal_2026_economics_row(row: dict[str, str]) -> dict[str, Optiona
             raw = row.get(ipem_column.strip())
         if raw is None and route_field == "transport_total_cost_per_ton":
             raw = row.get("Общие транспортные расходы, руб. за тонну")
+        if raw is None:
+            for alias in IPEM_COAL_2026_COLUMN_ALIASES.get(route_field, ()):
+                raw = row.get(alias)
+                if raw is not None:
+                    break
         economics[route_field] = parse_decimal_cell(raw or "")
     for route_field in IPEM_COAL_ECONOMICS_DEFAULT_ZERO_FIELDS:
         if economics[route_field] is None:

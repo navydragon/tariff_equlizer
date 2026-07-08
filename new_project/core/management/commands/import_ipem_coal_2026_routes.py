@@ -17,7 +17,7 @@ from scenarios.models import Scenario
 
 class Command(BaseCommand):
     help = (
-        "Импорт model-маршрутов из Уголь_эластика_2026.xlsx в RouteSet "
+        "Импорт model-маршрутов из Уголь_эластика_2026_5.xlsx в RouteSet "
         "и связка operational-маршрутов РЖД через model_route_id. "
         "С --scenario-id также загружает правила эластичности (лист Уголь_коэфф)."
     )
@@ -26,7 +26,7 @@ class Command(BaseCommand):
         parser.add_argument(
             "--file",
             dest="file_path",
-            default="../data/ipem/Уголь_эластика_2026.xlsx",
+            default="../data/ipem/Уголь_эластика_2026_5.xlsx",
             help="Путь к XLSX IPEM",
         )
         parser.add_argument(

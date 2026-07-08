@@ -1,3 +1,6 @@
+from pathlib import Path
+
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand, CommandError
 
@@ -38,8 +41,20 @@ class Command(BaseCommand):
             action="store_true",
             help="Только создать/обновить набор и правило, не привязывать к сценарию.",
         )
+        parser.add_argument(
+            "--file",
+            dest="file_path",
+            default="../data/ipem/Уголь_эластика_2026_5.xlsx",
+            help="Путь к XLSX IPEM",
+        )
 
     def handle(self, *args, **options) -> None:
+        xlsx_path = Path(options["file_path"])
+        if not xlsx_path.is_absolute():
+            xlsx_path = Path(settings.BASE_DIR) / xlsx_path
+        if not xlsx_path.exists():
+            raise CommandError(f"Файл не найден: {xlsx_path}")
+
         scenario = self._resolve_scenario(options)
         author = scenario.author if scenario is not None else self._resolve_author(options)
         attach = scenario is not None and not options.get("no_attach")
@@ -53,6 +68,7 @@ class Command(BaseCommand):
             scenario,
             author=author,
             attach=attach,
+            xlsx_path=xlsx_path,
         )
 
         self.stdout.write(

@@ -2031,7 +2031,7 @@ class IpemCoalImportBundleTests(TestCase):
             Path(__file__).resolve().parents[2]
             / "data"
             / "ipem"
-            / "Уголь_эластика_2026.xlsx"
+            / "Уголь_эластика_2026_5.xlsx"
         )
         if not xlsx_path.exists():
             self.skipTest(f"Файл IPEM не найден: {xlsx_path}")
@@ -2068,7 +2068,7 @@ class IpemCoalImportBundleTests(TestCase):
             Path(__file__).resolve().parents[2]
             / "data"
             / "ipem"
-            / "Уголь_эластика_2026.xlsx"
+            / "Уголь_эластика_2026_5.xlsx"
         )
         if not xlsx_path.exists():
             self.skipTest(f"Файл IPEM не найден: {xlsx_path}")

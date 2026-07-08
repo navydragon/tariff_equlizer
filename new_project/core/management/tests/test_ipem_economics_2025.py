@@ -193,7 +193,7 @@ class IpemCoal2026OverlapTests(TestCase):
         self.route_set = RouteSet.objects.create(code="RZD_2026_COAL", name="RZD coal test")
         cargo_group = CargoGroup.objects.create(name="Уголь", code=1, position=1)
         self.cargo = Cargo.objects.create(
-            code="016111",
+            code="16111",
             name="УГОЛЬ Г",
             cargo_group=cargo_group,
         )
@@ -218,7 +218,10 @@ class IpemCoal2026OverlapTests(TestCase):
             railroad=railroad,
         )
         self.wagon_kind = WagonKind.objects.create(code="WK_PV", name="Полувагоны")
-        self.shipment_type = ShipmentType.objects.create(code="ST_T", name="повагонная")
+        self.shipment_type = ShipmentType.objects.create(
+            code="ST_GV",
+            name="группа вагонов",
+        )
         self.message_type = MessageType.objects.create(code="MT_EXP", name="Экспорт")
 
         for idx in (1, 2, 3):
@@ -274,7 +277,7 @@ class IpemCoal2026OverlapTests(TestCase):
             Path(__file__).resolve().parents[4]
             / "data"
             / "ipem"
-            / "Уголь_эластика_2026.xlsx"
+            / "Уголь_эластика_2026_5.xlsx"
         )
         if not xlsx_path.exists():
             self.skipTest(f"Файл IPEM не найден: {xlsx_path}")
@@ -288,6 +291,6 @@ class IpemCoal2026OverlapTests(TestCase):
         )
         self.assertIsNotNone(chegdomyn_row)
         self.assertEqual(chegdomyn_row.resolve_status, "ok", chegdomyn_row)
-        self.assertEqual(chegdomyn_row.cargo_code, "016111")
+        self.assertEqual(chegdomyn_row.cargo_code, "16111")
         self.assertEqual(chegdomyn_row.rzd_match_count, 3)
         self.assertEqual(chegdomyn_row.rzd_match_count_broad, 3)

@@ -1,4 +1,4 @@
-"""Проверка соответствия строк Уголь_эластика_2026.xlsx маршрутам RouteSet RZD_2026."""
+"""Проверка соответствия строк Уголь_эластика_2026_5.xlsx маршрутам RouteSet RZD_2026."""
 from __future__ import annotations
 
 import argparse
@@ -19,13 +19,13 @@ from core.management.ipem_economics import (  # noqa: E402
 )
 from core.models import Route, RouteSet  # noqa: E402
 
-DEFAULT_FILE = BASE_DIR.parent / "data" / "ipem" / "Уголь_эластика_2026.xlsx"
+DEFAULT_FILE = BASE_DIR.parent / "data" / "ipem" / "Уголь_эластика_2026_5.xlsx"
 DEFAULT_OUTPUT = BASE_DIR / "scripts" / "ipem_coal_2026_rzd_overlap.csv"
 
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Сопоставление строк IPEM (Уголь_эластика_2026) с маршрутами RZD_2026",
+        description="Сопоставление строк IPEM (Уголь_эластика_2026_5) с маршрутами RZD_2026",
     )
     parser.add_argument(
         "--file",
@@ -88,7 +88,7 @@ def main() -> None:
     zero_strict = [r for r in overlap_rows if r.rzd_match_count == 0]
     counts = [r.rzd_match_count for r in overlap_rows if r.rzd_match_count > 0]
 
-    print("=== IPEM Уголь_эластика_2026 vs RZD_2026 ===")
+    print("=== IPEM Уголь_эластика_2026_5 vs RZD_2026 ===")
     print(f"Маршрутов в {args.route_set_code}: {rzd_total:,}")
     print(f"Строк в IPEM: {total}")
     print()

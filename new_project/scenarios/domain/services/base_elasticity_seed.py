@@ -63,7 +63,7 @@ def _load_coal_workbook_points(
     except ImportError as exc:
         raise RuntimeError("openpyxl is required to seed coal elasticity") from exc
 
-    workbook_path = xlsx_path or (_repo_root() / "data" / "ipem" / "Уголь_эластика_2026.xlsx")
+    workbook_path = xlsx_path or (_repo_root() / "data" / "ipem" / "Уголь_эластика_2026_5.xlsx")
     if not workbook_path.exists():
         return [], []
 

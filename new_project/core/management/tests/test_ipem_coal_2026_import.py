@@ -9,6 +9,7 @@ from core.management.ipem_economics import (
     build_model_route_from_resolved_row,
     clear_ipem_model_routes,
     link_operational_routes_to_models,
+    load_ipem_coal_2026_xlsx,
     parse_cargo_izpod_fields_from_ipem_row,
     sync_model_routes_cargo_izpod_from_operational,
 )
@@ -24,6 +25,15 @@ from core.models import (
     Station,
     WagonKind,
 )
+
+
+def _ipem_xlsx_path() -> Path:
+    return (
+        Path(__file__).resolve().parents[4]
+        / "data"
+        / "ipem"
+        / "Уголь_эластика_2026_5.xlsx"
+    )
 
 
 class IpemCoal2026ImportTests(TestCase):
@@ -181,6 +191,30 @@ class IpemCoal2026ImportTests(TestCase):
         self.assertEqual(economics["excise_or_duty_per_ton"], Decimal("0"))
         self.assertEqual(economics["operators_cost_per_ton"], Decimal("100"))
 
+    def test_parse_economics_reads_export_rzd_total_column_alias(self) -> None:
+        from core.management.ipem_economics import parse_ipem_coal_2026_economics_row
+
+        economics = parse_ipem_coal_2026_economics_row(
+            {
+                (
+                    "Расходы по оплате услуг ОАО 'РЖД', руб. за тонну общая стоимость "
+                    "(тарифные условия 2026 года)"
+                ): "1215.07",
+            },
+        )
+        self.assertEqual(economics["rzd_cost_total_per_ton"], Decimal("1215.07"))
+
+    def test_load_ipem_coal_2026_xlsx_reads_both_route_sheets(self) -> None:
+        xlsx_path = _ipem_xlsx_path()
+        if not xlsx_path.exists():
+            self.skipTest(f"Файл IPEM не найден: {xlsx_path}")
+
+        rows = load_ipem_coal_2026_xlsx(xlsx_path)
+        self.assertEqual(len(rows), 48)
+        message_types = {row.get("Вид перевозки", "") for row in rows}
+        self.assertIn("Экспорт", message_types)
+        self.assertIn("Внутр. перевозки", message_types)
+
     def test_sync_cargo_izpod_from_linked_operational(self) -> None:
         model_route = Route.objects.create(
             route_set=self.route_set,
@@ -227,6 +261,10 @@ class IpemCoal2026ImportTests(TestCase):
         self.assertEqual(
             parse_enterprise_load_coefficient({"Unnamed: 45": "0.875"}),
             Decimal("0.875"),
+        )
+        self.assertEqual(
+            parse_enterprise_load_coefficient({"Unnamed: 46": "1.0"}),
+            Decimal("1.0"),
         )
         self.assertEqual(
             parse_enterprise_load_coefficient(
@@ -316,12 +354,7 @@ class IpemCoal2026ImportTests(TestCase):
         self.assertEqual(operational.model_route_id, other_model.pk)
 
     def test_import_command_dry_run(self) -> None:
-        xlsx_path = (
-            Path(__file__).resolve().parents[4]
-            / "data"
-            / "ipem"
-            / "Уголь_эластика_2026.xlsx"
-        )
+        xlsx_path = _ipem_xlsx_path()
         if not xlsx_path.exists():
             self.skipTest(f"Файл IPEM не найден: {xlsx_path}")
 
