@@ -8,11 +8,12 @@ from pathlib import Path
 from django.contrib.auth import get_user_model
 from django.db import transaction
 
-from core.models import MessageType
+from core.models import CargoGroup, MessageType
 from scenarios.models import ElasticityRule, ElasticityRulePoint, ElasticitySet, Scenario
 
 User = get_user_model()
 
+COAL_CARGO_GROUP_CODE = 1
 ELASTICITY_SET_NAME = "2026"
 EXPORT_RULE_NAME = "Уголь экспорт"
 INTERNAL_RULE_NAME = "Уголь внутренние"
@@ -90,6 +91,10 @@ def _find_message_type_by_keyword(keyword: str) -> MessageType | None:
     )
 
 
+def _resolve_coal_cargo_group() -> CargoGroup | None:
+    return CargoGroup.objects.filter(code=COAL_CARGO_GROUP_CODE).first()
+
+
 def _replace_rule_points(
     rule: ElasticityRule,
     points: list[tuple[Decimal, Decimal]],
@@ -142,17 +147,20 @@ def seed_coal_elasticity_for_scenario(
     export_points, internal_points = _load_coal_workbook_points(xlsx_path)
     export_message_type = _find_message_type_by_keyword("экспорт")
     internal_message_type = _find_message_type_by_keyword("внутр")
+    coal_cargo_group = _resolve_coal_cargo_group()
 
     export_rule = ElasticityRule.objects.create(
         elasticity_set=elasticity_set,
         name=EXPORT_RULE_NAME,
         position=0,
+        cargo_group=coal_cargo_group,
         message_type=export_message_type,
     )
     internal_rule = ElasticityRule.objects.create(
         elasticity_set=elasticity_set,
         name=INTERNAL_RULE_NAME,
         position=1,
+        cargo_group=coal_cargo_group,
         message_type=internal_message_type,
     )
     export_count = _replace_rule_points(export_rule, export_points)

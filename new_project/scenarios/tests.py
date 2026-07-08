@@ -1832,9 +1832,11 @@ class ElasticityCoalSeedTests(TestCase):
             INTERNAL_RULE_NAME,
             seed_coal_elasticity_for_scenario,
         )
+        from core.models import CargoGroup
         from scenarios.models import ElasticityRule, ElasticityRulePoint, ElasticitySet, Scenario
 
         user = User.objects.create_user(login="seed_user", password="test_pass")
+        coal_group = CargoGroup.objects.create(name="Уголь", code=1, position=1)
         other_user = User.objects.create_user(login="other_user", password="test_pass")
         route_set = RouteSet.objects.create(code="RS_SEED", name="Seed RS")
         scenario = Scenario.objects.create(
@@ -1879,6 +1881,8 @@ class ElasticityCoalSeedTests(TestCase):
         self.assertEqual(len(rules), 2)
         self.assertEqual(rules[0].name, EXPORT_RULE_NAME)
         self.assertEqual(rules[1].name, INTERNAL_RULE_NAME)
+        self.assertEqual(rules[0].cargo_group_id, coal_group.pk)
+        self.assertEqual(rules[1].cargo_group_id, coal_group.pk)
         self.assertFalse(
             ElasticityRule.objects.filter(name="Старое правило").exists(),
         )
