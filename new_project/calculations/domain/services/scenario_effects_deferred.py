@@ -11,6 +11,7 @@ import numpy as np
 
 from calculations.domain.services.route_mart_store import (
     MartMeta,
+    filter_sidecar_ignore_own_axles,
     load_mart_meta,
     load_mart_sidecar,
     load_route_mart_parquet,
@@ -88,6 +89,7 @@ class DeferredFullComputeJob:
     elasticity_set_id: int | None = None
     retention_coefficient_mode: str = "combined"
     consider_enterprise_load: bool = True
+    ignore_own_axles_cargo: bool = False
     model_rows: list = None
 
     def __post_init__(self) -> None:
@@ -145,6 +147,12 @@ def _run_deferred_full_compute(job: DeferredFullComputeJob) -> None:
             )
             return
         mart_meta = job.mart_meta or load_mart_meta(parquet_path)
+        keep_mask: np.ndarray | None = None
+        if job.ignore_own_axles_cargo:
+            sidecar, keep_mask = filter_sidecar_ignore_own_axles(
+                sidecar,
+                mart_meta=mart_meta,
+            )
 
         scenario_stub = _elasticity_scenario_stub(job)
 
@@ -200,6 +208,9 @@ def _run_deferred_full_compute(job: DeferredFullComputeJob) -> None:
                 for column in dims_sidecar.column_names:
                     if column not in compact_df.columns:
                         compact_df[column] = dims_sidecar[column]
+
+        if keep_mask is not None and len(keep_mask) == len(compact_df):
+            compact_df = compact_df.loc[keep_mask].reset_index(drop=True)
 
         dimensions, dimension_labels, volume = prepare_compact_inputs(
             compact_df,

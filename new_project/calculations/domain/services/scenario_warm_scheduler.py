@@ -4,6 +4,7 @@ import sys
 import threading
 from typing import Literal
 
+from django.conf import settings
 from django.db import transaction
 
 from calculations.domain.services.scenario_warm_status import (
@@ -40,6 +41,8 @@ def schedule_debounced_scenario_warm(
     rule_id: int | None = None,
     mask_changed: bool = False,
 ) -> None:
+    if bool(getattr(settings, "DISABLE_AUTO_WARM", False)):
+        return
     kwargs = {
         "scenario_id": scenario_id,
         "change": change,

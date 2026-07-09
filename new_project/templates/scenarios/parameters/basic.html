@@ -166,6 +166,24 @@
           с учётом коэффициента загрузки предприятия на маршруте.
         </div>
       </div>
+
+      <div class="mb-3">
+        <label class="form-check">
+          <input
+            type="checkbox"
+            class="form-check-input"
+            id="editScenarioIgnoreOwnAxlesCargo"
+            name="ignore_own_axles_cargo"
+            {% if scenario.ignore_own_axles_cargo %}checked{% endif %}
+            data-action="change->scenario-edit#autosave"
+          />
+          <span class="form-check-label">Игнорировать грузы на своих осях</span>
+        </label>
+        <div class="form-text">
+          Если включить — в расчётах «Эффекта от решений» и «Куба эффектов» исключается группа
+          «Грузы на своих осях», чтобы ускорить полный проход по базе маршрутов.
+        </div>
+      </div>
       <div class="table-responsive">
         <table class="table table-vcenter">
           <thead>

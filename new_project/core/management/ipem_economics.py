@@ -514,7 +514,9 @@ def load_ipem_coal_2026_xlsx(path: Path) -> list[dict[str, str]]:
             header=IPEM_COAL_2026_HEADER_ROW,
         )
         for _, series in df.iterrows():
-            row = {str(col): _ipem_cell_str(series[col]) for col in df.columns}
+            # В IPEM иногда бывают хвостовые пробелы в заголовках колонок,
+            # из-за чего row.get("Категория отправки") / etc. не находит значения.
+            row = {str(col).strip(): _ipem_cell_str(series[col]) for col in df.columns}
             if not any(row.values()):
                 continue
             rows.append(row)
@@ -532,7 +534,8 @@ def load_ipem_metallurgy_2026_xlsx(path: Path) -> list[dict[str, str]]:
             header=IPEM_METALLURGY_2026_HEADER_ROW,
         )
         for _, series in df.iterrows():
-            row = {str(col): _ipem_cell_str(series[col]) for col in df.columns}
+            # См. load_ipem_coal_2026_xlsx: нормализуем заголовки.
+            row = {str(col).strip(): _ipem_cell_str(series[col]) for col in df.columns}
             if not any(row.values()):
                 continue
             rows.append(row)
@@ -970,6 +973,7 @@ def import_ipem_coal_2026_model_routes(
     route_set: RouteSet,
     *,
     dry_run: bool = False,
+    assign_elasticity_sources: bool = True,
     progress: Callable[[str], None] | None = None,
 ) -> IpemCoal2026ImportResult:
     result = IpemCoal2026ImportResult()
@@ -1036,18 +1040,19 @@ def import_ipem_coal_2026_model_routes(
         created,
     )
     sync_model_routes_cargo_izpod_from_operational(route_set, created)
-    from scenarios.domain.services.operational_elasticity import (
-        assign_operational_elasticity_sources,
-    )
+    if assign_elasticity_sources:
+        from scenarios.domain.services.operational_elasticity import (
+            assign_operational_elasticity_sources,
+        )
 
-    elasticity_stats = assign_operational_elasticity_sources(
-        route_set,
-        progress=progress,
-    )
-    result.elasticity_direct_model = elasticity_stats.direct_model
-    result.elasticity_holding_aggregate = elasticity_stats.holding_aggregate
-    result.elasticity_cargo_group_aggregate = elasticity_stats.cargo_group_aggregate
-    result.elasticity_skipped = elasticity_stats.skipped
+        elasticity_stats = assign_operational_elasticity_sources(
+            route_set,
+            progress=progress,
+        )
+        result.elasticity_direct_model = elasticity_stats.direct_model
+        result.elasticity_holding_aggregate = elasticity_stats.holding_aggregate
+        result.elasticity_cargo_group_aggregate = elasticity_stats.cargo_group_aggregate
+        result.elasticity_skipped = elasticity_stats.skipped
     return result
 
 
@@ -1056,6 +1061,7 @@ def import_ipem_metallurgy_2026_model_routes(
     route_set: RouteSet,
     *,
     dry_run: bool = False,
+    assign_elasticity_sources: bool = True,
     progress: Callable[[str], None] | None = None,
 ) -> IpemCoal2026ImportResult:
     """
@@ -1119,19 +1125,19 @@ def import_ipem_metallurgy_2026_model_routes(
     result.created_model_routes = len(created)
     result.linked_operational_routes = link_operational_routes_to_models(route_set, created)
     sync_model_routes_cargo_izpod_from_operational(route_set, created)
+    if assign_elasticity_sources:
+        from scenarios.domain.services.operational_elasticity import (
+            assign_operational_elasticity_sources,
+        )
 
-    from scenarios.domain.services.operational_elasticity import (
-        assign_operational_elasticity_sources,
-    )
-
-    elasticity_stats = assign_operational_elasticity_sources(
-        route_set,
-        progress=progress,
-    )
-    result.elasticity_direct_model = elasticity_stats.direct_model
-    result.elasticity_holding_aggregate = elasticity_stats.holding_aggregate
-    result.elasticity_cargo_group_aggregate = elasticity_stats.cargo_group_aggregate
-    result.elasticity_skipped = elasticity_stats.skipped
+        elasticity_stats = assign_operational_elasticity_sources(
+            route_set,
+            progress=progress,
+        )
+        result.elasticity_direct_model = elasticity_stats.direct_model
+        result.elasticity_holding_aggregate = elasticity_stats.holding_aggregate
+        result.elasticity_cargo_group_aggregate = elasticity_stats.cargo_group_aggregate
+        result.elasticity_skipped = elasticity_stats.skipped
     return result
 
 

@@ -77,6 +77,7 @@ python manage.py create_admin --login admin --email admin@example.com --password
 ```bash
 python manage.py import_ipem_elasticity_bundle --scenario-id 1 --route-set-code RZD_2026 --elasticity-file ../data/ipem/Металлургия_эластика.xlsx --file ../data/ipem/Уголь_эластика_2026_5.xlsx --file ../data/ipem/Металлургия_эластика.xlsx
 
+python manage.py refresh_deploy_caches --warm-scenarios --wait-scenarios
 python manage.py refresh_deploy_caches --warm-only --warm-scenarios --wait-scenarios
 ```
 

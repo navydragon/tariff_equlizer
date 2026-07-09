@@ -149,6 +149,8 @@ class ScenarioService:
             update_data["consider_demand_elasticity"] = dto.consider_demand_elasticity
         if dto.consider_enterprise_load is not None:
             update_data["consider_enterprise_load"] = dto.consider_enterprise_load
+        if dto.ignore_own_axles_cargo is not None:
+            update_data["ignore_own_axles_cargo"] = dto.ignore_own_axles_cargo
         if dto.retention_coefficient_mode is not None:
             update_data["retention_coefficient_mode"] = dto.retention_coefficient_mode
 

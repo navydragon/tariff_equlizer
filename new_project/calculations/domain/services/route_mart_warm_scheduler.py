@@ -4,6 +4,7 @@ import sys
 import threading
 from typing import Iterable
 
+from django.conf import settings
 from django.db import transaction
 
 from calculations.domain.services.route_effects_loader import (
@@ -75,6 +76,8 @@ def warm_route_mart(*, route_set_id: int) -> None:
 
 def schedule_debounced_route_mart_warm(*, route_set_id: int) -> None:
     if route_set_id <= 0:
+        return
+    if bool(getattr(settings, "DISABLE_AUTO_WARM", False)):
         return
 
     if _RUNNING_TESTS:

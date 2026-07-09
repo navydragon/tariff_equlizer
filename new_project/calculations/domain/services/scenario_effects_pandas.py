@@ -42,6 +42,8 @@ from calculations.domain.services.route_mask_cache import mask_cache_dir
 from calculations.domain.services.route_mart_store import (
     MartMeta,
     MartSidecarView,
+    OWN_AXLES_CARGO_GROUP_NAME,
+    filter_sidecar_ignore_own_axles,
     load_mart_meta,
     load_mart_sidecar,
     resolve_mart_parquet_path,
@@ -178,6 +180,11 @@ class ScenarioEffectsPandasService:
                 include_charge=True,
                 include_volume=True,
             )
+            if getattr(scenario, "ignore_own_axles_cargo", False):
+                sidecar, _keep_mask = filter_sidecar_ignore_own_axles(
+                    sidecar,
+                    mart_meta=mart_meta,
+                )
             load_timings = dict(sidecar_timings)
             t_load = time.perf_counter()
 
@@ -196,6 +203,9 @@ class ScenarioEffectsPandasService:
             t_compute = time.perf_counter()
 
             filter_options = self._collect_filter_options(sidecar, mart_meta)
+            if getattr(scenario, "ignore_own_axles_cargo", False):
+                cargos = [x for x in (filter_options.get("cargo_groups") or []) if x != OWN_AXLES_CARGO_GROUP_NAME]
+                filter_options = {**filter_options, "cargo_groups": cargos or ["—"]}
             skipped_charge, skipped_volume = self._resolve_route_stats(
                 scenario,
                 mart_meta,
@@ -388,6 +398,7 @@ class ScenarioEffectsPandasService:
             elasticity_set_id=scenario.elasticity_set_id,
             retention_coefficient_mode=scenario.retention_coefficient_mode,
             consider_enterprise_load=bool(scenario.consider_enterprise_load),
+            ignore_own_axles_cargo=bool(getattr(scenario, "ignore_own_axles_cargo", False)),
             model_rows=model_rows,
         )
 
@@ -480,6 +491,11 @@ class ScenarioEffectsPandasService:
             include_charge=True,
             include_volume=True,
         )
+        if getattr(scenario, "ignore_own_axles_cargo", False):
+            mart_sidecar, _keep_mask = filter_sidecar_ignore_own_axles(
+                mart_sidecar,
+                mart_meta=mart_meta,
+            )
 
         global_totals, timings, arrays = self._compute_arrays(
             mart_sidecar,

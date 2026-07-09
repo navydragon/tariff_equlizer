@@ -168,6 +168,13 @@ import { renderErrors } from "../lib/errors.js";
       return checkbox ? !!checkbox.checked : false;
     }
 
+    collectIgnoreOwnAxlesCargo() {
+      const checkbox = this.element.querySelector(
+        "#editScenarioIgnoreOwnAxlesCargo",
+      );
+      return checkbox ? !!checkbox.checked : false;
+    }
+
     collectRetentionCoefficientMode() {
       const checked = this.element.querySelector(
         'input.btn-check[name="retention_coefficient_mode"]:checked',
@@ -307,6 +314,7 @@ import { renderErrors } from "../lib/errors.js";
         consider_turnover_changes: this.collectConsiderTurnoverChanges(),
         consider_demand_elasticity: this.collectConsiderDemandElasticity(),
         consider_enterprise_load: this.collectConsiderEnterpriseLoad(),
+        ignore_own_axles_cargo: this.collectIgnoreOwnAxlesCargo(),
         retention_coefficient_mode: this.collectRetentionCoefficientMode(),
       };
     }

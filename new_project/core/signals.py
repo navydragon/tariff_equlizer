@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from django.conf import settings
 from django.db import transaction
 from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
@@ -38,6 +39,8 @@ def route_mart_touch_routeset_on_save(
     instance: Route,
     **kwargs,
 ) -> None:  # noqa: ARG001
+    if bool(getattr(settings, "DISABLE_AUTO_WARM", False)):
+        return
     _touch_route_set(instance.route_set_id)
     transaction.on_commit(
         lambda route_set_id=instance.route_set_id: (
@@ -52,6 +55,8 @@ def route_mart_touch_routeset_on_delete(
     instance: Route,
     **kwargs,
 ) -> None:  # noqa: ARG001
+    if bool(getattr(settings, "DISABLE_AUTO_WARM", False)):
+        return
     _touch_route_set(instance.route_set_id)
     transaction.on_commit(
         lambda route_set_id=instance.route_set_id: (
@@ -61,6 +66,8 @@ def route_mart_touch_routeset_on_delete(
 
 
 def _bump_refs_on_commit() -> None:
+    if bool(getattr(settings, "DISABLE_AUTO_WARM", False)):
+        return
     transaction.on_commit(invalidate_route_mart_and_schedule_warm)
 
 
@@ -80,7 +87,11 @@ def _bump_refs_on_commit() -> None:
 @receiver(post_delete, sender=MessageType)
 @receiver(post_save, sender=Shipper)
 @receiver(post_delete, sender=Shipper)
-def route_mart_bump_refs_version(sender, instance, **kwargs) -> None:  # noqa: ANN001,ARG001
+def route_mart_bump_refs_version(  # noqa: ANN001,ARG001
+    sender,
+    instance,
+    **kwargs,
+) -> None:
     if sender is CargoGroup:
         clear_cargo_group_position_cache()
     _bump_refs_on_commit()

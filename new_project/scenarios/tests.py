@@ -725,6 +725,19 @@ class PriceChangeSettingServiceTests(TestCase):
         self.scenario.refresh_from_db()
         self.assertTrue(self.scenario.consider_demand_elasticity)
 
+    def test_update_scenario_saves_ignore_own_axles_cargo(self):
+        scenario_service = ScenarioService()
+        from scenarios.domain.dto import UpdateScenarioDTO
+
+        dto = UpdateScenarioDTO(ignore_own_axles_cargo=True)
+        updated, errors = scenario_service.update_scenario(self.scenario.id, dto, self.user)
+        self.assertFalse(errors)
+        self.assertIsNotNone(updated)
+        self.assertTrue(updated.ignore_own_axles_cargo)
+
+        self.scenario.refresh_from_db()
+        self.assertTrue(self.scenario.ignore_own_axles_cargo)
+
     def test_copy_scenario_copies_consider_turnover_changes(self):
         self.scenario.consider_turnover_changes = True
         self.scenario.save(update_fields=["consider_turnover_changes"])
@@ -748,6 +761,18 @@ class PriceChangeSettingServiceTests(TestCase):
         )
         self.assertIsNotNone(copied)
         self.assertFalse(copied.consider_enterprise_load)
+
+    def test_copy_scenario_copies_ignore_own_axles_cargo(self):
+        self.scenario.ignore_own_axles_cargo = True
+        self.scenario.save(update_fields=["ignore_own_axles_cargo"])
+
+        copied = self.scenario_repository.copy_scenario(
+            source_id=self.scenario.id,
+            new_name="Копия своих осей",
+            new_author=self.user,
+        )
+        self.assertIsNotNone(copied)
+        self.assertTrue(copied.ignore_own_axles_cargo)
 
 
 class ScenarioCopyTests(TestCase):

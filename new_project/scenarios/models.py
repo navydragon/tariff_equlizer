@@ -76,6 +76,10 @@ class Scenario(models.Model):
         "Учитывать загрузку предприятия",
         default=True,
     )
+    ignore_own_axles_cargo = models.BooleanField(
+        "Игнорировать грузы на своих осях",
+        default=False,
+    )
     retention_coefficient_mode = models.CharField(
         "Прогноз коэффициента сохранения грузовой базы",
         max_length=32,

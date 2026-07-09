@@ -153,6 +153,7 @@ def compute_scenario_data_version(
         route_set.updated_at.isoformat() if route_set.updated_at else "",
         f"consider_turnover_changes:{bool(getattr(scenario, 'consider_turnover_changes', False))}",
         f"consider_demand_elasticity:{bool(getattr(scenario, 'consider_demand_elasticity', False))}",
+        f"ignore_own_axles_cargo:{bool(getattr(scenario, 'ignore_own_axles_cargo', False))}",
         f"elasticity_set:{getattr(scenario, 'elasticity_set_id', None)}",
         f"retention_mode:{getattr(scenario, 'retention_coefficient_mode', '')}",
     ]

@@ -4205,10 +4205,12 @@ class TariffRulesCacheAuditTests(TariffLoadServiceTestMixin, TestCase):
         fetch_routes_dataframe_cached_timed(self.route_set.id)
 
         self.scenario.consider_demand_elasticity = True
+        self.scenario.ignore_own_axles_cargo = True
         self.scenario.retention_coefficient_mode = "relative_to_base"
         self.scenario.save(
             update_fields=[
                 "consider_demand_elasticity",
+                "ignore_own_axles_cargo",
                 "retention_coefficient_mode",
             ],
         )
@@ -4279,6 +4281,7 @@ class TariffRulesCacheAuditTests(TariffLoadServiceTestMixin, TestCase):
         schedule_mock.assert_called_once()
         job = schedule_mock.call_args.args[0]
         self.assertTrue(job.consider_demand_elasticity)
+        self.assertTrue(job.ignore_own_axles_cargo)
         self.assertEqual(job.retention_coefficient_mode, "relative_to_base")
         self.assertTrue(job.cache_key)
 
@@ -4427,6 +4430,43 @@ class TurnoverEffectsComputeTests(TestCase):
         self.assertEqual(totals.baseline_total, Decimal("100"))
         self.assertEqual(totals.charge_by_year[2026], Decimal("120"))
 
+
+class OwnAxlesFilterTests(TestCase):
+    def test_filter_sidecar_ignore_own_axles_slices_1d_and_2d(self) -> None:
+        import numpy as np
+
+        from calculations.domain.services.route_mart_store import (
+            MartSidecarView,
+            filter_sidecar_ignore_own_axles,
+        )
+
+        sidecar = MartSidecarView(
+            column_arrays={
+                "freight_charge_rub": np.array([10.0, 20.0, 30.0], dtype=np.float32),
+                "cargo_group_id": np.array([1, 11, 2], dtype=np.int16),
+                "turnover_coef": np.array(
+                    [
+                        [1.0, 1.1],
+                        [2.0, 2.2],
+                        [3.0, 3.3],
+                    ],
+                    dtype=np.float32,
+                ),
+            },
+        )
+        filtered, keep = filter_sidecar_ignore_own_axles(sidecar, mart_meta=None)
+
+        self.assertEqual(len(keep), 3)
+        self.assertEqual(len(filtered), 2)
+        np.testing.assert_array_equal(
+            filtered["cargo_group_id"],
+            np.array([1, 2], dtype=np.int16),
+        )
+        np.testing.assert_allclose(
+            filtered["turnover_coef"],
+            np.array([[1.0, 1.1], [3.0, 3.3]], dtype=np.float32),
+        )
+
     def test_compute_scenario_data_version_depends_on_turnover_flag(self) -> None:
         from calculations.domain.services.scenario_effects_cache import (
             compute_scenario_data_version,
@@ -4449,6 +4489,35 @@ class TurnoverEffectsComputeTests(TestCase):
         )
         scenario.consider_turnover_changes = True
         scenario.save(update_fields=["consider_turnover_changes"])
+        version_on = compute_scenario_data_version(
+            scenario=scenario,
+            base_coef_by_year=base_coef,
+            rules=[],
+        )
+        self.assertNotEqual(version_off, version_on)
+
+    def test_compute_scenario_data_version_depends_on_ignore_own_axles_flag(self) -> None:
+        from calculations.domain.services.scenario_effects_cache import (
+            compute_scenario_data_version,
+        )
+
+        user = get_user_model().objects.create_user(login="own-axles-version", password="pass")
+        scenario = Scenario.objects.create(
+            name="OAV",
+            start_year=2025,
+            end_year=2026,
+            route_set=self.route_set,
+            author=user,
+            ignore_own_axles_cargo=False,
+        )
+        base_coef = {2025: Decimal("1"), 2026: Decimal("1")}
+        version_off = compute_scenario_data_version(
+            scenario=scenario,
+            base_coef_by_year=base_coef,
+            rules=[],
+        )
+        scenario.ignore_own_axles_cargo = True
+        scenario.save(update_fields=["ignore_own_axles_cargo"])
         version_on = compute_scenario_data_version(
             scenario=scenario,
             base_coef_by_year=base_coef,

@@ -265,6 +265,63 @@ class MartSidecarView:
         return pd.DataFrame(safe)
 
 
+OWN_AXLES_CARGO_GROUP_CODE = 11
+OWN_AXLES_CARGO_GROUP_NAME = "Грузы на своих осях"
+
+
+def filter_sidecar_ignore_own_axles(
+    sidecar: MartSidecarView,
+    *,
+    mart_meta: MartMeta | None,
+) -> tuple[MartSidecarView, np.ndarray]:
+    """
+    Возвращает отфильтрованный sidecar и boolean-маску строк, которые остались.
+
+    Маска нужна, чтобы применить тот же срез к compact DataFrame при deferred compute,
+    т.к. arrays и volume/dims должны иметь одинаковую длину.
+    """
+    if sidecar.empty:
+        return sidecar, np.zeros(0, dtype=bool)
+
+    keep: np.ndarray | None = None
+
+    cargo_group_id = sidecar.get("cargo_group_id")
+    if cargo_group_id is not None:
+        # cargo_group_id может быть float из legacy npy; сравнение корректно отфильтрует 11.
+        keep = np.asarray(cargo_group_id) != OWN_AXLES_CARGO_GROUP_CODE
+
+    if keep is None:
+        dim = sidecar.get("dim_cargo_group")
+        labels = (mart_meta.dimension_labels.get("cargo_group") if mart_meta else None)
+        if dim is not None and labels:
+            excluded = {
+                idx
+                for idx, label in enumerate(labels)
+                if str(label).strip() == OWN_AXLES_CARGO_GROUP_NAME
+            }
+            if excluded:
+                dim_arr = np.asarray(dim)
+                keep = ~np.isin(dim_arr, list(excluded))
+
+    if keep is None:
+        keep = np.ones(len(sidecar), dtype=bool)
+
+    if keep.all():
+        return sidecar, keep
+
+    filtered: dict[str, np.ndarray] = {}
+    for key, arr in sidecar.column_arrays.items():
+        nd = getattr(arr, "ndim", 1)
+        if nd == 1:
+            filtered[key] = arr[keep]
+        elif nd == 2:
+            filtered[key] = arr[keep, :]
+        else:
+            # Не ожидаем >2D в sidecar; безопасно оставляем как есть.
+            filtered[key] = arr
+    return MartSidecarView(column_arrays=filtered), keep
+
+
 def mart_meta_path(parquet_path: Path) -> Path:
     return parquet_path.with_suffix(parquet_path.suffix + META_SUFFIX)
 

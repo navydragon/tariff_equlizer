@@ -9,6 +9,8 @@ from calculations.domain.services.route_effects_loader import fetch_route_set_st
 from calculations.domain.services.route_mask_cache import mask_cache_dir
 from calculations.domain.services.route_mart_store import (
     ensure_compute_sidecars,
+    OWN_AXLES_CARGO_GROUP_NAME,
+    filter_sidecar_ignore_own_axles,
     load_mart_meta,
     load_mart_sidecar,
     mart_meta_path,
@@ -148,6 +150,8 @@ def warm_scenario_after_rule_change(
             return
 
         mart_meta = load_mart_meta(parquet_path)
+        if getattr(scenario, "ignore_own_axles_cargo", False):
+            df, _keep_mask = filter_sidecar_ignore_own_axles(df, mart_meta=mart_meta)
         t_kpi = time.perf_counter()
         global_totals, early_group_snapshot, compute_timings = compute_kpi_totals(
             df,
@@ -167,6 +171,9 @@ def warm_scenario_after_rule_change(
             df,
             mart_meta,
         )
+        if getattr(scenario, "ignore_own_axles_cargo", False):
+            cargos = [x for x in (filter_options.get("cargo_groups") or []) if x != OWN_AXLES_CARGO_GROUP_NAME]
+            filter_options = {**filter_options, "cargo_groups": cargos or ["—"]}
         if mart_meta is not None:
             skipped_charge = mart_meta.skipped_charge
             skipped_volume = mart_meta.routes_without_volume

@@ -27,6 +27,7 @@ class ScenarioDTO:
     consider_turnover_changes: bool = False
     consider_demand_elasticity: bool = False
     consider_enterprise_load: bool = True
+    ignore_own_axles_cargo: bool = False
     retention_coefficient_mode: str = "combined"
 
     @classmethod
@@ -66,6 +67,9 @@ class ScenarioDTO:
             consider_turnover_changes=bool(scenario.consider_turnover_changes),
             consider_demand_elasticity=bool(scenario.consider_demand_elasticity),
             consider_enterprise_load=bool(scenario.consider_enterprise_load),
+            ignore_own_axles_cargo=bool(
+                getattr(scenario, "ignore_own_axles_cargo", False),
+            ),
             retention_coefficient_mode=scenario.retention_coefficient_mode,
         )
 
@@ -109,6 +113,7 @@ class UpdateScenarioDTO:
     consider_turnover_changes: Optional[bool] = None
     consider_demand_elasticity: Optional[bool] = None
     consider_enterprise_load: Optional[bool] = None
+    ignore_own_axles_cargo: Optional[bool] = None
     retention_coefficient_mode: Optional[str] = None
 
     def validate(self) -> list[str]:
@@ -156,6 +161,13 @@ class UpdateScenarioDTO:
             bool,
         ):
             errors.append("Некорректное значение флага учета загрузки предприятия")
+        if self.ignore_own_axles_cargo is not None and not isinstance(
+            self.ignore_own_axles_cargo,
+            bool,
+        ):
+            errors.append(
+                "Некорректное значение флага игнорирования грузов на своих осях",
+            )
         if self.retention_coefficient_mode is not None:
             from scenarios.models import Scenario
 
@@ -192,6 +204,7 @@ class ScenarioListDTO:
     consider_turnover_changes: bool = False
     consider_demand_elasticity: bool = False
     consider_enterprise_load: bool = True
+    ignore_own_axles_cargo: bool = False
     retention_coefficient_mode: str = "combined"
 
     @classmethod
@@ -224,6 +237,9 @@ class ScenarioListDTO:
             consider_turnover_changes=bool(scenario.consider_turnover_changes),
             consider_demand_elasticity=bool(scenario.consider_demand_elasticity),
             consider_enterprise_load=bool(scenario.consider_enterprise_load),
+            ignore_own_axles_cargo=bool(
+                getattr(scenario, "ignore_own_axles_cargo", False),
+            ),
             retention_coefficient_mode=scenario.retention_coefficient_mode,
         )
 
