@@ -108,6 +108,7 @@ def _build_routes_sql(*, route_set_id: int | None = None, parameterized: bool = 
             mr.operators_cost_per_ton AS mr_operators_cost_per_ton,
             mr.transshipment_cost_per_ton AS mr_transshipment_cost_per_ton,
             mr.enterprise_load_coefficient AS mr_enterprise_load_coefficient,
+            mr.fixed_retention_coefficient AS mr_fixed_retention_coefficient,
             origin_rr.code AS origin_railroad_code,
             origin_rr.direction AS direction_raw,
             dest_rr.code AS destination_railroad_code,
@@ -154,6 +155,7 @@ def _coerce_route_mart_numeric_columns(df: pd.DataFrame) -> None:
         "mr_operators_cost_per_ton",
         "mr_transshipment_cost_per_ton",
         "mr_enterprise_load_coefficient",
+        "mr_fixed_retention_coefficient",
         "distance_loaded_km",
         "distance_belt_midpoint_km",
         *(

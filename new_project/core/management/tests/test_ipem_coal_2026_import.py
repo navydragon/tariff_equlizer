@@ -274,6 +274,26 @@ class IpemCoal2026ImportTests(TestCase):
         )
         self.assertIsNone(parse_enterprise_load_coefficient({}))
 
+    def test_parse_fixed_retention_from_internal_logistics_marker(self) -> None:
+        from core.management.ipem_economics import parse_fixed_retention_coefficient
+
+        self.assertEqual(
+            parse_fixed_retention_coefficient(
+                {"Коэффициент загрузки предприятия": "Внутренняя логистика"},
+            ),
+            Decimal("1"),
+        )
+        self.assertEqual(
+            parse_fixed_retention_coefficient(
+                {"Коэффициент загрузки предприятия": "  внутренняя ЛОГИСТИКА  "},
+            ),
+            Decimal("1"),
+        )
+        self.assertIsNone(parse_fixed_retention_coefficient({}))
+        self.assertIsNone(
+            parse_fixed_retention_coefficient({"Коэффициент загрузки предприятия": "0.9"}),
+        )
+
     def test_import_creates_model_route_from_resolved_row(self) -> None:
         resolved = IpemCoal2026ResolvedRow(
             ipem_row=1,
@@ -296,6 +316,7 @@ class IpemCoal2026ImportTests(TestCase):
             delivery_time_ops_days=1,
             rate_per_wagon_per_day=Decimal("1500.00"),
             enterprise_load_coefficient=Decimal("0.9"),
+            fixed_retention_coefficient=Decimal("1"),
             cargo_code_3="161",
             cargo_group_izpod="Уголь каменный",
         )
@@ -307,6 +328,7 @@ class IpemCoal2026ImportTests(TestCase):
         self.assertIsNone(model_route.model_route_id)
         self.assertEqual(model_route.market_price_per_ton, Decimal("5000.00"))
         self.assertEqual(model_route.enterprise_load_coefficient, Decimal("0.9"))
+        self.assertEqual(model_route.fixed_retention_coefficient, Decimal("1"))
         self.assertEqual(model_route.cargo_code_3, "161")
         self.assertEqual(model_route.cargo_group_izpod, "Уголь каменный")
         linked = link_operational_routes_to_models(self.route_set, [model_route])

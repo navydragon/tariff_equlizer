@@ -61,6 +61,11 @@ urlpatterns = [
         name="scenario_absolute_volumes_api",
     ),
     path(
+        "api/scenario-absolute/both/",
+        views.scenario_absolute_both_api,
+        name="scenario_absolute_both_api",
+    ),
+    path(
         "api/scenario-absolute/revenues/export/",
         views.scenario_absolute_revenues_export_api,
         name="scenario_absolute_revenues_export_api",

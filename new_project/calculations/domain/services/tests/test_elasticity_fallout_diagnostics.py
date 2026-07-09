@@ -1,4 +1,5 @@
 import logging
+from decimal import Decimal
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
@@ -12,6 +13,7 @@ from calculations.domain.services.elasticity_fallout_compute import (
 )
 from calculations.domain.services.route_mart_store import MartSidecarView
 from calculations.domain.services.scenario_effects_compute import _COMPUTE_DTYPE
+from scenarios.models import ElasticityRule
 from scenarios.models import Scenario
 
 
@@ -81,9 +83,11 @@ class ComputeFalloutArraysDiagnosticsTests(TestCase):
     def test_disabled_elasticity_returns_empty_stats(self) -> None:
         scenario = Scenario(consider_demand_elasticity=False)
         sidecar = MartSidecarView(
-            column_arrays={"transport_volume_tons": np.array([1.0], dtype=_COMPUTE_DTYPE)},
+            column_arrays={
+                "transport_volume_tons": np.array([1.0], dtype=_COMPUTE_DTYPE),
+            },
         )
-        volume, money, stats = compute_fallout_arrays(
+        volume, _money, stats = compute_fallout_arrays(
             sidecar,
             scenario=scenario,
             years=[2025, 2026],
@@ -95,3 +99,120 @@ class ComputeFalloutArraysDiagnosticsTests(TestCase):
         self.assertEqual(volume.shape, (1, 2))
         self.assertEqual(stats.routes_total, 1)
         self.assertEqual(stats.dynamic_eligible, 0)
+
+
+class ComputeFalloutArraysMemoizationTests(TestCase):
+    def test_holding_aggregate_retention_is_memoized_by_ratio(self) -> None:
+        scenario = Scenario(
+            consider_demand_elasticity=True,
+            elasticity_set_id=1,
+            retention_coefficient_mode="combined",
+            consider_enterprise_load=True,
+        )
+
+        # Two routes, same group, same ratio -> one retention compute.
+        sidecar = MartSidecarView(
+            column_arrays={
+                "skip_elasticity": np.array([0, 0], dtype=np.uint8),
+                "elasticity_source": np.array([2, 2], dtype=np.uint8),  # holding_aggregate
+                "transport_volume_tons": np.array(
+                    [100.0, 200.0],
+                    dtype=_COMPUTE_DTYPE,
+                ),
+                "message_type_id": np.array([1, 1], dtype=_COMPUTE_DTYPE),
+                "cargo_group_id": np.array([10, 10], dtype=_COMPUTE_DTYPE),
+                "dim_holding": np.array([1, 1], dtype=_COMPUTE_DTYPE),
+                "dim_direction": np.array([1, 1], dtype=_COMPUTE_DTYPE),
+            },
+        )
+
+        years = [2025, 2026]
+        initial_charge = np.array([100.0, 100.0], dtype=_COMPUTE_DTYPE)
+        charge_by_year = np.array(
+            [[100.0, 110.0], [100.0, 110.0]],
+            dtype=_COMPUTE_DTYPE,
+        )
+        turnover_coef = np.array([[1.0, 1.0], [1.0, 1.0]], dtype=_COMPUTE_DTYPE)
+
+        rule = ElasticityRule(
+            id=1,
+            elasticity_set_id=1,
+            cargo_group_id=10,
+            cargo_id=None,
+            message_type_id=None,
+            position=1,
+        )
+        point = type(
+            "Point",
+            (),
+            {"marginality": Decimal("0.05"), "coefficient": Decimal("0.95")},
+        )()
+
+        class _RuleRepo:
+            def list_by_set(self, _set_id):
+                return [rule]
+
+        class _PointRepo:
+            def list_by_rules(self, _rule_ids):
+                return {1: [point]}
+
+        # One model-row group keyed by holding/direction/message_type/cargo_group.
+        model_row = type(
+            "Row",
+            (),
+            {
+                "cargo_group_id": 10,
+                "cargo_id": 101,
+                "message_type_id": 1,
+                "market_price_per_ton": Decimal("5000"),
+                "production_cost_per_ton": Decimal("3000"),
+                "total_cost_per_ton": Decimal("0"),
+                "rzd_cost_total_per_ton": Decimal("800"),
+                "operators_cost_per_ton": Decimal("100"),
+                "transshipment_cost_per_ton": Decimal("50"),
+                "enterprise_load_coefficient": Decimal("1"),
+                "fixed_retention_coefficient": Decimal("0"),
+                "transport_volume_tons": Decimal("1000"),
+            },
+        )()
+
+        def _fake_build_model_route_group_indexes(_rows):
+            holding_key = ("H1", "D1", 1, 10)
+            return {holding_key: [model_row]}, {}
+
+        retention_calls = {"n": 0}
+
+        def _fake_weighted_retention_numpy(*_args, **_kwargs):
+            retention_calls["n"] += 1
+            return 1.05
+
+        with patch(
+            "calculations.domain.services.elasticity_fallout_compute.ElasticityRuleRepository",
+            new=lambda: _RuleRepo(),
+        ), patch(
+            "calculations.domain.services.elasticity_fallout_compute.ElasticityRulePointRepository",
+            new=lambda: _PointRepo(),
+        ), patch(
+            "calculations.domain.services.elasticity_fallout_compute.build_model_route_group_indexes",
+            new=_fake_build_model_route_group_indexes,
+        ), patch(
+            "calculations.domain.services.elasticity_fallout_compute._weighted_retention_numpy",
+            new=_fake_weighted_retention_numpy,
+        ):
+            _volume, _money, stats = compute_fallout_arrays(
+                sidecar,
+                scenario=scenario,
+                years=years,
+                initial_charge=initial_charge,
+                charge_by_year=charge_by_year,
+                turnover_coef=turnover_coef,
+                model_rows=[model_row],
+                dimension_labels={
+                    "holding": ["—", "H1"],
+                    "direction": ["—", "D1"],
+                },
+            )
+
+        self.assertEqual(retention_calls["n"], 1)
+        self.assertEqual(stats.aggregate_calls, 1)
+        self.assertEqual(stats.aggregate_cache_misses, 1)

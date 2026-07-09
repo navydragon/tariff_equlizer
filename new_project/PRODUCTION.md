@@ -72,19 +72,16 @@ python manage.py create_admin --login admin --email admin@example.com --password
 # … import_railroads, import_rzd_routes и т.д. — см. FIRST_IMPORT.md
 ```
 
-После импорта маршрутов РЖД (`import_rzd_routes --clear`) — **уголь 2026**: model-маршруты, коэффициент загрузки предприятия, эластичность и привязка к сценарию:
+После импорта маршрутов РЖД (`import_rzd_routes --clear`) — **IPEM (уголь + металлургия)**: правила эластичности из «Технический лист», model-маршруты, коэффициент загрузки предприятия и привязка к сценарию:
 
 ```bash
-python manage.py import_ipem_coal_2026_routes \
-  --file ../data/ipem/Уголь_эластика_2026.xlsx \
-  --route-set-code RZD_2026 \
-  --scenario-id 1
+python manage.py import_ipem_elasticity_bundle --scenario-id 1 --route-set-code RZD_2026 --elasticity-file ../data/ipem/Металлургия_эластика.xlsx --file ../data/ipem/Уголь_эластика_2026_5.xlsx --file ../data/ipem/Металлургия_эластика.xlsx
 
-python manage.py refresh_deploy_caches
+python manage.py refresh_deploy_caches --warm-only --warm-scenarios --wait-scenarios
 ```
 
 `--scenario-id 1` — id рабочего сценария с набором **RZD_2026** (часто «Базовый сценарий» после `create_base_scenario`).  
-Проверка без записи: добавьте `--dry-run`. Только маршруты без эластичности: `--skip-elasticity`.
+Проверка без записи: добавьте `--dry-run`. Только правила эластичности (без model-маршрутов): `--seed-elasticity-only`.
 
 Legacy-пайплайн через `total_ipem.csv` — раздел 6.1–6.2 в [FIRST_IMPORT.md](FIRST_IMPORT.md).
 

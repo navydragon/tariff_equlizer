@@ -32,7 +32,10 @@ from calculations.domain.services.scenario_effects_compute import (
     compute_arrays_full,
 )
 from calculations.domain.services.scenario_effects_formatting import GlobalTotals
-from calculations.domain.services.scenario_warm_timing import log_warm_timings
+from calculations.domain.services.scenario_warm_timing import (
+    format_warm_timings_message,
+    log_warm_timings,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -156,6 +159,7 @@ def _run_deferred_full_compute(job: DeferredFullComputeJob) -> None:
             mask_cache_dir=Path(job.mask_cache_dir_path),
             include_rule_by_year=job.include_rule_breakdown,
             consider_turnover_changes=job.consider_turnover_changes,
+            include_fallout=False,
             scenario=scenario_stub,
             model_rows=job.model_rows,
             dimension_labels=(
@@ -220,8 +224,8 @@ def _run_deferred_full_compute(job: DeferredFullComputeJob) -> None:
             volume=volume,
             route_ids=route_ids,
             turnover_coef=arrays.turnover_coef,
-            volume_fallout_by_year=arrays.volume_fallout_by_year,
-            money_fallout_by_year=arrays.money_fallout_by_year,
+            volume_fallout_by_year=None,
+            money_fallout_by_year=None,
         )
         phases["compact_build_ms"] = int((time.perf_counter() - t_compact) * 1000)
         if _job_data_version_stale(job):
@@ -239,6 +243,7 @@ def _run_deferred_full_compute(job: DeferredFullComputeJob) -> None:
                 routes_without_volume=job.routes_without_volume,
             ),
         )
+        phases["save_compact_ms"] = int((time.perf_counter() - t_save) * 1000)
         from calculations.domain.services.scenario_effects_cache import (
             set_scenario_effects_revision,
         )
@@ -253,9 +258,107 @@ def _run_deferred_full_compute(job: DeferredFullComputeJob) -> None:
         update_warm_status(
             scenario_id=job.scenario_id,
             data_version=job.data_version,
-            phase="done",
+            phase="compact",
         )
-        phases["save_ms"] = int((time.perf_counter() - t_save) * 1000)
+
+        # Эластичность (fallout) считаем отдельной фазой: compact готов сразу,
+        # а массивы выпадения догружаются позже.
+        if scenario_stub.consider_demand_elasticity and scenario_stub.elasticity_set_id:
+            from calculations.domain.services.elasticity_fallout_compute import (
+                FalloutComputeStats,
+                compute_fallout_arrays,
+            )
+            from calculations.domain.services.scenario_compute_store import (
+                compute_fallout_fingerprint,
+                save_fallout_cache,
+                save_scenario_fallout_arrays,
+                try_load_fallout_cache,
+            )
+            from calculations.domain.services.scenario_effects_cache import (
+                update_payload_fallout_ready,
+            )
+            from calculations.domain.services.scenario_effects_compute import (
+                build_turnover_coef_matrix,
+            )
+
+            t_fallout = time.perf_counter()
+            turnover_matrix = build_turnover_coef_matrix(
+                sidecar,
+                job.years,
+                enabled=job.consider_turnover_changes,
+            )
+            fallout_fingerprint = compute_fallout_fingerprint(
+                scenario=scenario_stub,
+                initial_charge=arrays.initial,
+                charge_by_year=arrays.charge_by_year,
+                turnover_coef=turnover_matrix,
+            )
+            n_routes = len(arrays.initial)
+            n_years = len(job.years)
+            cached_fallout = try_load_fallout_cache(
+                scenario_id=job.scenario_id,
+                fingerprint=fallout_fingerprint,
+                n_routes=n_routes,
+                n_years=n_years,
+            )
+            if cached_fallout is not None:
+                volume_fallout_by_year, money_fallout_by_year = cached_fallout
+                fallout_stats = FalloutComputeStats(
+                    routes_total=n_routes,
+                    years_count=n_years,
+                )
+                detail["fallout_cache_hit"] = 1
+            else:
+                volume_fallout_by_year, money_fallout_by_year, fallout_stats = (
+                    compute_fallout_arrays(
+                        sidecar,
+                        scenario=scenario_stub,
+                        years=job.years,
+                        initial_charge=arrays.initial,
+                        charge_by_year=arrays.charge_by_year,
+                        turnover_coef=turnover_matrix,
+                        model_rows=job.model_rows,
+                        dimension_labels=(
+                            mart_meta.dimension_labels if mart_meta is not None else None
+                        ),
+                    )
+                )
+                try:
+                    save_fallout_cache(
+                        scenario_id=job.scenario_id,
+                        fingerprint=fallout_fingerprint,
+                        volume_fallout_by_year=volume_fallout_by_year,
+                        money_fallout_by_year=money_fallout_by_year,
+                    )
+                except OSError:
+                    logger.warning(
+                        "Failed to persist fallout cache scenario_id=%s fingerprint=%s",
+                        job.scenario_id,
+                        fallout_fingerprint,
+                        exc_info=True,
+                    )
+            detail["elasticity_fallout_ms"] = int((time.perf_counter() - t_fallout) * 1000)
+            for key, value in fallout_stats.to_timings().items():
+                detail[key] = int(value)
+
+            if _job_data_version_stale(job):
+                return
+
+            t_save_fallout = time.perf_counter()
+            save_scenario_fallout_arrays(
+                scenario_id=job.scenario_id,
+                data_version=job.data_version,
+                volume_fallout_by_year=volume_fallout_by_year,
+                money_fallout_by_year=money_fallout_by_year,
+                fallout_cache_fingerprint=fallout_fingerprint,
+            )
+            phases["save_fallout_ms"] = int((time.perf_counter() - t_save_fallout) * 1000)
+            set_scenario_effects_revision(
+                scenario_id=job.scenario_id,
+                data_version=job.data_version,
+            )
+            update_payload_fallout_ready(cache_key=job.cache_key)
+        phases["save_ms"] = phases.get("save_compact_ms", 0) + phases.get("save_fallout_ms", 0)
         phases["total_ms"] = int((time.perf_counter() - started) * 1000)
         log_warm_timings(
             logger,
@@ -266,6 +369,21 @@ def _run_deferred_full_compute(job: DeferredFullComputeJob) -> None:
             data_version=job.data_version,
             rules=len(job.rule_specs),
             include_rule_breakdown=job.include_rule_breakdown,
+        )
+        rebuild_message = format_warm_timings_message(
+            label="compact",
+            phases=phases,
+            detail=detail,
+            scenario_id=job.scenario_id,
+            data_version=job.data_version,
+            rules=len(job.rule_specs),
+            include_rule_breakdown=job.include_rule_breakdown,
+        )
+        update_warm_status(
+            scenario_id=job.scenario_id,
+            data_version=job.data_version,
+            phase="done",
+            rebuild_message=rebuild_message,
         )
     except Exception:
         logger.exception(

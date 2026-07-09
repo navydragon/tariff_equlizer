@@ -353,6 +353,10 @@ def compute_retention_at_tariff_change(
     point_repo: ElasticityRulePointRepository | None = None,
     points_index: PointsIndex | None = None,
 ) -> Decimal | None:
+    fixed = resolve_fixed_retention_coefficient(route)
+    if fixed is not None:
+        return fixed
+
     margin = marginality_ratio_for_tariff_change(route, tariff_change)
     current_lookup = lookup_coefficient_for_marginality(
         rule,
@@ -410,6 +414,10 @@ def compute_retention_at_charge_ratio(
 ) -> Decimal | None:
     if not scenario.elasticity_set_id:
         return None
+
+    fixed = resolve_fixed_retention_coefficient(route)
+    if fixed is not None:
+        return max(Decimal("0"), fixed)
 
     rules = (rule_repo or ElasticityRuleRepository()).list_by_set(
         scenario.elasticity_set_id,
@@ -656,6 +664,10 @@ def compute_retention_coefficient(
     if not scenario.elasticity_set_id:
         return None
 
+    fixed = resolve_fixed_retention_coefficient(route)
+    if fixed is not None:
+        return max(Decimal("0"), fixed)
+
     mode = scenario.retention_coefficient_mode
     if mode == Scenario.RetentionCoefficientMode.COMBINED:
         if charge_ratio is None:
@@ -718,6 +730,19 @@ def resolve_enterprise_load_coefficient(route: Route) -> Decimal | None:
     if model_route is None:
         return None
     model_val = model_route.enterprise_load_coefficient
+    if model_val is None or model_val == 0:
+        return None
+    return model_val
+
+
+def resolve_fixed_retention_coefficient(route: Route) -> Decimal | None:
+    own = getattr(route, "fixed_retention_coefficient", None)
+    if own is not None and own != 0:
+        return own
+    model_route = getattr(route, "model_route", None)
+    if model_route is None:
+        return None
+    model_val = getattr(model_route, "fixed_retention_coefficient", None)
     if model_val is None or model_val == 0:
         return None
     return model_val

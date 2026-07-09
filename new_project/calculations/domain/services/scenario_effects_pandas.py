@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import time
-from decimal import Decimal
 from pathlib import Path
 import pandas as pd
 import numpy as np
@@ -45,7 +44,6 @@ from calculations.domain.services.route_mart_store import (
     MartSidecarView,
     load_mart_meta,
     load_mart_sidecar,
-    resolve_light_mart_columns,
     resolve_mart_parquet_path,
 )
 from calculations.domain.services.route_mart_warm_status import (
@@ -244,6 +242,11 @@ class ScenarioEffectsPandasService:
 
         cache_key = make_cache_key(user_id=user_id, scenario_id=scenario.id)
         compact_for_cache = compact if compact_ready else None
+        fallout_pending = bool(
+            deferred_job is not None
+            and getattr(scenario, "consider_demand_elasticity", False)
+            and getattr(scenario, "elasticity_set_id", None)
+        )
         store_payload(
             cache_key=cache_key,
             payload=ScenarioEffectsCachePayload(
@@ -256,6 +259,7 @@ class ScenarioEffectsPandasService:
                 facts=[],
                 compact=compact_for_cache,
                 compact_pending=deferred_job is not None,
+                fallout_pending=fallout_pending,
                 data_version=data_version,
             ),
         )

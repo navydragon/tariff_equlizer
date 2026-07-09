@@ -6,7 +6,7 @@
     <form
       id="editScenarioForm"
       data-scenario-edit-target="form"
-      data-action="submit->scenario-edit#submit"
+      data-action="submit->scenario-edit#autosave"
     >
       {# Название #}
       <div class="mb-3">
@@ -21,6 +21,7 @@
           placeholder="Введите название сценария"
           autocomplete="off"
           data-scenario-edit-target="name"
+          data-action="input->scenario-edit#autosave"
         />
       </div>
 
@@ -35,6 +36,7 @@
           placeholder="Введите описание сценария (необязательно)"
           autocomplete="off"
           data-scenario-edit-target="description"
+          data-action="input->scenario-edit#autosave"
         >{{ scenario.description }}</textarea>
       </div>
 
@@ -48,6 +50,7 @@
           data-scenario-edit-target="routeSetSelect"
           data-scenario-edit-current-route-set-id-value="{{ scenario.route_set_id }}"
           data-scenario-edit-route-sets-preloaded-value="true"
+          data-action="change->scenario-edit#autosave"
         >
           {% for route_set in route_sets %}
           <option
@@ -77,6 +80,7 @@
             max="2100"
             value="{{ scenario.start_year }}"
             data-scenario-edit-target="startYear"
+            data-action="change->scenario-edit#autosave blur->scenario-edit#autosave"
           />
         </div>
         <div class="col-md-6 mb-3">
@@ -91,9 +95,16 @@
             max="2100"
             value="{{ scenario.end_year }}"
             data-scenario-edit-target="endYear"
+            data-action="change->scenario-edit#autosave blur->scenario-edit#autosave"
           />
         </div>
       </div>
+
+      <div
+        class="text-danger small d-none"
+        data-scenario-edit-target="yearsError"
+        role="alert"
+      ></div>
 
       <div class="mb-3">
         <label class="form-check">
@@ -103,6 +114,7 @@
             id="editScenarioConsiderTurnoverChanges"
             name="consider_turnover_changes"
             {% if scenario.consider_turnover_changes %}checked{% endif %}
+            data-action="change->scenario-edit#autosave"
           />
           <span class="form-check-label">Учитывать изменения погрузки</span>
         </label>
@@ -120,6 +132,7 @@
             id="editScenarioConsiderDemandElasticity"
             name="consider_demand_elasticity"
             {% if scenario.consider_demand_elasticity %}checked{% endif %}
+            data-action="change->scenario-edit#autosave"
           />
           <span class="form-check-label">Учитывать эластичность спроса</span>
         </label>
@@ -144,6 +157,7 @@
             id="editScenarioConsiderEnterpriseLoad"
             name="consider_enterprise_load"
             {% if scenario.consider_enterprise_load %}checked{% endif %}
+            data-action="change->scenario-edit#autosave"
           />
           <span class="form-check-label">Учитывать загрузку предприятия</span>
         </label>
@@ -175,6 +189,7 @@
                     value="{{ mode_key }}"
                     autocomplete="off"
                     {% if row.mode == mode_key %}checked{% endif %}
+                    data-action="change->scenario-edit#autosave"
                   />
                   <label
                     class="btn btn-outline-primary"
@@ -206,6 +221,7 @@
                     value="{{ mode_key }}"
                     autocomplete="off"
                     {% if scenario.retention_coefficient_mode == mode_key %}checked{% endif %}
+                    data-action="change->scenario-edit#autosave"
                   />
                   <label
                     class="btn btn-outline-primary"
@@ -233,6 +249,7 @@
                     value="{{ mode_key }}"
                     autocomplete="off"
                     {% if scenario.export_price_mode == mode_key %}checked{% endif %}
+                    data-action="change->scenario-edit#autosave"
                   />
                   <label
                     class="btn btn-outline-primary"
@@ -246,15 +263,6 @@
         </table>
       </div>
 
-      <div class="mt-4">
-        <button type="submit" class="btn btn-primary">
-          <i class="ti ti-device-floppy"></i>
-          Сохранить изменения
-        </button>
-        <a href="{% url 'scenarios:management' %}" class="btn btn-secondary">
-          Отмена
-        </a>
-      </div>
     </form>
   </div>
 </div>

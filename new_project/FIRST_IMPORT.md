@@ -135,10 +135,10 @@ python manage.py import_rzd_routes --clear
 
 ### 6.0. Уголь 2026: model-маршруты и эластичность (рекомендуется)
 
-Импорт из `data/ipem/Уголь_эластика_2026.xlsx`:
+Единый импорт IPEM (уголь + металлургия) рекомендуется делать одной командой:
 
-- лист **Уголь_эластика** → **model-маршруты** (`is_model=true`) в `RouteSet RZD_2026`, в т.ч. **коэффициент загрузки предприятия**;
-- лист **Уголь_коэфф** → набор эластичности **«2026»** (правила «Уголь экспорт» / «Уголь внутренние») и привязка к сценарию.
+- лист **Технический лист** (из `Металлургия_эластика.xlsx`) → набор эластичности **«2026»** и привязка к сценарию;
+- листы model-маршрутов из указанных XLSX → **model-маршруты** (`is_model=true`) в `RouteSet RZD_2026`, в т.ч. **коэффициент загрузки предприятия** и (для строк «Внутренняя логистика») **постоянный коэффициент сохранения**.
 
 Operational-маршруты РЖД связываются через `model_route_id` по ключу: **станция + станция + груз + род вагона + тип отправки**.
 
@@ -147,24 +147,26 @@ Operational-маршруты РЖД связываются через `model_rou
 Model-маршруты **не участвуют** в расчётах «Эффект решений» и «Куб эффектов»; в «Экономике грузов» в поиске показываются только они.
 
 ```bash
-python manage.py import_ipem_coal_2026_routes ^
-  --file ../data/ipem/Уголь_эластика_2026.xlsx ^
+python manage.py import_ipem_elasticity_bundle ^
+  --scenario-id 1 ^
   --route-set-code RZD_2026 ^
-  --scenario-id 1
+  --elasticity-file ../data/ipem/Металлургия_эластика.xlsx ^
+  --file ../data/ipem/Уголь_эластика_2026_5.xlsx ^
+  --file ../data/ipem/Металлургия_эластика.xlsx
 ```
 
-Только маршруты (без эластичности), как раньше:
+Только правила эластичности (без model-маршрутов):
 
 ```bash
-python manage.py import_ipem_coal_2026_routes ^
-  --file ../data/ipem/Уголь_эластика_2026.xlsx ^
-  --route-set-code RZD_2026
+python manage.py import_ipem_elasticity_bundle --scenario-id 1 --seed-elasticity-only
 ```
 
 Проверка без записи:
 
 ```bash
-python manage.py import_ipem_coal_2026_routes --dry-run --scenario-id 1
+python manage.py import_ipem_elasticity_bundle --scenario-id 1 --dry-run ^
+  --file ../data/ipem/Уголь_эластика_2026_5.xlsx ^
+  --file ../data/ipem/Металлургия_эластика.xlsx
 ```
 
 После импорта пересобрать витрины:

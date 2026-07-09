@@ -436,6 +436,7 @@ def compute_arrays_full(
     mask_cache_dir: Path | None = None,
     include_rule_by_year: bool = True,
     consider_turnover_changes: bool = False,
+    include_fallout: bool = True,
     scenario: Scenario | None = None,
     model_rows: list | None = None,
     dimension_labels: dict[str, list[str]] | None = None,
@@ -542,7 +543,7 @@ def compute_arrays_full(
 
     volume_fallout_by_year: np.ndarray | None = None
     money_fallout_by_year: np.ndarray | None = None
-    if scenario is not None and model_rows is not None:
+    if include_fallout and scenario is not None and model_rows is not None:
         from calculations.domain.services.elasticity_fallout_compute import (
             compute_fallout_arrays,
         )

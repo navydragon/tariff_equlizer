@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import logging
+from collections import defaultdict
 from dataclasses import dataclass
 from decimal import Decimal
+from typing import Callable
 
 import numpy as np
 import pandas as pd
@@ -58,6 +60,8 @@ class FalloutComputeStats:
     routes_computed: int = 0
     cells_computed: int = 0
     aggregate_calls: int = 0
+    aggregate_cache_hits: int = 0
+    aggregate_cache_misses: int = 0
     model_row_iters: int = 0
     model_routes_pool: int = 0
     holding_groups: int = 0
@@ -85,6 +89,8 @@ class FalloutComputeStats:
             "fallout_routes_computed": self.routes_computed,
             "fallout_cells_computed": self.cells_computed,
             "fallout_aggregate_calls": self.aggregate_calls,
+            "fallout_aggregate_cache_hits": self.aggregate_cache_hits,
+            "fallout_aggregate_cache_misses": self.aggregate_cache_misses,
             "fallout_model_row_iters": self.model_row_iters,
             "fallout_model_routes_pool": self.model_routes_pool,
             "fallout_holding_groups": self.holding_groups,
@@ -138,7 +144,7 @@ def log_fallout_diagnostics(stats: FalloutComputeStats) -> None:
         "computed_routes=%s (%.1f%% of eligible) | "
         "skip: elasticity=%s no_volume=%s no_initial=%s source_none=%s | "
         "source: direct=%s holding=%s cargo_group=%s | "
-        "aggregate_calls=%s model_row_iters=%s avg_rows_per_call=%.1f | "
+        "aggregate_calls=%s cache_hit=%s cache_miss=%s model_row_iters=%s avg_rows_per_call=%.1f | "
         "model_pool=%s holding_groups=%s cargo_groups=%s years=%s cells=%s",
         stats.routes_total,
         stats.loop_routes,
@@ -154,6 +160,8 @@ def log_fallout_diagnostics(stats: FalloutComputeStats) -> None:
         stats.source_holding_aggregate,
         stats.source_cargo_group_aggregate,
         stats.aggregate_calls,
+        stats.aggregate_cache_hits,
+        stats.aggregate_cache_misses,
         stats.model_row_iters,
         avg_rows,
         stats.model_routes_pool,
@@ -187,6 +195,7 @@ class _ModelGroupArrays:
     operators: np.ndarray
     transshipment: np.ndarray
     enterprise: np.ndarray
+    fixed_retention: np.ndarray
     weight: np.ndarray
     n: int
 
@@ -205,6 +214,7 @@ class _ModelGroupArrays:
                 operators=np.empty(0, dtype=np.float64),
                 transshipment=np.empty(0, dtype=np.float64),
                 enterprise=np.empty(0, dtype=np.float64),
+                fixed_retention=np.empty(0, dtype=np.float64),
                 weight=np.empty(0, dtype=np.float64),
                 n=0,
             )
@@ -252,6 +262,13 @@ class _ModelGroupArrays:
                 ],
                 dtype=np.float64,
             ),
+            fixed_retention=np.array(
+                [
+                    _decimal_to_float(row.fixed_retention_coefficient)
+                    for row in rows
+                ],
+                dtype=np.float64,
+            ),
             weight=np.array(
                 [_decimal_to_float(row.transport_volume_tons) for row in rows],
                 dtype=np.float64,
@@ -294,6 +311,7 @@ def _retention_coefficient_float(
     margin: float,
     base_margin: float | None,
     enterprise: float,
+    fixed_retention: float,
     scenario: Scenario,
     rule_index: RuleIndex,
     float_points_index: FloatPointsIndex,
@@ -305,6 +323,9 @@ def _retention_coefficient_float(
     operators: float | None = None,
     transshipment: float | None = None,
 ) -> float | None:
+    if fixed_retention > 0.0:
+        return fixed_retention
+
     rule = select_rule_for_keys_indexed(
         rule_index,
         cargo_group_id=cargo_group_id,
@@ -415,6 +436,7 @@ def _weighted_retention_numpy(
             margin=margin,
             base_margin=base_margin,
             enterprise=float(group.enterprise[index]),
+            fixed_retention=float(group.fixed_retention[index]),
             scenario=scenario,
             rule_index=rule_index,
             float_points_index=float_points_index,
@@ -447,6 +469,7 @@ class _EconomicsProxy:
     operators_cost_per_ton: Decimal | None
     transshipment_cost_per_ton: Decimal | None
     enterprise_load_coefficient: Decimal | None
+    fixed_retention_coefficient: Decimal | None
 
     def __init__(
         self,
@@ -461,6 +484,7 @@ class _EconomicsProxy:
         operators_cost_per_ton: Decimal | None,
         transshipment_cost_per_ton: Decimal | None,
         enterprise_load_coefficient: Decimal | None,
+        fixed_retention_coefficient: Decimal | None = None,
     ):
         self.cargo_id = cargo_id
         self.cargo_group_id = cargo_group_id
@@ -472,6 +496,7 @@ class _EconomicsProxy:
         self.operators_cost_per_ton = operators_cost_per_ton
         self.transshipment_cost_per_ton = transshipment_cost_per_ton
         self.enterprise_load_coefficient = enterprise_load_coefficient
+        self.fixed_retention_coefficient = fixed_retention_coefficient
 
     @property
     def cargo(self):
@@ -501,6 +526,7 @@ def _proxy_from_model_row(
         operators_cost_per_ton=row.operators_cost_per_ton,
         transshipment_cost_per_ton=row.transshipment_cost_per_ton,
         enterprise_load_coefficient=row.enterprise_load_coefficient,
+        fixed_retention_coefficient=row.fixed_retention_coefficient,
     )
 
 
@@ -539,6 +565,10 @@ def _retention_for_proxy(
     base_marginality_ratio: Decimal | None = None,
     charge_ratio: Decimal | float = Decimal("1"),
 ) -> Decimal | None:
+    fixed = proxy.fixed_retention_coefficient
+    if fixed is not None and fixed != 0:
+        return max(Decimal("0"), fixed)
+
     rule = select_rule_for_route_indexed(proxy, rule_index)  # type: ignore[arg-type]
     if rule is None:
         return None
@@ -642,6 +672,95 @@ def _label_at(labels: list[str], code: int) -> str:
     return labels[code]
 
 
+def _charge_ratios_for_routes(
+    route_indices: np.ndarray,
+    *,
+    year_index: int,
+    initial_charge: np.ndarray,
+    charge_by_year: np.ndarray,
+    turnover_coef: np.ndarray,
+) -> np.ndarray:
+    ri = route_indices.astype(np.intp, copy=False)
+    initials = initial_charge[ri].astype(np.float64, copy=False)
+    turnovers = turnover_coef[ri, year_index].astype(np.float64, copy=False)
+    current_charges = charge_by_year[ri, year_index].astype(np.float64, copy=False)
+    ratios = np.ones(ri.size, dtype=np.float64)
+    for pos, route_index in enumerate(ri):
+        initial = float(initials[pos])
+        turnover = float(turnovers[pos])
+        current_charge = float(current_charges[pos])
+        current_tariff = current_charge / turnover if turnover else initial
+        ratios[pos] = current_tariff / initial if initial > 0 else 1.0
+    return ratios
+
+
+def _apply_aggregate_fallout_for_year(
+    route_indices: list[int],
+    *,
+    year_index: int,
+    source_key: str,
+    group_key: tuple[object, ...],
+    aggregate_group: _ModelGroupArrays,
+    volumes: np.ndarray,
+    initial_charge: np.ndarray,
+    charge_by_year: np.ndarray,
+    turnover_coef: np.ndarray,
+    volume_fallout: np.ndarray,
+    money_fallout: np.ndarray,
+    weighted_retention_cached: Callable[..., float | None],
+    routes_with_fallout: np.ndarray,
+    stats: FalloutComputeStats,
+) -> None:
+    if not route_indices:
+        return
+
+    ri = np.asarray(route_indices, dtype=np.intp)
+    charge_ratios = _charge_ratios_for_routes(
+        ri,
+        year_index=year_index,
+        initial_charge=initial_charge,
+        charge_by_year=charge_by_year,
+        turnover_coef=turnover_coef,
+    )
+    ratio_keys = np.array([_ratio_key(float(value)) for value in charge_ratios])
+    unique_ratios = np.unique(ratio_keys)
+
+    route_volumes = volumes[ri].astype(np.float64, copy=False)
+    route_turnovers = turnover_coef[ri, year_index].astype(np.float64, copy=False)
+    route_charges = charge_by_year[ri, year_index].astype(np.float64, copy=False)
+
+    for ratio in unique_ratios:
+        mask = ratio_keys == ratio
+        if not np.any(mask):
+            continue
+        k = weighted_retention_cached(
+            source_key=source_key,
+            group_key=group_key,
+            group=aggregate_group,
+            charge_ratio=float(ratio),
+        )
+        if k is None:
+            continue
+        k_delta = float(k) - 1.0
+        affected = ri[mask]
+        volume_fallout[affected, year_index] = np.round(
+            route_volumes[mask] * route_turnovers[mask] * k_delta,
+            4,
+        )
+        money_fallout[affected, year_index] = np.round(
+            route_charges[mask] * k_delta,
+            2,
+        )
+        stats.cells_computed += int(mask.sum())
+        routes_with_fallout[affected] = True
+
+
+def _ratio_key(value: float) -> float:
+    if not np.isfinite(value) or value <= 0:
+        return 1.0
+    return round(float(value), 6)
+
+
 def compute_fallout_arrays(
     sidecar: MartSidecarView | pd.DataFrame,
     *,
@@ -728,6 +847,7 @@ def compute_fallout_arrays(
     mr_oper = _col("mr_operators_cost_per_ton")
     mr_per = _col("mr_transshipment_cost_per_ton")
     mr_enterprise = _col("mr_enterprise_load_coefficient")
+    mr_fixed = _col("mr_fixed_retention_coefficient")
     mr_cargo_id = _col("mr_cargo_id")
     mr_message_type_id = _col("mr_message_type_id")
     mr_cargo_group_id = _col("mr_cargo_group_id")
@@ -746,28 +866,64 @@ def compute_fallout_arrays(
     eligible_indices = np.flatnonzero(eligible_mask)
     stats.loop_routes = int(eligible_indices.size)
 
-    def _weighted_retention_counted(
-        group: _ModelGroupArrays,
+    direct_routes: list[int] = []
+    holding_route_groups: dict[tuple[object, ...], list[int]] = defaultdict(list)
+    cargo_route_groups: dict[tuple[object, ...], list[int]] = defaultdict(list)
+    for route_index in eligible_indices:
+        route_index = int(route_index)
+        source = _SOURCE_CODE_TO_NAME[int(source_codes[route_index])]
+        if source == "direct_model":
+            direct_routes.append(route_index)
+        elif source == "holding_aggregate":
+            key = (
+                _label_at(holding_labels, int(dim_holding[route_index])),
+                _label_at(direction_labels, int(dim_direction[route_index])),
+                int(message_type_id[route_index]) or None,
+                int(cargo_group_id[route_index]) or None,
+            )
+            holding_route_groups[key].append(route_index)
+        elif source == "cargo_group_aggregate":
+            key = (
+                int(cargo_group_id[route_index]) or None,
+                _label_at(direction_labels, int(dim_direction[route_index])),
+                int(message_type_id[route_index]) or None,
+            )
+            cargo_route_groups[key].append(route_index)
+
+    aggregate_retention_cache: dict[tuple[object, ...], float | None] = {}
+
+    def _weighted_retention_cached(
         *,
+        source_key: str,
+        group_key: tuple[object, ...],
+        group: _ModelGroupArrays,
         charge_ratio: float,
     ) -> float | None:
+        cache_key = (source_key, group_key, _ratio_key(charge_ratio))
+        cached = aggregate_retention_cache.get(cache_key, "__miss__")
+        if cached != "__miss__":
+            stats.aggregate_cache_hits += 1
+            return cached  # type: ignore[return-value]
+
+        stats.aggregate_cache_misses += 1
         stats.aggregate_calls += 1
         stats.model_row_iters += group.n
-        return _weighted_retention_numpy(
+        value = _weighted_retention_numpy(
             group,
             charge_ratio=charge_ratio,
             scenario=scenario,
             rule_index=rule_index,
             float_points_index=float_points_index,
         )
+        aggregate_retention_cache[cache_key] = value
+        return value
 
-    for route_index in eligible_indices:
-        route_index = int(route_index)
+    routes_with_fallout = np.zeros(n_routes, dtype=bool)
+
+    for route_index in direct_routes:
         volume = float(volumes[route_index])
         initial = float(initial_charge[route_index])
-        source = _SOURCE_CODE_TO_NAME[int(source_codes[route_index])]
 
-        route_had_fallout = False
         for year_index, _year in enumerate(years):
             turnover = float(turnover_coef[route_index, year_index])
             if year_index == 0:
@@ -778,89 +934,59 @@ def compute_fallout_arrays(
             charge_ratio = current_tariff / initial if initial > 0 else 1.0
             prev_charge = current_charge
 
-            k: float | None = None
-            aggregate_group: _ModelGroupArrays | None = None
-
-            if source == "direct_model":
-                direct_message_type_id = _optional_id(
-                    int(message_type_id[route_index])
-                    or int(mr_message_type_id[route_index]),
-                )
-                direct_cargo_group_id = _optional_id(
-                    int(cargo_group_id[route_index])
-                    or int(mr_cargo_group_id[route_index]),
-                )
-                direct_cargo_id = _optional_id(int(mr_cargo_id[route_index]))
-                market = float(mr_market[route_index])
-                production = float(mr_prod[route_index])
-                total = float(mr_total[route_index])
-                rzd = float(mr_rzd[route_index])
-                operators = float(mr_oper[route_index])
-                transshipment = float(mr_per[route_index])
-                margin = _marginality_from_values(
-                    market=market,
-                    production=production,
-                    total=total,
-                    rzd=rzd,
-                    operators=operators,
-                    transshipment=transshipment,
-                    charge_ratio=charge_ratio,
-                )
-                base_margin = _marginality_from_values(
-                    market=market,
-                    production=production,
-                    total=total,
-                    rzd=rzd,
-                    operators=operators,
-                    transshipment=transshipment,
-                    charge_ratio=1.0,
-                )
-                k = _retention_coefficient_float(
-                    cargo_group_id=direct_cargo_group_id,
-                    cargo_id=direct_cargo_id,
-                    message_type_id=direct_message_type_id,
-                    margin=margin,
-                    base_margin=base_margin,
-                    enterprise=float(mr_enterprise[route_index]),
-                    scenario=scenario,
-                    rule_index=rule_index,
-                    float_points_index=float_points_index,
-                    charge_ratio=charge_ratio,
-                    market=market,
-                    production=production,
-                    total=total,
-                    rzd=rzd,
-                    operators=operators,
-                    transshipment=transshipment,
-                )
-            elif source == "holding_aggregate":
-                key = (
-                    _label_at(holding_labels, int(dim_holding[route_index])),
-                    _label_at(direction_labels, int(dim_direction[route_index])),
-                    int(message_type_id[route_index]) or None,
-                    int(cargo_group_id[route_index]) or None,
-                )
-                aggregate_group = holding_arrays.get(key)
-                if aggregate_group is not None and aggregate_group.n > 0:
-                    k = _weighted_retention_counted(
-                        aggregate_group,
-                        charge_ratio=charge_ratio,
-                    )
-            elif source == "cargo_group_aggregate":
-                key = (
-                    int(cargo_group_id[route_index]) or None,
-                    _label_at(direction_labels, int(dim_direction[route_index])),
-                    int(message_type_id[route_index]) or None,
-                )
-                aggregate_group = cargo_arrays.get(key)
-                if aggregate_group is not None and aggregate_group.n > 0:
-                    k = _weighted_retention_counted(
-                        aggregate_group,
-                        charge_ratio=charge_ratio,
-                    )
-            else:
-                k = None
-
+            direct_message_type_id = _optional_id(
+                int(message_type_id[route_index])
+                or int(mr_message_type_id[route_index]),
+            )
+            direct_cargo_group_id = _optional_id(
+                int(cargo_group_id[route_index])
+                or int(mr_cargo_group_id[route_index]),
+            )
+            direct_cargo_id = _optional_id(int(mr_cargo_id[route_index]))
+            market = float(mr_market[route_index])
+            production = float(mr_prod[route_index])
+            total = float(mr_total[route_index])
+            rzd = float(mr_rzd[route_index])
+            operators = float(mr_oper[route_index])
+            transshipment = float(mr_per[route_index])
+            fixed = float(mr_fixed[route_index])
+            margin = _marginality_from_values(
+                market=market,
+                production=production,
+                total=total,
+                rzd=rzd,
+                operators=operators,
+                transshipment=transshipment,
+                charge_ratio=charge_ratio,
+            )
+            base_margin = _marginality_from_values(
+                market=market,
+                production=production,
+                total=total,
+                rzd=rzd,
+                operators=operators,
+                transshipment=transshipment,
+                charge_ratio=1.0,
+            )
+            k = _retention_coefficient_float(
+                cargo_group_id=direct_cargo_group_id,
+                cargo_id=direct_cargo_id,
+                message_type_id=direct_message_type_id,
+                margin=margin,
+                base_margin=base_margin,
+                enterprise=float(mr_enterprise[route_index]),
+                fixed_retention=fixed,
+                scenario=scenario,
+                rule_index=rule_index,
+                float_points_index=float_points_index,
+                charge_ratio=charge_ratio,
+                market=market,
+                production=production,
+                total=total,
+                rzd=rzd,
+                operators=operators,
+                transshipment=transshipment,
+            )
             if k is None:
                 continue
 
@@ -874,10 +1000,53 @@ def compute_fallout_arrays(
                 2,
             )
             stats.cells_computed += 1
-            route_had_fallout = True
+            routes_with_fallout[route_index] = True
 
-        if route_had_fallout:
-            stats.routes_computed += 1
+    for year_index, _year in enumerate(years):
+        if year_index == 0:
+            continue
+        for group_key, route_list in holding_route_groups.items():
+            aggregate_group = holding_arrays.get(group_key)
+            if aggregate_group is None or aggregate_group.n <= 0:
+                continue
+            _apply_aggregate_fallout_for_year(
+                route_list,
+                year_index=year_index,
+                source_key="holding_aggregate",
+                group_key=group_key,
+                aggregate_group=aggregate_group,
+                volumes=volumes,
+                initial_charge=initial_charge,
+                charge_by_year=charge_by_year,
+                turnover_coef=turnover_coef,
+                volume_fallout=volume_fallout,
+                money_fallout=money_fallout,
+                weighted_retention_cached=_weighted_retention_cached,
+                routes_with_fallout=routes_with_fallout,
+                stats=stats,
+            )
+        for group_key, route_list in cargo_route_groups.items():
+            aggregate_group = cargo_arrays.get(group_key)
+            if aggregate_group is None or aggregate_group.n <= 0:
+                continue
+            _apply_aggregate_fallout_for_year(
+                route_list,
+                year_index=year_index,
+                source_key="cargo_group_aggregate",
+                group_key=group_key,
+                aggregate_group=aggregate_group,
+                volumes=volumes,
+                initial_charge=initial_charge,
+                charge_by_year=charge_by_year,
+                turnover_coef=turnover_coef,
+                volume_fallout=volume_fallout,
+                money_fallout=money_fallout,
+                weighted_retention_cached=_weighted_retention_cached,
+                routes_with_fallout=routes_with_fallout,
+                stats=stats,
+            )
+
+    stats.routes_computed = int(routes_with_fallout.sum())
 
     log_fallout_diagnostics(stats)
     return volume_fallout, money_fallout, stats

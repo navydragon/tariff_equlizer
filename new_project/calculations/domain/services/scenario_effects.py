@@ -25,7 +25,6 @@ from calculations.domain.services.scenario_effects_cache import (
     COMPACT_API_WAIT_TIMEOUT_SECONDS,
     RouteEffectFact,
     ScenarioEffectsCachePayload,
-    get_payload,
     get_payload_ready,
     make_cache_key,
     store_payload,
@@ -197,7 +196,14 @@ class ScenarioEffectsService:
                 ),
             )
 
-        show_fallout_column = False
+        show_fallout_column = bool(
+            scenario.consider_demand_elasticity and getattr(scenario, "elasticity_set_id", None)
+        )
+        fallout_pending = bool(
+            show_fallout_column
+            and payload.compact is not None
+            and getattr(payload, "fallout_pending", False)
+        )
         fallout_by_group = None
         grand_fallout = None
         if (
@@ -239,6 +245,7 @@ class ScenarioEffectsService:
                 table_rows=table_rows,
                 chart=chart,
                 show_fallout_column=show_fallout_column,
+                fallout_pending=fallout_pending,
             ),
             [],
         )

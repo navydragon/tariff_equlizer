@@ -43,7 +43,10 @@ class ScenarioEffectsAggregateRequestDTO:
             errors.append("Некорректный group_by")
         if self.group_by_inner not in GROUP_BY_INNER_CHOICES:
             errors.append("Некорректный group_by_inner")
-        if self.group_by_inner != "none" and self.group_by_inner == self.group_by:
+        if (
+            self.group_by_inner != "none"
+            and self.group_by_inner == self.group_by
+        ):
             errors.append("group_by_inner не может совпадать с group_by")
         if not isinstance(self.cargo_groups, list):
             errors.append("cargo_groups должен быть списком")
@@ -72,7 +75,10 @@ class ScenarioEffectsRequestDTO:
             errors.append("Некорректный group_by")
         if self.group_by_inner not in GROUP_BY_INNER_CHOICES:
             errors.append("Некорректный group_by_inner")
-        if self.group_by_inner != "none" and self.group_by_inner == self.group_by:
+        if (
+            self.group_by_inner != "none"
+            and self.group_by_inner == self.group_by
+        ):
             errors.append("group_by_inner не может совпадать с group_by")
         if not isinstance(self.cargo_groups, list):
             errors.append("cargo_groups должен быть списком")
@@ -185,12 +191,14 @@ class ScenarioEffectsAggregateResponseDTO:
     table_rows: list[EffectTableRowDTO]
     chart: EffectChartDTO
     show_fallout_column: bool = False
+    fallout_pending: bool = False
 
     def to_api_dict(self) -> dict[str, Any]:
         payload = {
             "table": {
                 "rows": [row.to_api_dict() for row in self.table_rows],
                 "show_fallout": self.show_fallout_column,
+                "fallout_pending": self.fallout_pending,
             },
             "chart": self.chart.to_api_dict(),
         }

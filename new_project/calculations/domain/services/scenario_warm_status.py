@@ -32,6 +32,7 @@ class ScenarioWarmStatus:
     started_at: float = 0.0
     updated_at: float = 0.0
     error: str | None = None
+    rebuild_message: str | None = None
 
 
 def warm_status_cache_key(*, scenario_id: int) -> str:
@@ -119,10 +120,22 @@ def update_warm_status(*, scenario_id: int, **fields: object) -> ScenarioWarmSta
             scenario_id=scenario_id,
             data_version=data_version,
             mask_changed=bool(fields.get("mask_changed", False)),
-            rule_id=fields.get("rule_id") if isinstance(fields.get("rule_id"), int) else None,
-            phase=fields.get("phase") if isinstance(fields.get("phase"), str) else "queued",
+            rule_id=(
+                fields.get("rule_id")
+                if isinstance(fields.get("rule_id"), int)
+                else None
+            ),
+            phase=(
+                fields.get("phase")
+                if isinstance(fields.get("phase"), str)
+                else "queued"
+            ),
         )
-        fields = {key: value for key, value in fields.items() if key not in {"data_version", "mask_changed", "rule_id", "phase"}}
+        fields = {
+            key: value
+            for key, value in fields.items()
+            if key not in {"data_version", "mask_changed", "rule_id", "phase"}
+        }
 
     for key, value in fields.items():
         if hasattr(status, key):
@@ -164,12 +177,8 @@ def _status_to_api(status: ScenarioWarmStatus) -> dict[str, Any]:
         )
 
     phase: WarmPhase = status.phase
-    if phase == "error":
-        pass
-    elif compact_ready:
-        phase = "done"
-    elif kpi_ready and phase in {"kpi", "queued", "mask"}:
-        phase = "compact" if status.phase != "done" else "done"
+    if phase != "error" and kpi_ready and phase in {"kpi", "queued", "mask"}:
+        phase = "compact" if not compact_ready else status.phase
 
     elapsed_ms = 0
     if status.started_at:
@@ -185,4 +194,5 @@ def _status_to_api(status: ScenarioWarmStatus) -> dict[str, Any]:
         "compact_ready": compact_ready,
         "elapsed_ms": elapsed_ms,
         "error": status.error,
+        "rebuild_message": status.rebuild_message,
     }

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
 import time
+import uuid
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
@@ -30,6 +33,8 @@ RULES_BY_YEAR_FILENAME = "rules_by_year.npy"
 CHARGE_BY_YEAR_FILENAME = "charge_by_year.npy"
 RULE_BY_YEAR_FILENAME = "rule_by_year.npy"
 METADATA_FILENAME = "metadata.json"
+FALLOUT_CACHE_DIRNAME = "fallout_cache"
+_WRITE_POOL_WORKERS = 4
 
 
 @dataclass
@@ -50,6 +55,15 @@ def scenario_compute_cache_root() -> Path:
 
 def scenario_compute_dir(*, scenario_id: int, data_version: str) -> Path:
     return scenario_compute_cache_root() / str(scenario_id) / data_version
+
+
+def fallout_cache_dir(*, scenario_id: int, fingerprint: str) -> Path:
+    return (
+        scenario_compute_cache_root()
+        / str(scenario_id)
+        / FALLOUT_CACHE_DIRNAME
+        / fingerprint
+    )
 
 
 def _global_totals_to_json(totals: GlobalTotals) -> dict:
@@ -158,13 +172,46 @@ def _compact_required_paths(cache_dir: Path) -> list[Path]:
     return paths
 
 
+def _read_metadata(cache_dir: Path) -> dict | None:
+    meta_path = cache_dir / METADATA_FILENAME
+    if not meta_path.is_file():
+        return None
+    return json.loads(meta_path.read_text(encoding="utf-8"))
+
+
+def _array_write_fingerprint(array: np.ndarray) -> str:
+    """Быстрый fingerprint для skip-rewrite небольших массивов."""
+    flat = np.asarray(array, dtype=array.dtype).ravel()
+    nbytes = flat.nbytes
+    if nbytes <= 64 * 1024:
+        digest = hashlib.sha256(flat.tobytes()).hexdigest()
+    else:
+        hasher = hashlib.sha256()
+        hasher.update(flat[:4096].tobytes())
+        hasher.update(flat[-4096:].tobytes())
+        hasher.update(str(float(flat.sum())).encode("ascii"))
+        digest = hasher.hexdigest()
+    return f"{array.shape}:{array.dtype}:{nbytes}:{digest}"
+
+
+def _array_on_disk_matches(out_path: Path, array: np.ndarray) -> bool:
+    if not out_path.is_file():
+        return False
+    try:
+        on_disk = np.load(out_path, mmap_mode=None if os.name == "nt" else "r")
+        on_disk_arr = np.asarray(on_disk)
+        if on_disk_arr.shape != array.shape or on_disk_arr.dtype != array.dtype:
+            return False
+        return _array_write_fingerprint(on_disk_arr) == _array_write_fingerprint(array)
+    except OSError:
+        return False
+
+
 def _atomic_replace(tmp_path: Path, final_path: Path, *, max_attempts: int = 12) -> None:
     final_path.parent.mkdir(parents=True, exist_ok=True)
     last_error: OSError | None = None
     for attempt in range(max_attempts):
         try:
-            if final_path.exists():
-                final_path.unlink()
             os.replace(tmp_path, final_path)
             return
         except OSError as exc:
@@ -178,22 +225,127 @@ def _atomic_replace(tmp_path: Path, final_path: Path, *, max_attempts: int = 12)
 
 def _save_rule_by_year(path: Path, rule_by_year: np.ndarray) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_base = path.with_name(path.stem + ".tmp")
+    tmp_base = path.with_name(f"{path.stem}.tmp.{uuid.uuid4().hex}")
     np.save(tmp_base, rule_by_year.astype(np.float32, copy=False))
     _atomic_replace(Path(f"{tmp_base}.npy"), path)
 
 
-def _save_npy_array(array: np.ndarray, out_path: Path) -> None:
+def _save_npy_array(
+    array: np.ndarray,
+    out_path: Path,
+    *,
+    skip_if_unchanged: bool = False,
+) -> None:
+    if skip_if_unchanged and _array_on_disk_matches(out_path, array):
+        return
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_base = out_path.parent / (out_path.stem + ".tmp")
+    tmp_base = out_path.parent / f"{out_path.stem}.tmp.{uuid.uuid4().hex}"
     np.save(tmp_base, array)
     _atomic_replace(Path(f"{tmp_base}.npy"), out_path)
+
+
+def _save_npy_arrays_batch(
+    items: list[tuple[np.ndarray, Path]],
+    *,
+    skip_if_unchanged: bool = False,
+) -> None:
+    if not items:
+        return
+    if os.name == "nt" or len(items) == 1:
+        for array, path in items:
+            _save_npy_array(array, path, skip_if_unchanged=skip_if_unchanged)
+        return
+    with ThreadPoolExecutor(max_workers=_WRITE_POOL_WORKERS) as executor:
+        futures = [
+            executor.submit(
+                _save_npy_array,
+                array,
+                path,
+                skip_if_unchanged=skip_if_unchanged,
+            )
+            for array, path in items
+        ]
+        for future in futures:
+            future.result()
+
+
+def _digest_array(hasher: "hashlib._Hash", array: np.ndarray) -> None:
+    arr = np.ascontiguousarray(array)
+    hasher.update(str(arr.shape).encode("ascii"))
+    hasher.update(str(arr.dtype).encode("ascii"))
+    mv = memoryview(arr)
+    chunk = 8 * 1024 * 1024
+    for offset in range(0, len(mv), chunk):
+        hasher.update(mv[offset : offset + chunk])
+
+
+def compute_fallout_fingerprint(
+    *,
+    scenario,
+    initial_charge: np.ndarray,
+    charge_by_year: np.ndarray,
+    turnover_coef: np.ndarray,
+) -> str:
+    hasher = hashlib.sha256()
+    hasher.update(
+        f"elasticity_set:{getattr(scenario, 'elasticity_set_id', None)}".encode(),
+    )
+    hasher.update(
+        f"retention:{getattr(scenario, 'retention_coefficient_mode', '')}".encode(),
+    )
+    hasher.update(
+        f"enterprise_load:{bool(getattr(scenario, 'consider_enterprise_load', True))}".encode(),
+    )
+    _digest_array(hasher, initial_charge)
+    _digest_array(hasher, charge_by_year)
+    _digest_array(hasher, turnover_coef)
+    return hasher.hexdigest()[:16]
+
+
+def try_load_fallout_cache(
+    *,
+    scenario_id: int,
+    fingerprint: str,
+    n_routes: int,
+    n_years: int,
+) -> tuple[np.ndarray, np.ndarray] | None:
+    cache_dir = fallout_cache_dir(scenario_id=scenario_id, fingerprint=fingerprint)
+    volume_path = cache_dir / VOLUME_FALLOUT_BY_YEAR_FILENAME
+    money_path = cache_dir / MONEY_FALLOUT_BY_YEAR_FILENAME
+    if not volume_path.is_file() or not money_path.is_file():
+        return None
+    volume = _load_npy_mmap(volume_path, dtype=np.float32)
+    money = _load_npy_mmap(money_path, dtype=np.float32)
+    if volume is None or money is None:
+        return None
+    if volume.shape != (n_routes, n_years) or money.shape != (n_routes, n_years):
+        return None
+    return volume, money
+
+
+def save_fallout_cache(
+    *,
+    scenario_id: int,
+    fingerprint: str,
+    volume_fallout_by_year: np.ndarray,
+    money_fallout_by_year: np.ndarray,
+) -> None:
+    cache_dir = fallout_cache_dir(scenario_id=scenario_id, fingerprint=fingerprint)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    _save_npy_arrays_batch(
+        [
+            (volume_fallout_by_year.astype(np.float32, copy=False), cache_dir / VOLUME_FALLOUT_BY_YEAR_FILENAME),
+            (money_fallout_by_year.astype(np.float32, copy=False), cache_dir / MONEY_FALLOUT_BY_YEAR_FILENAME),
+        ],
+    )
 
 
 def _load_npy_mmap(path: Path, *, dtype=None) -> np.ndarray | None:
     if not path.is_file():
         return None
-    loaded = np.load(path, mmap_mode="r")
+    # На Windows mmap удерживает file handle и мешает atomic replace при прогреве/пересчёте.
+    # Для кешевых файлов сценария лучше грузить без mmap, чтобы не ловить WinError 5/32.
+    loaded = np.load(path, mmap_mode=None if os.name == "nt" else "r")
     if dtype is None:
         return np.asarray(loaded)
     return np.asarray(loaded, dtype=dtype)
@@ -202,7 +354,7 @@ def _load_npy_mmap(path: Path, *, dtype=None) -> np.ndarray | None:
 def _load_rule_by_year(cache_dir: Path, data) -> np.ndarray | None:
     sidecar = cache_dir / RULE_BY_YEAR_FILENAME
     if sidecar.is_file():
-        loaded = np.load(sidecar, mmap_mode="r")
+        loaded = np.load(sidecar, mmap_mode=None if os.name == "nt" else "r")
         return np.asarray(loaded, dtype=np.float32)
 
     if data is not None and "rule_by_year" in data.files:
@@ -316,7 +468,9 @@ def purge_stale_scenario_compute(
 
     removed = 0
     for child in scenario_dir.iterdir():
-        if not child.is_dir() or child.name == keep_data_version:
+        if not child.is_dir():
+            continue
+        if child.name in (keep_data_version, FALLOUT_CACHE_DIRNAME):
             continue
         shutil.rmtree(child, ignore_errors=True)
         removed += 1
@@ -336,8 +490,17 @@ def save_scenario_compute(
     if compact is None:
         raise ValueError("save_scenario_compute requires a compact bundle")
     arrays = _compact_arrays_for_store(compact)
+    dim_filenames = {_dimension_filename(column) for column in _DIMENSION_COLUMNS}
+    big_items: list[tuple[np.ndarray, Path]] = []
+    dim_items: list[tuple[np.ndarray, Path]] = []
     for filename, array in arrays.items():
-        _save_npy_array(array, cache_dir / filename)
+        target = (array, cache_dir / filename)
+        if filename in dim_filenames:
+            dim_items.append(target)
+        else:
+            big_items.append(target)
+    _save_npy_arrays_batch(big_items)
+    _save_npy_arrays_batch(dim_items, skip_if_unchanged=True)
 
     rule_by_year_path = cache_dir / RULE_BY_YEAR_FILENAME
     if compact.rule_by_year is not None:
@@ -346,9 +509,13 @@ def save_scenario_compute(
         rule_by_year_path.unlink()
 
     include_rule_breakdown = compact.rule_by_year is not None
+    fallout_ready = bool(
+        compact.volume_fallout_by_year is not None and compact.money_fallout_by_year is not None
+    )
     metadata = {
         "kpi_only": False,
         "include_rule_breakdown": include_rule_breakdown,
+        "fallout_ready": fallout_ready,
         "years": compact.years,
         "dimension_labels": compact.dimension_labels,
         "rule_meta": [[rule_id, name] for rule_id, name in compact.rule_meta],
@@ -367,6 +534,102 @@ def save_scenario_compute(
         data_version=data_version,
     )
     return cache_dir
+
+
+def _try_link_or_copy_fallout_from_cache(
+    *,
+    cache_dir: Path,
+    fallout_cache_fingerprint: str,
+    scenario_id: int,
+) -> bool:
+    src_dir = fallout_cache_dir(
+        scenario_id=scenario_id,
+        fingerprint=fallout_cache_fingerprint,
+    )
+    src_volume = src_dir / VOLUME_FALLOUT_BY_YEAR_FILENAME
+    src_money = src_dir / MONEY_FALLOUT_BY_YEAR_FILENAME
+    if not src_volume.is_file() or not src_money.is_file():
+        return False
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    for src, filename in (
+        (src_volume, VOLUME_FALLOUT_BY_YEAR_FILENAME),
+        (src_money, MONEY_FALLOUT_BY_YEAR_FILENAME),
+    ):
+        dst = cache_dir / filename
+        if dst.is_file():
+            dst.unlink()
+        try:
+            os.link(src, dst)
+        except OSError:
+            shutil.copy2(src, dst)
+    return True
+
+
+def save_scenario_fallout_arrays(
+    *,
+    scenario_id: int,
+    data_version: str,
+    volume_fallout_by_year: np.ndarray,
+    money_fallout_by_year: np.ndarray,
+    fallout_cache_fingerprint: str | None = None,
+) -> Path:
+    cache_dir = scenario_compute_dir(scenario_id=scenario_id, data_version=data_version)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    linked = False
+    if fallout_cache_fingerprint:
+        linked = _try_link_or_copy_fallout_from_cache(
+            cache_dir=cache_dir,
+            fallout_cache_fingerprint=fallout_cache_fingerprint,
+            scenario_id=scenario_id,
+        )
+    if not linked:
+        _save_npy_arrays_batch(
+            [
+                (
+                    volume_fallout_by_year.astype(np.float32, copy=False),
+                    cache_dir / VOLUME_FALLOUT_BY_YEAR_FILENAME,
+                ),
+                (
+                    money_fallout_by_year.astype(np.float32, copy=False),
+                    cache_dir / MONEY_FALLOUT_BY_YEAR_FILENAME,
+                ),
+            ],
+        )
+
+    metadata = _read_metadata(cache_dir)
+    if metadata is None:
+        raise ValueError(
+            f"Cannot append fallout: metadata missing for scenario_id={scenario_id} "
+            f"data_version={data_version}",
+        )
+    metadata["fallout_ready"] = True
+    _write_metadata(cache_dir, metadata)
+
+    from calculations.domain.services.scenario_effects_cache import (
+        set_scenario_effects_revision,
+    )
+
+    set_scenario_effects_revision(
+        scenario_id=scenario_id,
+        data_version=data_version,
+    )
+    return cache_dir
+
+
+def is_scenario_fallout_on_disk(*, scenario_id: int, data_version: str) -> bool:
+    cache_dir = scenario_compute_dir(scenario_id=scenario_id, data_version=data_version)
+    meta_path = cache_dir / METADATA_FILENAME
+    if not meta_path.is_file():
+        return False
+    metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+    if metadata.get("kpi_only"):
+        return False
+    if not metadata.get("fallout_ready"):
+        return False
+    return (cache_dir / VOLUME_FALLOUT_BY_YEAR_FILENAME).is_file() and (
+        cache_dir / MONEY_FALLOUT_BY_YEAR_FILENAME
+    ).is_file()
 
 
 def is_scenario_compact_on_disk(*, scenario_id: int, data_version: str) -> bool:

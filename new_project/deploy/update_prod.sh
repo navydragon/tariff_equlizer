@@ -140,7 +140,7 @@ if [[ -z "${SKIP_CACHE_REFRESH}" ]]; then
   if [[ -n "${WARM_DEPLOY_CACHES}" || -n "${WARM_DEPLOY_SCENARIOS}" ]]; then
     warm_args="--warm-only"
     if [[ -n "${WARM_DEPLOY_SCENARIOS}" ]]; then
-      warm_args="${warm_args} --warm-scenarios"
+      warm_args="${warm_args} --warm-scenarios --wait-scenarios"
     fi
     echo "==> Прогреваем кеши (refresh_deploy_caches ${warm_args})"
     if ! run_manage_as_service_user "refresh_deploy_caches ${warm_args}"; then

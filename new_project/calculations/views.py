@@ -309,6 +309,23 @@ def scenario_effects_aggregate_api(request):
         request=dto,
     )
     if calc_errors:
+        # Понятный ответ для фронта: расчёт/детализация ещё в процессе.
+        pending_msg = "Расчёт ещё выполняется. Повторите запрос через несколько секунд."
+        if pending_msg in calc_errors:
+            scenario = Scenario.objects.select_related("route_set").get(pk=scenario.pk)
+            payload = _build_cache_readiness_payload(scenario=scenario)
+            response = JsonResponse(
+                {
+                    "success": False,
+                    "code": "compute_pending",
+                    "errors": calc_errors,
+                    "retry_after_seconds": 3,
+                    **payload,
+                },
+                status=409,
+            )
+            response["Retry-After"] = "3"
+            return response
         return JsonResponse({"success": False, "errors": calc_errors}, status=400)
 
     return JsonResponse({"success": True, **response_dto.to_api_dict()})
@@ -540,6 +557,87 @@ def scenario_absolute_volumes_api(request):
         return JsonResponse({"success": False, "errors": calc_errors}, status=400)
 
     return JsonResponse({"success": True, **response_dto.to_api_dict()})
+
+
+@login_required
+@require_http_methods(["POST"])
+def scenario_absolute_both_api(request):
+    data, error_response = _parse_json_body(request)
+    if error_response:
+        return error_response
+
+    scenario_id = data.get("scenario_id")
+    if not isinstance(scenario_id, int) or scenario_id <= 0:
+        return JsonResponse(
+            {"success": False, "errors": ["Некорректный scenario_id"]},
+            status=400,
+        )
+
+    cache_key = data.get("cache_key") or ""
+    if not cache_key:
+        return JsonResponse(
+            {"success": False, "errors": ["Некорректный cache_key"]},
+            status=400,
+        )
+
+    revenues_raw = data.get("revenues") or {}
+    volumes_raw = data.get("volumes") or {}
+    if not isinstance(revenues_raw, dict) or not isinstance(volumes_raw, dict):
+        return JsonResponse(
+            {"success": False, "errors": ["Некорректный формат запроса"]},
+            status=400,
+        )
+
+    dto_revenues = ScenarioAbsoluteRequestDTO(
+        cache_key=cache_key,
+        group_by=revenues_raw.get("group_by") or "cargo_group",
+        group_by_inner=revenues_raw.get("group_by_inner") or "none",
+        include_fallout=bool(revenues_raw.get("include_fallout")),
+    )
+    dto_volumes = ScenarioAbsoluteRequestDTO(
+        cache_key=cache_key,
+        group_by=volumes_raw.get("group_by") or "cargo_group",
+        group_by_inner=volumes_raw.get("group_by_inner") or "none",
+        include_fallout=bool(volumes_raw.get("include_fallout")),
+    )
+    errors = dto_revenues.validate() + dto_volumes.validate()
+    if errors:
+        return JsonResponse({"success": False, "errors": errors}, status=400)
+
+    scenario, error_response = _get_user_scenario(request, scenario_id)
+    if error_response:
+        return error_response
+
+    service = ScenarioAbsoluteService()
+    response_revenues, errors_revenues = service.aggregate_revenues(
+        scenario=scenario,
+        user_id=request.user.id,
+        request=dto_revenues,
+    )
+    if errors_revenues or response_revenues is None:
+        return JsonResponse(
+            {"success": False, "errors": errors_revenues or ["Ошибка расчёта выручки"]},
+            status=400,
+        )
+
+    response_volumes, errors_volumes = service.aggregate_volumes(
+        scenario=scenario,
+        user_id=request.user.id,
+        request=dto_volumes,
+    )
+    if errors_volumes or response_volumes is None:
+        return JsonResponse(
+            {"success": False, "errors": errors_volumes or ["Ошибка расчёта объёмов"]},
+            status=400,
+        )
+
+    return JsonResponse(
+        {
+            "success": True,
+            "revenues": response_revenues.to_api_dict(),
+            "volumes": response_volumes.to_api_dict(),
+        },
+    )
 
 
 @login_required

@@ -55,6 +55,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
       compactStatusUrl: String,
       revenuesUrl: String,
       volumesUrl: String,
+      absoluteBothUrl: String,
       revenuesExportUrl: String,
       volumesExportUrl: String,
       activeScenarioId: String,
@@ -89,6 +90,8 @@ import { clearToasts, showToast } from "../lib/toast.js";
         boundScenarioEditModalHiddenHandler: null,
         showFalloutAdjustedRevenues: false,
         showFalloutAdjustedVolumes: false,
+        absoluteBothInFlight: null,
+        lastRebuildToastVersion: null,
       };
 
       this.state.scenarioEditModalEl = document.getElementById(
@@ -308,11 +311,9 @@ import { clearToasts, showToast } from "../lib/toast.js";
         await this._ensureCompactReady();
       }
 
-      if (kind === "revenues") {
-        await this._aggregateRevenues();
-      } else {
-        await this._aggregateVolumes();
-      }
+      // Важно: тумблер относится только к одной таблице.
+      // Даже при наличии общего эндпоинта `both/` перезагружаем только нужную.
+      await this._aggregateAbsoluteSingle(kind);
     }
 
     _resetFalloutToggles() {
@@ -363,9 +364,23 @@ import { clearToasts, showToast } from "../lib/toast.js";
       if (!this._isElasticityEnabled()) {
         return false;
       }
-      return kind === "revenues"
-        ? Boolean(this.state.showFalloutAdjustedRevenues)
-        : Boolean(this.state.showFalloutAdjustedVolumes);
+      // Источник правды — текущее состояние чекбокса в DOM.
+      // `state.showFalloutAdjusted*` может стать рассинхронизированным при
+      // программном сбросе/перерисовке без события `change`.
+      if (kind === "revenues") {
+        if (this.hasRevenuesFalloutToggleTarget) {
+          this.state.showFalloutAdjustedRevenues = Boolean(
+            this.revenuesFalloutToggleTarget.checked,
+          );
+        }
+        return Boolean(this.state.showFalloutAdjustedRevenues);
+      }
+      if (this.hasVolumesFalloutToggleTarget) {
+        this.state.showFalloutAdjustedVolumes = Boolean(
+          this.volumesFalloutToggleTarget.checked,
+        );
+      }
+      return Boolean(this.state.showFalloutAdjustedVolumes);
     }
 
     _fixInnerGroupConflict(outerSelect, innerSelect) {
@@ -507,12 +522,18 @@ import { clearToasts, showToast } from "../lib/toast.js";
         this.state.compactPending = data.compact_ready === false;
         this.state.effectsCompactPending = data.compact_ready === false;
         this.state.awaitingCompact = data.compact_ready === false;
+        this.state.falloutPending =
+          Boolean(data.compact_ready) && data.fallout_ready === false;
         this.state.earlyGroupReady = Boolean(
           data.early_group_ready ?? data.compact_ready,
         );
         this.state.lastDataVersion = data.data_version || null;
         if (this.state.compactPending) {
-          this._setCompactPendingIndicator(true);
+          this._setCompactPendingIndicator(true, "Обновление детализации…");
+        } else if (this.state.falloutPending) {
+          this._setCompactPendingIndicator(true, "Расчёт эластичности…", {
+            affectTables: false,
+          });
         }
         this.state.scenarioYears = data.years || [];
         this._renderWarning(
@@ -762,11 +783,18 @@ import { clearToasts, showToast } from "../lib/toast.js";
           this.state.compactPending = false;
           this._setCompactPendingIndicator(false);
         }
+        const showFallout = Boolean(data?.table?.show_fallout);
+        const falloutPending = Boolean(data?.table?.fallout_pending);
         this._renderTable(
           data.table && data.table.rows ? data.table.rows : [],
-          Boolean(data.table && data.table.show_fallout),
+          showFallout,
+          falloutPending,
         );
         this._renderChart(data.chart || null);
+        if (showFallout && falloutPending && !this.state.falloutRefreshInFlight) {
+          this.state.falloutRefreshInFlight = true;
+          void this._waitForFalloutReadyAndRefreshTable();
+        }
         if (showTableLoading) {
           this._setTableLoading(false);
           this._setChartLoading(false);
@@ -814,9 +842,11 @@ import { clearToasts, showToast } from "../lib/toast.js";
         if (data && data.success) {
           if (!data.compact_ready) {
             this.state.compactPending = true;
+            this.state.falloutPending = false;
           }
           if (data.compact_ready) {
             this.state.awaitingCompact = false;
+            this.state.falloutPending = data.fallout_ready === false;
           }
           if (data.early_group_ready) {
             this.state.earlyGroupReady = true;
@@ -829,6 +859,36 @@ import { clearToasts, showToast } from "../lib/toast.js";
         console.error("[decision-effects] compact-status failed", error);
       }
       await this._sleep(2000);
+    }
+
+    async _waitForFalloutReadyAndRefreshTable() {
+      if (!this.compactStatusUrlValue || !this.state.cacheKey) {
+        this.state.falloutRefreshInFlight = false;
+        return;
+      }
+
+      const maxAttempts = 45;
+      for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+        try {
+          const { data } = await fetchJson(this.compactStatusUrlValue, {
+            method: "POST",
+            body: { cache_key: this.state.cacheKey },
+          });
+
+          if (data?.success && data.fallout_ready === true) {
+            this.state.falloutPending = false;
+            this._setCompactPendingIndicator(false);
+            this.state.falloutRefreshInFlight = false;
+            this._aggregateEffects({ showTableLoading: false, attempt: 0 });
+            return;
+          }
+        } catch (error) {
+          console.error("[decision-effects] compact-status failed", error);
+        }
+        await this._sleep(2000);
+      }
+
+      this.state.falloutRefreshInFlight = false;
     }
 
     async _ensureCompactReady() {
@@ -848,16 +908,23 @@ import { clearToasts, showToast } from "../lib/toast.js";
               method: "POST",
               body: { cache_key: this.state.cacheKey },
             });
-        if (data?.success && data.compact_ready) {
-          this.state.compactPending = false;
-          this.state.awaitingCompact = false;
-          this.state.earlyGroupReady = true;
-          this._setCompactPendingIndicator(false);
-          return true;
-        }
-        if (data?.success && data.early_group_ready) {
-          this.state.earlyGroupReady = true;
-        }
+            if (data?.success && data.compact_ready) {
+              this.state.compactPending = false;
+              this.state.awaitingCompact = false;
+              this.state.earlyGroupReady = true;
+              this.state.falloutPending = data.fallout_ready === false;
+              if (this.state.falloutPending) {
+                this._setCompactPendingIndicator(true, "Расчёт эластичности…", {
+                  affectTables: false,
+                });
+              } else {
+                this._setCompactPendingIndicator(false);
+              }
+              return true;
+            }
+            if (data?.success && data.early_group_ready) {
+              this.state.earlyGroupReady = true;
+            }
           } catch (error) {
             console.error("[decision-effects] compact-status failed", error);
           }
@@ -912,7 +979,71 @@ import { clearToasts, showToast } from "../lib/toast.js";
       }
       this._setKpiLoading(true);
       await this._waitForWarmKpi(this.state.selectedScenarioId);
+      await this._waitForWarmComplete(this.state.selectedScenarioId);
+      await this._maybeShowRebuildToast(this.state.selectedScenarioId);
       await this._checkRevision(true);
+    }
+
+    async _waitForWarmComplete(scenarioId, startedAt = Date.now()) {
+      if (!this.hasWarmStatusUrlValue || !scenarioId) {
+        return;
+      }
+      const timeoutMs = 120000;
+      if (Date.now() - startedAt > timeoutMs) {
+        return;
+      }
+
+      const url = `${this.warmStatusUrlValue}?scenario_id=${encodeURIComponent(
+        String(scenarioId),
+      )}`;
+      try {
+        const { data } = await fetchJson(url);
+        if (!data || !data.success) {
+          await this._sleep(300);
+          return this._waitForWarmComplete(scenarioId, startedAt);
+        }
+        if (data.phase === "error") {
+          console.error("[decision-effects] scenario warm failed", data.error);
+          return;
+        }
+        const message = (data.rebuild_message || "").trim();
+        if (data.phase === "done" && message) {
+          return;
+        }
+        await this._sleep(300);
+        return this._waitForWarmComplete(scenarioId, startedAt);
+      } catch (error) {
+        console.error("[decision-effects] warm complete poll failed", error);
+        await this._sleep(500);
+        return this._waitForWarmComplete(scenarioId, startedAt);
+      }
+    }
+
+    async _maybeShowRebuildToast(scenarioId) {
+      if (!this.hasWarmStatusUrlValue || !scenarioId) {
+        return;
+      }
+      const url = `${this.warmStatusUrlValue}?scenario_id=${encodeURIComponent(
+        String(scenarioId),
+      )}`;
+      try {
+        const { data } = await fetchJson(url);
+        if (!data || !data.success) {
+          return;
+        }
+        const message = (data.rebuild_message || "").trim();
+        const dataVersion = data.data_version || null;
+        if (!message || !dataVersion) {
+          return;
+        }
+        if (this.state.lastRebuildToastVersion === dataVersion) {
+          return;
+        }
+        this.state.lastRebuildToastVersion = dataVersion;
+        showToast(message, this._toastOptions({ variant: "info", delay: 10000 }));
+      } catch (_e) {
+        // ignore
+      }
     }
 
     async _waitForWarmKpi(scenarioId, startedAt = Date.now()) {
@@ -940,7 +1071,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
           console.error("[decision-effects] scenario warm failed", data.error);
           return;
         }
-        if (data.kpi_ready || data.phase === "done" || data.compact_ready) {
+        if (data.kpi_ready || data.phase === "done") {
           return;
         }
         await this._sleep(300);
@@ -984,7 +1115,11 @@ import { clearToasts, showToast } from "../lib/toast.js";
       }
     }
 
-    _setCompactPendingIndicator(isPending) {
+    _setCompactPendingIndicator(
+      isPending,
+      message = "Обновление детализации…",
+      { affectTables = true } = {},
+    ) {
       if (!this.hasKpiCardsTarget) return;
       const existing = this.kpiCardsTarget.querySelector("[data-compact-pending]");
       if (!isPending) {
@@ -994,6 +1129,10 @@ import { clearToasts, showToast } from "../lib/toast.js";
         return;
       }
       if (existing) {
+        const text = existing.querySelector("[data-compact-pending-text]");
+        if (text) {
+          text.textContent = message;
+        }
         return;
       }
       const wrapper = document.createElement("div");
@@ -1001,18 +1140,20 @@ import { clearToasts, showToast } from "../lib/toast.js";
       wrapper.innerHTML = `
         <div class="alert alert-info py-2 px-3 mb-2 w-100" role="status">
           <span class="spinner-border spinner-border-sm text-primary me-2" role="status"></span>
-          Обновление детализации…
+          <span data-compact-pending-text>${message}</span>
         </div>
       `;
       this.kpiCardsTarget.prepend(wrapper);
-      if (this.hasTableWrapTarget) {
-        this.tableWrapTarget.innerHTML = this._tableLoadingHtml(
-          "Обновление детализации…",
-        );
+      if (affectTables) {
+        if (this.hasTableWrapTarget) {
+          this.tableWrapTarget.innerHTML = this._tableLoadingHtml(
+            "Обновление детализации…",
+          );
+        }
+        this._setChartLoading(true, "Обновление детализации…");
+        this._setRevenuesTableLoading(true, "Обновление детализации…");
+        this._setVolumesTableLoading(true, "Обновление детализации…");
       }
-      this._setChartLoading(true, "Обновление детализации…");
-      this._setRevenuesTableLoading(true, "Обновление детализации…");
-      this._setVolumesTableLoading(true, "Обновление детализации…");
     }
 
     _setKpiLoading(isLoading) {
@@ -1358,8 +1499,13 @@ import { clearToasts, showToast } from "../lib/toast.js";
       };
     }
 
-    _formatEffectsFalloutCell(row) {
+    _formatEffectsFalloutCell(row, falloutPending = false) {
       if (row.fallout_bln == null) {
+        if (falloutPending) {
+          return `<td class="text-end text-muted">
+            <span class="spinner-border spinner-border-sm text-primary" role="status"></span>
+          </td>`;
+        }
         return '<td class="text-end text-muted">—</td>';
       }
       const money = this._formatSignedMagnitude(row.fallout_bln);
@@ -1370,7 +1516,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
       </td>`;
     }
 
-    _renderTable(rows, showFallout = false) {
+    _renderTable(rows, showFallout = false, falloutPending = false) {
       if (!this.hasTableWrapTarget) return;
 
       if (!rows.length) {
@@ -1386,7 +1532,9 @@ import { clearToasts, showToast } from "../lib/toast.js";
       const body = rows
         .map((row) => {
           const rowClass = row.is_subtotal ? "fw-subtotal fw-bold" : "";
-          const falloutCell = showFallout ? this._formatEffectsFalloutCell(row) : "";
+          const falloutCell = showFallout
+            ? this._formatEffectsFalloutCell(row, falloutPending)
+            : "";
 
           const basePct = this._formatSignedPct(row.base_pct);
           const rulesPct = this._formatSignedPct(row.rules_pct);
@@ -1625,11 +1773,164 @@ import { clearToasts, showToast } from "../lib/toast.js";
     }
 
     async _aggregateRevenues(options = {}) {
+      if (this.absoluteBothUrlValue) {
+        return this._aggregateAbsoluteBoth(options);
+      }
       return this._aggregateAbsoluteTable("revenues", options);
     }
 
     async _aggregateVolumes(options = {}) {
+      if (this.absoluteBothUrlValue) {
+        return this._aggregateAbsoluteBoth(options);
+      }
       return this._aggregateAbsoluteTable("volumes", options);
+    }
+
+    async _aggregateAbsoluteSingle(kind, options = {}) {
+      // Обходит `both/`, чтобы не дергать вторую таблицу.
+      // Временно отключаем `both/` для данного вызова.
+      const saved = this.absoluteBothUrlValue;
+      this.absoluteBothUrlValue = null;
+      try {
+        return await this._aggregateAbsoluteTable(kind, options);
+      } finally {
+        this.absoluteBothUrlValue = saved;
+      }
+    }
+
+    async _aggregateAbsoluteBoth(options = {}) {
+      // `revenues` и `volumes` оба могут вызвать `both/` параллельно.
+      // Чтобы не делать два одинаковых запроса (и не мигать лоадерами),
+      // дедуплицируем in-flight запрос.
+      if (this.state.absoluteBothInFlight) {
+        return this.state.absoluteBothInFlight;
+      }
+      const promise = this._aggregateAbsoluteBothImpl(options);
+      this.state.absoluteBothInFlight = promise;
+      try {
+        return await promise;
+      } finally {
+        if (this.state.absoluteBothInFlight === promise) {
+          this.state.absoluteBothInFlight = null;
+        }
+      }
+    }
+
+    async _aggregateAbsoluteBothImpl({ attempt = 0 } = {}) {
+      if (
+        !this.absoluteBothUrlValue ||
+        !this.state.cacheKey ||
+        !this.state.selectedScenarioId
+      ) {
+        return;
+      }
+
+      const includeFalloutRevenues = this._includeFalloutForKind("revenues");
+      const includeFalloutVolumes = this._includeFalloutForKind("volumes");
+      const needsCompactWait =
+        (this.state.awaitingCompact || this.state.compactPending) &&
+        (!this._canUseEarlyAbsolute() ||
+          includeFalloutRevenues ||
+          includeFalloutVolumes);
+      const maxAttempts =
+        needsCompactWait || includeFalloutRevenues || includeFalloutVolumes ? 45 : 5;
+      const loadingMessage =
+        includeFalloutRevenues || includeFalloutVolumes
+          ? "Расчёт выпадения…"
+          : needsCompactWait
+            ? "Обновление детализации…"
+            : "Расчёт данных…";
+
+      if (attempt === 0 && (includeFalloutRevenues || includeFalloutVolumes)) {
+        await this._ensureCompactReady();
+      }
+
+      if (attempt === 0 || needsCompactWait || includeFalloutRevenues || includeFalloutVolumes) {
+        this._setRevenuesTableLoading(true, loadingMessage);
+        this._setVolumesTableLoading(true, loadingMessage);
+      }
+
+      try {
+        const payload = {
+          scenario_id: this.state.selectedScenarioId,
+          cache_key: this.state.cacheKey,
+          revenues: this._absolutePayload("revenues"),
+          volumes: this._absolutePayload("volumes"),
+        };
+
+        const { response, data } = await fetchJson(this.absoluteBothUrlValue, {
+          method: "POST",
+          body: payload,
+        });
+
+        if (!response.ok || !data || !data.success) {
+          const message =
+            (data && data.errors && data.errors.join("; ")) ||
+            "Ошибка загрузки абсолютных таблиц";
+          if (
+            (needsCompactWait ||
+              includeFalloutRevenues ||
+              includeFalloutVolumes) &&
+            attempt + 1 < maxAttempts
+          ) {
+            await this._waitForCompactReady();
+            return this._aggregateAbsoluteBothImpl({ attempt: attempt + 1 });
+          }
+          if (this._isAggregatePendingMessage(message) && attempt + 1 < maxAttempts) {
+            await this._sleep(2000);
+            return this._aggregateAbsoluteBothImpl({ attempt: attempt + 1 });
+          }
+          this._showError(message);
+          if (this.hasRevenuesTableWrapTarget) {
+            this._setRevenuesTableLoading(false);
+            this.revenuesTableWrapTarget.innerHTML =
+              '<div class="text-muted py-4 text-center">Нет данных.</div>';
+          }
+          if (this.hasVolumesTableWrapTarget) {
+            this._setVolumesTableLoading(false);
+            this.volumesTableWrapTarget.innerHTML =
+              '<div class="text-muted py-4 text-center">Нет данных.</div>';
+          }
+          return;
+        }
+
+        const revenuesRows = (data.revenues?.table && data.revenues.table.rows) || [];
+        const volumesRows = (data.volumes?.table && data.volumes.table.rows) || [];
+        const shouldRetry =
+          (this._absoluteRowsLookEmpty(revenuesRows) ||
+            this._absoluteRowsLookEmpty(volumesRows) ||
+            !revenuesRows.length ||
+            !volumesRows.length) &&
+          (needsCompactWait || includeFalloutRevenues || includeFalloutVolumes) &&
+          attempt + 1 < maxAttempts;
+        if (shouldRetry) {
+          await this._waitForCompactReady();
+          return this._aggregateAbsoluteBothImpl({ attempt: attempt + 1 });
+        }
+
+        if (this.hasRevenuesTableWrapTarget) {
+          this._renderAbsoluteTable(this.revenuesTableWrapTarget, data.revenues || {});
+        }
+        if (this.hasVolumesTableWrapTarget) {
+          this._renderAbsoluteTable(this.volumesTableWrapTarget, data.volumes || {});
+        }
+      } catch (error) {
+        console.error("[decision-effects] absolute both aggregate failed", error);
+        if (attempt + 1 < maxAttempts) {
+          await this._sleep(2000);
+          return this._aggregateAbsoluteBothImpl({ attempt: attempt + 1 });
+        }
+        if (this.hasRevenuesTableWrapTarget) {
+          this._setRevenuesTableLoading(false);
+          this.revenuesTableWrapTarget.innerHTML =
+            '<div class="text-muted py-4 text-center">Не удалось загрузить таблицу.</div>';
+        }
+        if (this.hasVolumesTableWrapTarget) {
+          this._setVolumesTableLoading(false);
+          this.volumesTableWrapTarget.innerHTML =
+            '<div class="text-muted py-4 text-center">Не удалось загрузить таблицу.</div>';
+        }
+      }
     }
 
     async _aggregateAbsoluteTable(kind, { attempt = 0 } = {}) {

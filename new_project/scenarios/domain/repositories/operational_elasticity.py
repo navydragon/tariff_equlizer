@@ -24,6 +24,7 @@ class ModelRouteEconomicsRow:
     operators_cost_per_ton: Decimal | None
     transshipment_cost_per_ton: Decimal | None
     enterprise_load_coefficient: Decimal | None
+    fixed_retention_coefficient: Decimal | None
 
 
 class OperationalElasticityRepository:
@@ -92,6 +93,7 @@ class OperationalElasticityRepository:
             operators_cost_per_ton=route.operators_cost_per_ton,
             transshipment_cost_per_ton=route.transshipment_cost_per_ton,
             enterprise_load_coefficient=route.enterprise_load_coefficient,
+            fixed_retention_coefficient=route.fixed_retention_coefficient,
         )
 
     def reset_operational_elasticity_flags(self, route_set: RouteSet) -> int:

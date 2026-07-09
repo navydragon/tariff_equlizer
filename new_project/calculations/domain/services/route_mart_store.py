@@ -88,6 +88,7 @@ MART_ELASTICITY_SIDECAR_COLUMNS = (
     "mr_operators_cost_per_ton",
     "mr_transshipment_cost_per_ton",
     "mr_enterprise_load_coefficient",
+    "mr_fixed_retention_coefficient",
 )
 
 _MASK_SIDECAR_INT_COLUMNS = frozenset(
@@ -99,7 +100,7 @@ _MASK_SIDECAR_BOOL_COLUMNS = frozenset(
 )
 
 # Версия sidecar на диске (отдельные .npy + mmap); bump при смене dtype/колонок.
-SIDECAR_SCHEMA_VERSION = 8
+SIDECAR_SCHEMA_VERSION = 9
 # Legacy npz (до v4).
 MASKS_NPZ_SCHEMA_VERSION = 3
 MASKS_NPZ_META_KEYS = frozenset({"__schema_version__"})

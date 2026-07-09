@@ -73,6 +73,23 @@ class Command(BaseCommand):
             help="После прогрева витрин прогреть KPI-снимки сценариев.",
         )
         parser.add_argument(
+            "--wait-scenarios",
+            action="store_true",
+            help=(
+                "Ждать готовности compact (и fallout, если включена эластичность) "
+                "после --warm-scenarios. По умолчанию прогрев compact идёт в фоне."
+            ),
+        )
+        parser.add_argument(
+            "--scenario-wait-timeout-seconds",
+            type=int,
+            default=900,
+            help=(
+                "Таймаут ожидания готовности сценария "
+                "при --wait-scenarios (сек)."
+            ),
+        )
+        parser.add_argument(
             "--skip-mask-prewarm",
             action="store_true",
             help="Не прогревать маски тарифных правил (быстрее; маски построятся при первом расчёте).",
@@ -104,7 +121,13 @@ class Command(BaseCommand):
                 prewarm_masks=not options["skip_mask_prewarm"],
             )
             if options.get("warm_scenarios"):
-                self._warm_scenario_snapshots(route_set_id=options["route_set_id"])
+                self._warm_scenario_snapshots(
+                    route_set_id=options["route_set_id"],
+                    wait=bool(options.get("wait_scenarios")),
+                    timeout_seconds=int(
+                        options.get("scenario_wait_timeout_seconds") or 900,
+                    ),
+                )
 
     def _clear_caches(self) -> None:
         self.stdout.write("==> Очищаем дисковые кеши и Redis/LocMem")
@@ -207,9 +230,22 @@ class Command(BaseCommand):
         if removed_masks:
             self.stdout.write(f"        удалено устаревших mask dirs: {removed_masks}")
 
-    def _warm_scenario_snapshots(self, *, route_set_id: int | None) -> None:
+    def _warm_scenario_snapshots(
+        self,
+        *,
+        route_set_id: int | None,
+        wait: bool,
+        timeout_seconds: int,
+    ) -> None:
         from calculations.domain.services.scenario_effects_warm import (
             warm_scenario_kpi_snapshot,
+        )
+        from calculations.domain.services.scenario_warm_status import (
+            resolve_warm_data_version,
+        )
+        from calculations.domain.services.scenario_compute_store import (
+            is_scenario_compact_on_disk,
+            is_scenario_fallout_on_disk,
         )
         from scenarios.models import Scenario
 
@@ -230,3 +266,49 @@ class Command(BaseCommand):
             warm_scenario_kpi_snapshot(scenario_id=scenario.id)
             elapsed_ms = int((time.perf_counter() - started) * 1000)
             self.stdout.write(f"        готово за {elapsed_ms} ms")
+
+            if not wait:
+                continue
+
+            data_version = resolve_warm_data_version(scenario_id=scenario.id)
+            if not data_version:
+                self.stdout.write(
+                    self.style.WARNING("        data_version не определён — пропуск ожидания"),
+                )
+                continue
+
+            wait_fallout = bool(
+                getattr(scenario, "consider_demand_elasticity", False)
+                and getattr(scenario, "elasticity_set_id", None)
+            )
+            wait_started = time.perf_counter()
+            deadline = wait_started + float(timeout_seconds)
+            while True:
+                compact_ready = is_scenario_compact_on_disk(
+                    scenario_id=scenario.id,
+                    data_version=data_version,
+                )
+                fallout_ready = (
+                    is_scenario_fallout_on_disk(
+                        scenario_id=scenario.id,
+                        data_version=data_version,
+                    )
+                    if wait_fallout
+                    else True
+                )
+                if compact_ready and fallout_ready:
+                    waited_ms = int((time.perf_counter() - wait_started) * 1000)
+                    self.stdout.write(
+                        self.style.SUCCESS(f"        compact+fallout готовы за {waited_ms} ms"),
+                    )
+                    break
+                if time.perf_counter() >= deadline:
+                    waited_ms = int((time.perf_counter() - wait_started) * 1000)
+                    self.stdout.write(
+                        self.style.WARNING(
+                            "        таймаут ожидания готовности compact/fallout "
+                            f"({waited_ms} ms)",
+                        ),
+                    )
+                    break
+                time.sleep(2.0)

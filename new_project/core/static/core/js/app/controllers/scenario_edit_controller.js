@@ -16,6 +16,7 @@ import { renderErrors } from "../lib/errors.js";
       "description",
       "startYear",
       "endYear",
+      "yearsError",
       "routeSetSelect",
       "rebuildStatus",
       "recomputeBtn",
@@ -32,12 +33,18 @@ import { renderErrors } from "../lib/errors.js";
 
     connect() {
       this.initTabs();
+      this._autosaveTimer = null;
+      this._autosaveSeq = 0;
       if (!this.routeSetsPreloadedValue) {
         this.loadRouteSets();
       }
     }
 
     disconnect() {
+      if (this._autosaveTimer) {
+        clearTimeout(this._autosaveTimer);
+        this._autosaveTimer = null;
+      }
       if (this.onShownTab) {
         this.element
           .querySelectorAll('[data-bs-toggle="tab"]')
@@ -184,26 +191,116 @@ import { renderErrors } from "../lib/errors.js";
       return settings;
     }
 
-    // === Form submit ===
-    async submit(event) {
-      event.preventDefault();
+    // === Autosave ===
+    autosave(event) {
+      if (event && typeof event.preventDefault === "function") {
+        event.preventDefault();
+      }
 
+      if (this._autosaveTimer) {
+        clearTimeout(this._autosaveTimer);
+      }
+
+      this._autosaveTimer = setTimeout(() => {
+        void this._autosaveNow();
+      }, 400);
+    }
+
+    async _autosaveNow() {
       const errorsContainer = document.getElementById("editScenarioErrors");
-      if (errorsContainer) errorsContainer.innerHTML = "";
 
+      const { ok, errors, startYear, endYear } = this._validateYears();
+      if (!ok) {
+        this._setYearsError(errors.join(" "));
+        return;
+      }
+
+      this._setYearsError("");
+      if (errorsContainer) {
+        errorsContainer.innerHTML = "";
+      }
+
+      const payload = this._buildPayload({ startYear, endYear });
+      const url = this.updateUrlValue;
+      if (!url) return;
+
+      const seq = (this._autosaveSeq += 1);
+      const { data } = await fetchJson(url, { method: "POST", body: payload });
+      if (seq !== this._autosaveSeq) {
+        return;
+      }
+
+      if (!data || !data.success) {
+        const errs =
+          (data && (data.errors || (data.error ? [data.error] : null))) || [
+            "Ошибка при сохранении сценария",
+          ];
+        if (errorsContainer) {
+          errorsContainer.innerHTML = "";
+          const div = document.createElement("div");
+          div.className = "alert alert-danger";
+          errorsContainer.appendChild(div);
+          renderErrors(div, errs);
+          errorsContainer.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+        this.showToast("error", errs.join("<br>"));
+      }
+    }
+
+    _validateYears() {
+      const errors = [];
+      const startRaw = this.hasStartYearTarget ? String(this.startYearTarget.value || "").trim() : "";
+      const endRaw = this.hasEndYearTarget ? String(this.endYearTarget.value || "").trim() : "";
+
+      if (!/^\d{4}$/.test(startRaw)) {
+        errors.push("Год начала должен быть в формате ГГГГ");
+      }
+      if (!/^\d{4}$/.test(endRaw)) {
+        errors.push("Год окончания должен быть в формате ГГГГ");
+      }
+
+      const startYear = /^\d{4}$/.test(startRaw) ? parseInt(startRaw, 10) : null;
+      const endYear = /^\d{4}$/.test(endRaw) ? parseInt(endRaw, 10) : null;
+
+      if (startYear != null && (startYear < 2000 || startYear > 2100)) {
+        errors.push("Год начала должен быть в пределах 2000-2100");
+      }
+      if (endYear != null && (endYear < 2000 || endYear > 2100)) {
+        errors.push("Год окончания должен быть в пределах 2000-2100");
+      }
+      if (startYear != null && endYear != null && startYear >= endYear) {
+        errors.push("Год начала должен быть меньше года окончания");
+      }
+
+      if (errors.length) {
+        return { ok: false, errors, startYear: null, endYear: null };
+      }
+      return { ok: true, errors: [], startYear, endYear };
+    }
+
+    _setYearsError(message) {
+      if (!this.hasYearsErrorTarget) return;
+      const text = String(message || "").trim();
+      if (!text) {
+        this.yearsErrorTarget.textContent = "";
+        this.yearsErrorTarget.classList.add("d-none");
+        return;
+      }
+      this.yearsErrorTarget.textContent = text;
+      this.yearsErrorTarget.classList.remove("d-none");
+    }
+
+    _buildPayload({ startYear, endYear }) {
       const routeSetId = this.hasRouteSetSelectTarget
         ? parseInt(this.routeSetSelectTarget.value || "0", 10)
         : 0;
 
-      const payload = {
+      return {
         name: this.hasNameTarget ? this.nameTarget.value : "",
         description: this.hasDescriptionTarget ? this.descriptionTarget.value : "",
-        start_year: this.hasStartYearTarget
-          ? parseInt(this.startYearTarget.value || "0", 10)
-          : null,
-        end_year: this.hasEndYearTarget
-          ? parseInt(this.endYearTarget.value || "0", 10)
-          : null,
+        // Важно: годы всегда уходят парой.
+        start_year: startYear,
+        end_year: endYear,
         route_set_id: routeSetId || null,
         price_change_settings: this.collectPriceChangeSettings(),
         export_price_mode: this.collectExportPriceMode(),
@@ -212,26 +309,6 @@ import { renderErrors } from "../lib/errors.js";
         consider_enterprise_load: this.collectConsiderEnterpriseLoad(),
         retention_coefficient_mode: this.collectRetentionCoefficientMode(),
       };
-
-      const url = this.updateUrlValue;
-      const { data } = await fetchJson(url, { method: "POST", body: payload });
-
-      if (!data || !data.success) {
-        const errs = (data && (data.errors || (data.error ? [data.error] : null))) || [
-          "Ошибка при сохранении сценария",
-        ];
-        if (errorsContainer) {
-          const div = document.createElement("div");
-          div.className = "alert alert-danger";
-          errorsContainer.appendChild(div);
-          renderErrors(div, errs);
-          errorsContainer.scrollIntoView({ behavior: "smooth", block: "start" });
-        }
-        this.showToast("error", errs.join("<br>"));
-        return;
-      }
-
-      this.showToast("success", "Сценарий успешно обновлен");
     }
 
     async recompute() {

@@ -712,6 +712,13 @@ class Route(models.Model):
         null=True,
         blank=True,
     )
+    fixed_retention_coefficient = models.DecimalField(
+        "Постоянный коэффициент сохранения",
+        max_digits=6,
+        decimal_places=4,
+        null=True,
+        blank=True,
+    )
     turnover_change_coef_2025 = models.DecimalField(
         "Коэфф. изменения грузооборота 2025",
         max_digits=6,

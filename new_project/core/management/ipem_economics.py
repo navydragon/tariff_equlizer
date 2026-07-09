@@ -82,6 +82,13 @@ IPEM_COAL_2026_XLSX_NAME = "Уголь_эластика_2026_5.xlsx"
 IPEM_COAL_2026_HEADER_ROW = 2
 IPEM_COAL_CARGO_GROUP_CODE = 1
 
+IPEM_METALLURGY_2026_ROUTE_SHEETS: tuple[str, ...] = (
+    "ЧМ,ЦМ,Руда,Кокс",
+)
+IPEM_METALLURGY_2026_XLSX_NAME = "Металлургия_эластика.xlsx"
+IPEM_METALLURGY_2026_HEADER_ROW = 2
+IPEM_METALLURGY_CARGO_GROUP_CODES: tuple[int, ...] = (2, 4, 5, 10)
+
 IPEM_COAL_2026_OVERLAP_COLUMNS: tuple[str, ...] = (
     "ipem_row",
     "сцеп_цены",
@@ -213,6 +220,7 @@ class IpemCoal2026ResolvedRow:
     delivery_time_ops_days: Optional[int]
     rate_per_wagon_per_day: Optional[Decimal]
     enterprise_load_coefficient: Optional[Decimal] = None
+    fixed_retention_coefficient: Optional[Decimal] = None
     cargo_code_izpod: str = ""
     cargo_group_izpod: str = ""
     cargo_code_3: str = ""
@@ -325,6 +333,20 @@ def parse_enterprise_load_coefficient(row: dict[str, str]) -> Optional[Decimal]:
         raw = row.get(key) or ""
         if raw:
             return parse_decimal_cell(raw)
+    return None
+
+
+def parse_fixed_retention_coefficient(row: dict[str, str]) -> Optional[Decimal]:
+    """
+    В некоторых xlsx (металлургия) в колонке «Коэффициент загрузки предприятия»
+    встречается текстовый маркер «Внутренняя логистика». Это НЕ load factor, а
+    сигнал, что retention должен быть постоянным (в файле всегда 1).
+    """
+    raw = (row.get("Коэффициент загрузки предприятия") or "").strip()
+    if not raw:
+        return None
+    if "внутренн" in raw.casefold() and "логист" in raw.casefold():
+        return Decimal("1")
     return None
 
 
@@ -490,6 +512,24 @@ def load_ipem_coal_2026_xlsx(path: Path) -> list[dict[str, str]]:
             path,
             sheet_name=sheet_name,
             header=IPEM_COAL_2026_HEADER_ROW,
+        )
+        for _, series in df.iterrows():
+            row = {str(col): _ipem_cell_str(series[col]) for col in df.columns}
+            if not any(row.values()):
+                continue
+            rows.append(row)
+    return rows
+
+
+def load_ipem_metallurgy_2026_xlsx(path: Path) -> list[dict[str, str]]:
+    import pandas as pd
+
+    rows: list[dict[str, str]] = []
+    for sheet_name in IPEM_METALLURGY_2026_ROUTE_SHEETS:
+        df = pd.read_excel(
+            path,
+            sheet_name=sheet_name,
+            header=IPEM_METALLURGY_2026_HEADER_ROW,
         )
         for _, series in df.iterrows():
             row = {str(col): _ipem_cell_str(series[col]) for col in df.columns}
@@ -788,6 +828,7 @@ def resolve_ipem_coal_2026_row(
                 row.get("Ставка на вагон, руб. за вагон в сутки", "")
             ),
             enterprise_load_coefficient=parse_enterprise_load_coefficient(row),
+            fixed_retention_coefficient=parse_fixed_retention_coefficient(row),
             **cargo_izpod,
         ),
         [],
@@ -820,6 +861,7 @@ def build_model_route_from_resolved_row(
         delivery_time_ops_days=resolved.delivery_time_ops_days,
         rate_per_wagon_per_day=resolved.rate_per_wagon_per_day,
         enterprise_load_coefficient=resolved.enterprise_load_coefficient,
+        fixed_retention_coefficient=resolved.fixed_retention_coefficient,
         cargo_code_izpod=resolved.cargo_code_izpod,
         cargo_group_izpod=resolved.cargo_group_izpod,
         cargo_code_3=resolved.cargo_code_3,
@@ -838,6 +880,17 @@ def _coal_model_routes_qs(route_set: RouteSet):
     )
 
 
+def _model_routes_qs_for_cargo_groups(
+    route_set: RouteSet,
+    cargo_group_codes: Iterable[int],
+):
+    return Route.objects.filter(
+        route_set=route_set,
+        is_model=True,
+        cargo__cargo_group__code__in=list(cargo_group_codes),
+    )
+
+
 def clear_ipem_model_routes(route_set: RouteSet) -> None:
     coal_model_ids = list(_coal_model_routes_qs(route_set).values_list("pk", flat=True))
     if not coal_model_ids:
@@ -848,6 +901,26 @@ def clear_ipem_model_routes(route_set: RouteSet) -> None:
         model_route_id__in=coal_model_ids,
     ).update(model_route=None)
     Route.objects.filter(pk__in=coal_model_ids).delete()
+
+
+def clear_ipem_model_routes_for_cargo_groups(
+    route_set: RouteSet,
+    cargo_group_codes: Iterable[int],
+) -> None:
+    model_ids = list(
+        _model_routes_qs_for_cargo_groups(route_set, cargo_group_codes).values_list(
+            "pk",
+            flat=True,
+        )
+    )
+    if not model_ids:
+        return
+    Route.objects.filter(
+        route_set=route_set,
+        is_model=False,
+        model_route_id__in=model_ids,
+    ).update(model_route=None)
+    Route.objects.filter(pk__in=model_ids).delete()
 
 
 def link_operational_routes_to_models(
@@ -963,6 +1036,90 @@ def import_ipem_coal_2026_model_routes(
         created,
     )
     sync_model_routes_cargo_izpod_from_operational(route_set, created)
+    from scenarios.domain.services.operational_elasticity import (
+        assign_operational_elasticity_sources,
+    )
+
+    elasticity_stats = assign_operational_elasticity_sources(
+        route_set,
+        progress=progress,
+    )
+    result.elasticity_direct_model = elasticity_stats.direct_model
+    result.elasticity_holding_aggregate = elasticity_stats.holding_aggregate
+    result.elasticity_cargo_group_aggregate = elasticity_stats.cargo_group_aggregate
+    result.elasticity_skipped = elasticity_stats.skipped
+    return result
+
+
+def import_ipem_metallurgy_2026_model_routes(
+    xlsx_path: Path,
+    route_set: RouteSet,
+    *,
+    dry_run: bool = False,
+    progress: Callable[[str], None] | None = None,
+) -> IpemCoal2026ImportResult:
+    """
+    Импорт model-маршрутов из Металлургия_эластика.xlsx (лист «ЧМ,ЦМ,Руда,Кокс»).
+
+    Использует тот же формат колонок, что и угольные листы, но в одном листе.
+    """
+    result = IpemCoal2026ImportResult()
+    ipem_rows = load_ipem_metallurgy_2026_xlsx(xlsx_path)
+    result.total_rows = len(ipem_rows)
+
+    wagons = list(WagonKind.objects.all())
+    shipment_by_name = {normalize_name(s.name): s for s in ShipmentType.objects.all()}
+    message_by_name = {normalize_name(m.name): m for m in MessageType.objects.all()}
+
+    resolved_rows: list[IpemCoal2026ResolvedRow] = []
+    seen_link_keys: dict[tuple[Any, ...], str] = {}
+
+    for ipem_row_idx, row in enumerate(ipem_rows, start=1):
+        resolved, reasons = resolve_ipem_coal_2026_row(
+            row,
+            ipem_row=ipem_row_idx,
+            wagons=wagons,
+            shipment_by_name=shipment_by_name,
+            message_by_name=message_by_name,
+        )
+        if resolved is None:
+            result.skipped_rows += 1
+            result.skip_reasons.append(
+                f"Строка {ipem_row_idx}: {'; '.join(reasons)}"
+            )
+            continue
+
+        # У угля route_code вида IPEM2026-XYZ; для металлургии нужен другой префикс,
+        # иначе ловим uniq(route_set_id, route_code) при совместном импорте.
+        resolved.route_code = f"IPEM-META-2026-{ipem_row_idx:03d}"
+
+        link_key = (
+            resolved.origin.pk,
+            resolved.destination.pk,
+            resolved.cargo.pk,
+            resolved.wagon_kind.pk,
+            resolved.shipment_type.pk,
+        )
+        if link_key in seen_link_keys:
+            result.duplicate_link_key_warnings.append(
+                f"Ключ связи {link_key}: повтор в IPEM (строка {ipem_row_idx}, "
+                f"ранее строка {seen_link_keys[link_key]}); при линковке победит последняя"
+            )
+        seen_link_keys[link_key] = str(ipem_row_idx)
+        resolved_rows.append(resolved)
+
+    if dry_run:
+        result.created_model_routes = len(resolved_rows)
+        return result
+
+    clear_ipem_model_routes_for_cargo_groups(route_set, IPEM_METALLURGY_CARGO_GROUP_CODES)
+
+    model_routes: list[Route] = [build_model_route_from_resolved_row(route_set, r) for r in resolved_rows]
+    created = Route.objects.bulk_create(model_routes, batch_size=500)
+    result.created_model_routes = len(created)
+    result.linked_operational_routes = link_operational_routes_to_models(route_set, created)
+    sync_model_routes_cargo_izpod_from_operational(route_set, created)
+
     from scenarios.domain.services.operational_elasticity import (
         assign_operational_elasticity_sources,
     )

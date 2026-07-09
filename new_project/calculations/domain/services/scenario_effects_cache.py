@@ -116,6 +116,7 @@ class ScenarioEffectsCachePayload:
     facts: list[RouteEffectFact] = field(default_factory=list)
     compact: CompactRouteEffects | None = None
     compact_pending: bool = False
+    fallout_pending: bool = False
     data_version: str | None = None
     early_group_snapshot: EarlyGroupSnapshot | None = None
 
@@ -230,6 +231,7 @@ def _payload_for_redis(payload: ScenarioEffectsCachePayload) -> ScenarioEffectsC
         facts=payload.facts,
         compact=None,
         compact_pending=payload.compact_pending,
+        fallout_pending=payload.fallout_pending,
         data_version=payload.data_version,
     )
 
@@ -270,6 +272,7 @@ def _hydrate_payload_from_disk(
             facts=payload.facts,
             compact=None,
             compact_pending=payload.compact_pending,
+            fallout_pending=payload.fallout_pending,
             data_version=payload.data_version,
             early_group_snapshot=early_group_snapshot,
         )
@@ -296,6 +299,7 @@ def _hydrate_payload_from_disk(
         facts=payload.facts,
         compact=compact,
         compact_pending=compact_pending,
+        fallout_pending=payload.fallout_pending,
         data_version=payload.data_version,
         early_group_snapshot=early_group_snapshot,
     )
@@ -340,6 +344,14 @@ def update_payload_compact(
     cache.set(cache_key, _payload_for_redis(payload), CACHE_TIMEOUT_SECONDS)
 
 
+def update_payload_fallout_ready(*, cache_key: str) -> None:
+    payload = cache.get(cache_key)
+    if not isinstance(payload, ScenarioEffectsCachePayload):
+        return
+    payload.fallout_pending = False
+    cache.set(cache_key, _payload_for_redis(payload), CACHE_TIMEOUT_SECONDS)
+
+
 def validate_cache_access(
     *,
     payload: ScenarioEffectsCachePayload,
@@ -379,18 +391,25 @@ def get_compact_status(*, cache_key: str) -> dict[str, object]:
         return {
             "compact_ready": False,
             "early_group_ready": False,
+            "fallout_ready": False,
             "data_version": None,
         }
 
     data_version = payload.data_version
     early_group_ready = False
+    fallout_ready = False
     if data_version:
         from calculations.domain.services.scenario_compute_store import (
             is_early_group_ready_on_disk,
+            is_scenario_fallout_on_disk,
             is_scenario_compact_on_disk,
         )
 
         early_group_ready = is_early_group_ready_on_disk(
+            scenario_id=payload.scenario_id,
+            data_version=data_version,
+        )
+        fallout_ready = is_scenario_fallout_on_disk(
             scenario_id=payload.scenario_id,
             data_version=data_version,
         )
@@ -403,6 +422,7 @@ def get_compact_status(*, cache_key: str) -> dict[str, object]:
             return {
                 "compact_ready": True,
                 "early_group_ready": True,
+                "fallout_ready": fallout_ready,
                 "data_version": data_version,
             }
 
@@ -410,5 +430,6 @@ def get_compact_status(*, cache_key: str) -> dict[str, object]:
     return {
         "compact_ready": compact_ready,
         "early_group_ready": early_group_ready or compact_ready,
+        "fallout_ready": fallout_ready,
         "data_version": data_version,
     }

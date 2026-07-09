@@ -1823,6 +1823,36 @@ class EnterpriseLoadCapTests(TestCase):
             Decimal("0.875"),
         )
 
+    def test_resolve_fixed_retention_coefficient_prefers_own_value(self) -> None:
+        from types import SimpleNamespace
+
+        from scenarios.domain.utils.elasticity_matching import (
+            resolve_fixed_retention_coefficient,
+        )
+
+        model_route = SimpleNamespace(fixed_retention_coefficient=Decimal("1"))
+        operational = SimpleNamespace(
+            fixed_retention_coefficient=Decimal("0.95"),
+            model_route=model_route,
+            model_route_id=1,
+        )
+        self.assertEqual(resolve_fixed_retention_coefficient(operational), Decimal("0.95"))
+
+    def test_resolve_fixed_retention_coefficient_falls_back_to_model(self) -> None:
+        from types import SimpleNamespace
+
+        from scenarios.domain.utils.elasticity_matching import (
+            resolve_fixed_retention_coefficient,
+        )
+
+        model_route = SimpleNamespace(fixed_retention_coefficient=Decimal("1"))
+        operational = SimpleNamespace(
+            fixed_retention_coefficient=None,
+            model_route=model_route,
+            model_route_id=1,
+        )
+        self.assertEqual(resolve_fixed_retention_coefficient(operational), Decimal("1"))
+
 
 class ElasticityCoalSeedTests(TestCase):
     def test_reuses_existing_set_by_name_and_clears_rules(self) -> None:
