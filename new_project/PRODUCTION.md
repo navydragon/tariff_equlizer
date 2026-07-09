@@ -157,7 +157,48 @@ cd /opt/tariff_equlizer/new_project
 ./deploy/update_prod.sh
 ```
 
-Скрипт выполняет `git pull`, `migrate`, `collectstatic`, затем **останавливает сервис**, очищает все кеши (диск + Redis) и **запускает gunicorn**. По умолчанию **прогрев parquet не выполняется** — на ~2M маршрутов он требует много RAM и без swap процесс получает `Killed` (OOM). Прогрев: `./deploy/update_prod.sh --warm-caches` или вручную `refresh_deploy_caches --warm-only` при остановленном сервисе.
+Скрипт выполняет `git pull`, `migrate`, `collectstatic`, затем (если не указан `--skip-cache-refresh`) **останавливает сервис**, очищает кеши (диск + Redis/LocMem), при необходимости прогревает витрины и снова **запускает сервис**.
+
+### 8.1 Флаги `deploy/update_prod.sh`
+
+- **`-n`, `--skip-cache-refresh`**: не останавливать сервис и не трогать кеши (только `migrate + collectstatic + restart`).
+- **`--warm-caches`**: после очистки прогреть parquet-витрины маршрутов (route mart) и маски правил.
+- **`--warm-scenarios`**: после `--warm-caches` прогреть KPI/compact для всех сценариев.
+- **`--keep-caches`**: не очищать кеши перед прогревом (полезно для повторного warm без “холодного” старта).
+- **`--skip-git-pull`**: пропустить `git pull`.
+
+Эквиваленты через переменные окружения:
+
+- **`SKIP_CACHE_REFRESH=1`** ⇔ `--skip-cache-refresh`
+- **`WARM_DEPLOY_CACHES=1`** ⇔ `--warm-caches`
+- **`WARM_DEPLOY_SCENARIOS=1`** ⇔ `--warm-scenarios`
+- **`KEEP_DEPLOY_CACHES=1`** ⇔ `--keep-caches`
+
+> На наборах ~2M маршрутов прогрев `--warm-caches` может потребовать много RAM; без swap процесс может быть убит OOM. В этом случае прогревайте по частям или включайте swap.
+
+### 8.2 “Максимальный прогрев всех сценариев”
+
+Самый простой вариант (прогреть всё, не очищая кеши):
+
+```bash
+cd /opt/tariff_equlizer/new_project
+KEEP_DEPLOY_CACHES=1 WARM_DEPLOY_CACHES=1 WARM_DEPLOY_SCENARIOS=1 sudo bash deploy/update_prod.sh
+```
+
+Если хотите прогреть “с нуля” (с полной очисткой перед warm):
+
+```bash
+cd /opt/tariff_equlizer/new_project
+sudo bash deploy/update_prod.sh --warm-caches --warm-scenarios
+```
+
+Также есть удобная обёртка: [`deploy/warm_prod_all.sh`](deploy/warm_prod_all.sh)
+
+```bash
+cd /opt/tariff_equlizer/new_project
+sudo bash deploy/warm_prod_all.sh          # прогрев без очистки
+CLEAR=1 sudo bash deploy/warm_prod_all.sh  # прогрев с очисткой
+```
 
 Пропустить очистку кешей (флаг или переменная окружения):
 
