@@ -412,3 +412,47 @@ class IpemCoal2026ImportTests(TestCase):
         )
         skipped_charge, _without_volume = fetch_route_set_stats(self.route_set.pk)
         self.assertEqual(skipped_charge, 0)
+
+
+def _metallurgy_xlsx_path() -> Path:
+    return (
+        Path(__file__).resolve().parents[4]
+        / "data"
+        / "ipem"
+        / "Металлургия_эластика.xlsx"
+    )
+
+
+class IpemMetallurgyEconomicsImportTests(TestCase):
+    def test_load_metallurgy_xlsx_reads_pasted_economics_values(self) -> None:
+        from core.management.ipem_economics import (
+            load_ipem_metallurgy_2026_xlsx,
+            parse_ipem_coal_2026_economics_row,
+        )
+
+        xlsx_path = _metallurgy_xlsx_path()
+        if not xlsx_path.exists():
+            self.skipTest(f"Файл IPEM не найден: {xlsx_path}")
+
+        rows = load_ipem_metallurgy_2026_xlsx(xlsx_path)
+        self.assertGreaterEqual(len(rows), 100)
+
+        economics = parse_ipem_coal_2026_economics_row(rows[0])
+        self.assertIsNotNone(economics["market_price_per_ton"])
+        self.assertIsNotNone(economics["production_cost_per_ton"])
+        self.assertIsNotNone(economics["operators_cost_per_ton"])
+        self.assertIsNotNone(economics["total_cost_per_ton"])
+
+        for field in (
+            "market_price_per_ton",
+            "production_cost_per_ton",
+            "operators_cost_per_ton",
+            "transport_total_cost_per_ton",
+            "total_cost_per_ton",
+        ):
+            filled = sum(
+                1
+                for row in rows
+                if parse_ipem_coal_2026_economics_row(row)[field] is not None
+            )
+            self.assertGreaterEqual(filled, len(rows) - 5, msg=field)

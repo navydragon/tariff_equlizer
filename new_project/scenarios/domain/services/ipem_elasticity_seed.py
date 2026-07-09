@@ -1,4 +1,4 @@
-"""Seed ElasticitySet 2026 from IPEM 'Технический лист'."""
+"""Seed ElasticitySet 2026 (metallurgy only) from IPEM 'Технический лист'."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -8,7 +8,7 @@ from pathlib import Path
 from django.contrib.auth import get_user_model
 from django.db import transaction
 
-from core.models import CargoGroup, MessageType
+from core.models import CargoGroup
 from scenarios.domain.services.base_elasticity_seed import ELASTICITY_SET_NAME
 from scenarios.models import (
     ElasticityRule,
@@ -38,6 +38,10 @@ def _default_workbook_path() -> Path:
     return _repo_root() / "data" / "ipem" / "Металлургия_эластика.xlsx"
 
 
+def _cell_has_value(value) -> bool:
+    return value is not None and str(value).strip() != ""
+
+
 def _load_points_from_block(
     worksheet,
     *,
@@ -46,23 +50,15 @@ def _load_points_from_block(
 ) -> list[tuple[Decimal, Decimal]]:
     by_marginality: dict[Decimal, Decimal] = {}
     for row in range(3, worksheet.max_row + 1):
-        m = worksheet.cell(row, marginality_col_0based + 1).value
-        c = worksheet.cell(row, coefficient_col_0based + 1).value
-        if m is None or c is None:
+        marginality = worksheet.cell(row, marginality_col_0based + 1).value
+        coefficient = worksheet.cell(row, coefficient_col_0based + 1).value
+        if not _cell_has_value(marginality) or not _cell_has_value(coefficient):
             continue
-        if str(m).strip() == "" or str(c).strip() == "":
+        if isinstance(coefficient, str) and coefficient.startswith("="):
             continue
-        key = Decimal(str(m)).quantize(Decimal("0.0001"))
-        by_marginality[key] = Decimal(str(c)).quantize(Decimal("0.0001"))
+        key = Decimal(str(marginality)).quantize(Decimal("0.0001"))
+        by_marginality[key] = Decimal(str(coefficient)).quantize(Decimal("0.0001"))
     return sorted(by_marginality.items(), key=lambda item: item[0])
-
-
-def _find_message_type_by_keyword(keyword: str) -> MessageType | None:
-    return (
-        MessageType.objects.filter(name__icontains=keyword)
-        .order_by("id")
-        .first()
-    )
 
 
 def _resolve_cargo_group_by_code(code: int) -> CargoGroup | None:
@@ -107,9 +103,12 @@ def seed_ipem_elasticity_for_scenario(
     """
     Создаёт/обновляет набор эластичности «2026» по листу «Технический лист».
 
-    Правила (по плану):
-    - Уголь: cargo_group=1 + message_type=(экспорт|внутр) по keyword.
-    - Металлургия: cargo_group=4 (руда) и cargo_group in {2,5,10} (металлы) без message_type.
+    Правила (металлургия):
+    - Руда: cargo_group=4.
+    - Металлы: cargo_group in {2, 5, 10} (общая кривая).
+
+    Важно: угольные правила НЕ создаются и НЕ удаляются — ими управляет
+    отдельная команда `import_ipem_coal_2026_routes`.
     """
     owner = author or scenario.author
     if owner is None:
@@ -118,7 +117,9 @@ def seed_ipem_elasticity_for_scenario(
     try:
         import openpyxl
     except ImportError as exc:
-        raise RuntimeError("openpyxl is required to seed IPEM elasticity") from exc
+        raise RuntimeError(
+            "openpyxl is required to seed IPEM elasticity",
+        ) from exc
 
     workbook_path = xlsx_path or _default_workbook_path()
     if not workbook_path.exists():
@@ -133,16 +134,6 @@ def seed_ipem_elasticity_for_scenario(
     worksheet = workbook[TECH_SHEET_NAME]
 
     # Blocks on the tech sheet (0-based indices).
-    points_coal_export = _load_points_from_block(
-        worksheet,
-        marginality_col_0based=0,
-        coefficient_col_0based=1,
-    )
-    points_coal_internal = _load_points_from_block(
-        worksheet,
-        marginality_col_0based=4,
-        coefficient_col_0based=5,
-    )
     points_metals = _load_points_from_block(
         worksheet,
         marginality_col_0based=8,
@@ -156,13 +147,8 @@ def seed_ipem_elasticity_for_scenario(
 
     elasticity_set = _resolve_elasticity_set(owner)
 
-    export_message_type = _find_message_type_by_keyword("экспорт")
-    internal_message_type = _find_message_type_by_keyword("внутр")
-
     # Delete only rules we manage (by name), keep user-defined rules intact.
     managed_rule_names = {
-        "IPEM: Уголь экспорт",
-        "IPEM: Уголь внутренние",
         "IPEM: Руда",
         "IPEM: Металлы (2)",
         "IPEM: Металлы (5)",
@@ -176,7 +162,6 @@ def seed_ipem_elasticity_for_scenario(
     rules_upserted = 0
     points_upserted = 0
 
-    coal_group = _resolve_cargo_group_by_code(1)
     ore_group = _resolve_cargo_group_by_code(4)
     coke_group = _resolve_cargo_group_by_code(2)
     metals_group = _resolve_cargo_group_by_code(5)
@@ -187,7 +172,6 @@ def seed_ipem_elasticity_for_scenario(
         name: str,
         position: int,
         cargo_group: CargoGroup | None,
-        message_type: MessageType | None,
         points,
     ):
         nonlocal rules_upserted, points_upserted
@@ -196,52 +180,33 @@ def seed_ipem_elasticity_for_scenario(
             name=name,
             position=position,
             cargo_group=cargo_group,
-            message_type=message_type,
         )
         rules_upserted += 1
         points_upserted += _replace_rule_points(rule, points)
 
     # Positions are stable for reproducibility.
     _create_rule(
-        name="IPEM: Уголь экспорт",
-        position=0,
-        cargo_group=coal_group,
-        message_type=export_message_type,
-        points=points_coal_export,
-    )
-    _create_rule(
-        name="IPEM: Уголь внутренние",
-        position=1,
-        cargo_group=coal_group,
-        message_type=internal_message_type,
-        points=points_coal_internal,
-    )
-    _create_rule(
         name="IPEM: Руда",
         position=10,
         cargo_group=ore_group,
-        message_type=None,
         points=points_ore,
     )
     _create_rule(
         name="IPEM: Металлы (2)",
         position=20,
         cargo_group=coke_group,
-        message_type=None,
         points=points_metals,
     )
     _create_rule(
         name="IPEM: Металлы (5)",
         position=21,
         cargo_group=metals_group,
-        message_type=None,
         points=points_metals,
     )
     _create_rule(
         name="IPEM: Металлы (10)",
         position=22,
         cargo_group=other_group,
-        message_type=None,
         points=points_metals,
     )
 

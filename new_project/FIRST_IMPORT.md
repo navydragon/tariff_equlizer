@@ -133,12 +133,12 @@ python manage.py import_rzd_routes --clear
 
 ## 6. Экономика IPEM → маршруты RZD_2026
 
-### 6.0. Уголь 2026: model-маршруты и эластичность (рекомендуется)
+### 6.0. Уголь + металлургия 2026: model-маршруты и эластичность (рекомендуется)
 
-Единый импорт IPEM (уголь + металлургия) рекомендуется делать одной командой:
+IPEM импортируется двумя командами:
 
-- лист **Технический лист** (из `Металлургия_эластика.xlsx`) → набор эластичности **«2026»** и привязка к сценарию;
-- листы model-маршрутов из указанных XLSX → **model-маршруты** (`is_model=true`) в `RouteSet RZD_2026`, в т.ч. **коэффициент загрузки предприятия** и (для строк «Внутренняя логистика») **постоянный коэффициент сохранения**.
+- **уголь**: model-маршруты + угольные правила эластичности (лист `Уголь_коэфф`);
+- **металлургия**: model-маршруты + правила эластичности для руды/металлов (лист `Технический лист`).
 
 Operational-маршруты РЖД связываются через `model_route_id` по ключу: **станция + станция + груз + род вагона + тип отправки**.
 
@@ -147,25 +147,24 @@ Operational-маршруты РЖД связываются через `model_rou
 Model-маршруты **не участвуют** в расчётах «Эффект решений» и «Куб эффектов»; в «Экономике грузов» в поиске показываются только они.
 
 ```bash
-python manage.py import_ipem_elasticity_bundle ^
+python manage.py import_ipem_coal_2026_routes ^
   --scenario-id 1 ^
   --route-set-code RZD_2026 ^
-  --elasticity-file ../data/ipem/Металлургия_эластика.xlsx ^
-  --file ../data/ipem/Уголь_эластика_2026_5.xlsx ^
+  --file ../data/ipem/Уголь_эластика_2026_5.xlsx
+
+python manage.py import_ipem_metallurgy_2026_routes ^
+  --scenario-id 1 ^
+  --route-set-code RZD_2026 ^
   --file ../data/ipem/Металлургия_эластика.xlsx
-```
-
-Только правила эластичности (без model-маршрутов):
-
-```bash
-python manage.py import_ipem_elasticity_bundle --scenario-id 1 --seed-elasticity-only
 ```
 
 Проверка без записи:
 
 ```bash
-python manage.py import_ipem_elasticity_bundle --scenario-id 1 --dry-run ^
-  --file ../data/ipem/Уголь_эластика_2026_5.xlsx ^
+python manage.py import_ipem_coal_2026_routes --scenario-id 1 --dry-run ^
+  --file ../data/ipem/Уголь_эластика_2026_5.xlsx
+
+python manage.py import_ipem_metallurgy_2026_routes --scenario-id 1 --dry-run ^
   --file ../data/ipem/Металлургия_эластика.xlsx
 ```
 

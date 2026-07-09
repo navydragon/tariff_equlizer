@@ -2275,3 +2275,116 @@ class ScenarioRecomputeApiTests(TestCase):
         self.assertTrue(payload["success"])
         self.assertTrue(payload["rebuild"]["started"])
         self.assertIn("data_version", payload["rebuild"])
+
+
+class IpemMetallurgyElasticitySeedTests(TestCase):
+    def test_seed_metallurgy_rules_does_not_delete_coal(self) -> None:
+        from scenarios.domain.services.base_elasticity_seed import (
+            ELASTICITY_SET_NAME,
+            EXPORT_RULE_NAME,
+            INTERNAL_RULE_NAME,
+        )
+        from scenarios.domain.services.ipem_elasticity_seed import (
+            seed_ipem_elasticity_for_scenario,
+        )
+        from core.models import CargoGroup, MessageType
+        from scenarios.models import ElasticityRule, ElasticitySet, Scenario
+
+        user = User.objects.create_user(
+            login="ipem_seed_user",
+            password="test_pass",
+        )
+        route_set = RouteSet.objects.create(
+            code="RS_IPEM_SEED",
+            name="Ipem seed RS",
+        )
+        scenario = Scenario.objects.create(
+            name="Ipem seed scenario",
+            description="",
+            start_year=2025,
+            end_year=2030,
+            route_set=route_set,
+            author=user,
+        )
+        elasticity_set = ElasticitySet.objects.create(
+            name=ELASTICITY_SET_NAME,
+            author=user,
+        )
+
+        coal_group = CargoGroup.objects.create(name="Уголь", code=1, position=1)
+        export_mt = MessageType.objects.create(code="MT_EXP2", name="Экспорт")
+        internal_mt = MessageType.objects.create(
+            code="MT_INT2",
+            name="Внутр. перевозки",
+        )
+        ElasticityRule.objects.create(
+            elasticity_set=elasticity_set,
+            name=EXPORT_RULE_NAME,
+            position=0,
+            cargo_group=coal_group,
+            message_type=export_mt,
+        )
+        ElasticityRule.objects.create(
+            elasticity_set=elasticity_set,
+            name=INTERNAL_RULE_NAME,
+            position=1,
+            cargo_group=coal_group,
+            message_type=internal_mt,
+        )
+
+        seed_ipem_elasticity_for_scenario(
+            scenario,
+            attach=True,
+            xlsx_path=Path("/nonexistent.xlsx"),
+        )
+
+        self.assertTrue(
+            ElasticityRule.objects.filter(
+                elasticity_set=elasticity_set,
+                name=EXPORT_RULE_NAME,
+            ).exists(),
+        )
+        self.assertTrue(
+            ElasticityRule.objects.filter(
+                elasticity_set=elasticity_set,
+                name=INTERNAL_RULE_NAME,
+            ).exists(),
+        )
+
+
+class IpemMetallurgyElasticityPointsTests(TestCase):
+    def test_seed_loads_full_metals_and_ore_curves(self) -> None:
+        from decimal import Decimal
+        from pathlib import Path
+
+        from scenarios.domain.services.ipem_elasticity_seed import (
+            _default_workbook_path,
+            _load_points_from_block,
+        )
+
+        workbook_path = _default_workbook_path()
+        if not workbook_path.exists():
+            self.skipTest("IPEM metallurgy workbook is missing")
+
+        import openpyxl
+
+        worksheet = openpyxl.load_workbook(workbook_path, data_only=True)[
+            "Технический лист"
+        ]
+        metals = _load_points_from_block(
+            worksheet,
+            marginality_col_0based=8,
+            coefficient_col_0based=9,
+        )
+        ore = _load_points_from_block(
+            worksheet,
+            marginality_col_0based=12,
+            coefficient_col_0based=13,
+        )
+
+        self.assertGreaterEqual(len(metals), 100)
+        self.assertGreaterEqual(len(ore), 115)
+        self.assertEqual(metals[-1][0], Decimal("0.1700"))
+        self.assertEqual(metals[-1][1], Decimal("2.0000"))
+        self.assertEqual(ore[-1][0], Decimal("0.2400"))
+        self.assertEqual(ore[-1][1], Decimal("2.0000"))
