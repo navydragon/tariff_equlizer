@@ -232,6 +232,34 @@
   overflow: auto;
 }
 
+.decision-effects-table-wrap .table-responsive {
+  overflow-x: hidden;
+}
+
+.decision-effects-table-wrap .table {
+  table-layout: fixed;
+  width: 100%;
+}
+
+.decision-effects-table-wrap .table thead th {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  vertical-align: bottom;
+}
+
+.decision-effects-table-wrap .table tbody td {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.decision-effects-th {
+  display: block;
+  width: 100%;
+  line-height: 1.15;
+  text-align: center;
+}
+
 .decision-effects-table-wrap .table tbody tr.fw-subtotal td {
   background-color: #f1f5f9;
 }

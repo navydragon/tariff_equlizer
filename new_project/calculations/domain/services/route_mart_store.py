@@ -1298,8 +1298,12 @@ def _sidecars_complete(parquet_path: Path) -> bool:
     )
 
 
-def ensure_compute_sidecars(parquet_path: Path) -> bool:
-    """Гарантирует charge/volume/dims/masks sidecar для витрины."""
+def ensure_compute_sidecars(parquet_path: Path, *, require_turnover: bool = True) -> bool:
+    """Гарантирует charge/volume/dims/masks sidecar для витрины.
+
+    `turnover_coef` строится отдельным пайплайном и может отсутствовать.
+    Для вычислений, где turnover не нужен, можно вызывать с `require_turnover=False`.
+    """
     if _sidecars_complete(parquet_path):
         return True
     if not parquet_path.is_file():
@@ -1319,7 +1323,7 @@ def ensure_compute_sidecars(parquet_path: Path) -> bool:
     has_source = _parquet_has_sidecar_source_columns(parquet_path)
     if (need_dims or need_masks or need_charge) and not has_source:
         return False
-    if need_turnover:
+    if need_turnover and require_turnover:
         return False
 
     columns_to_read: list[str] = list(MART_COMPUTE_BASE_COLUMNS)

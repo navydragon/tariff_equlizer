@@ -42,11 +42,11 @@ from scenarios.models import Scenario, TariffRule
 logger = logging.getLogger(__name__)
 
 
-def _resolve_ready_parquet_path(*, route_set_id: int) -> Path | None:
+def _resolve_ready_parquet_path(*, route_set_id: int, require_turnover: bool) -> Path | None:
     parquet_path = resolve_mart_parquet_path(route_set_id=route_set_id)
     if not parquet_path.is_file() or not mart_meta_path(parquet_path).is_file():
         return None
-    if not ensure_compute_sidecars(parquet_path):
+    if not ensure_compute_sidecars(parquet_path, require_turnover=require_turnover):
         return None
     return parquet_path
 
@@ -119,7 +119,10 @@ def warm_scenario_after_rule_change(
             )
 
         t_parquet = time.perf_counter()
-        parquet_path = _resolve_ready_parquet_path(route_set_id=scenario.route_set_id)
+        parquet_path = _resolve_ready_parquet_path(
+            route_set_id=scenario.route_set_id,
+            require_turnover=bool(getattr(scenario, "consider_turnover_changes", False)),
+        )
         phases["parquet_resolve_ms"] = int((time.perf_counter() - t_parquet) * 1000)
         if parquet_path is None:
             logger.debug(
@@ -182,6 +185,20 @@ def warm_scenario_after_rule_change(
         phases["post_compute_ms"] = int((time.perf_counter() - t_post) * 1000)
 
         t_save = time.perf_counter()
+        from calculations.domain.services.scenario_effects_cache import (
+            get_scenario_effects_revision,
+            set_scenario_effects_revision,
+        )
+
+        from calculations.domain.services.scenario_compute_store import (
+            resolve_incremental_base_data_version,
+        )
+
+        base_data_version = resolve_incremental_base_data_version(
+            scenario_id=scenario.id,
+            current_data_version=data_version,
+            preferred=get_scenario_effects_revision(scenario_id=scenario.id),
+        )
         save_scenario_compute_kpi_only(
             scenario_id=scenario.id,
             data_version=data_version,
@@ -192,17 +209,16 @@ def warm_scenario_after_rule_change(
             routes_without_volume=skipped_volume,
             early_group_snapshot=early_group_snapshot,
         )
-        from calculations.domain.services.scenario_effects_cache import (
-            set_scenario_effects_revision,
-        )
-
         set_scenario_effects_revision(
             scenario_id=scenario.id,
             data_version=data_version,
         )
         purge_stale_scenario_compute(
             scenario_id=scenario.id,
-            keep_data_version=data_version,
+            keep_data_versions=tuple(
+                x for x in (data_version, base_data_version) if x and x != data_version
+            )
+            or (data_version,),
         )
         from calculations.domain.services.route_mask_cache import (
             purge_stale_mask_cache_dirs,
@@ -223,6 +239,7 @@ def warm_scenario_after_rule_change(
             years=years,
             rule_specs=rule_specs,
             data_version=data_version,
+            base_data_version=base_data_version,
             global_totals=global_totals,
             filter_options=filter_options,
             skipped_charge=skipped_charge,

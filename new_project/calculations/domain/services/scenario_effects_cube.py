@@ -186,8 +186,6 @@ class ScenarioEffectsCubeService:
                     slices.append((f"rule:{rule_id}", rule_name))
             if (
                 scenario.consider_demand_elasticity
-                and payload.compact.volume_fallout_by_year is not None
-                and payload.compact.money_fallout_by_year is not None
             ):
                 slices.append(("volume_fallout", _EFFECT_VOLUME_FALLOUT))
                 slices.append(("money_fallout", _EFFECT_MONEY_FALLOUT))
@@ -267,11 +265,11 @@ class ScenarioEffectsCubeService:
             return compact.rules_by_year
         if effect_key == "volume_fallout":
             if compact.volume_fallout_by_year is None:
-                raise ValueError("volume_fallout_by_year missing in compact payload")
+                return np.zeros_like(compact.base_by_year)
             return compact.volume_fallout_by_year
         if effect_key == "money_fallout":
             if compact.money_fallout_by_year is None:
-                raise ValueError("money_fallout_by_year missing in compact payload")
+                return np.zeros_like(compact.base_by_year)
             return compact.money_fallout_by_year
 
         rule_id = int(effect_key.split(":", 1)[1])

@@ -733,12 +733,16 @@ def _apply_aggregate_fallout_for_year(
         mask = ratio_keys == ratio
         if not np.any(mask):
             continue
-        k = weighted_retention_cached(
-            source_key=source_key,
-            group_key=group_key,
-            group=aggregate_group,
-            charge_ratio=float(ratio),
-        )
+        # Быстрый путь: если тариф не изменился, выпадение равно 0.
+        if float(ratio) == 1.0:
+            k = 1.0
+        else:
+            k = weighted_retention_cached(
+                source_key=source_key,
+                group_key=group_key,
+                group=aggregate_group,
+                charge_ratio=float(ratio),
+            )
         if k is None:
             continue
         k_delta = float(k) - 1.0
@@ -771,6 +775,7 @@ def compute_fallout_arrays(
     turnover_coef: np.ndarray,
     model_rows: list[ModelRouteEconomicsRow],
     dimension_labels: dict[str, list[str]] | None = None,
+    route_indices: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray, FalloutComputeStats]:
     n_routes = len(sidecar)
     n_years = len(years)
@@ -859,6 +864,13 @@ def compute_fallout_arrays(
         initial_charge=initial_charge,
         n_routes=n_routes,
     )
+    if route_indices is not None:
+        # Считаем fallout только для subset маршрутов. Остальные остаются нулями,
+        # а снаружи caller может сделать merge со старыми массивами.
+        subset_mask = np.zeros(n_routes, dtype=bool)
+        if route_indices.size:
+            subset_mask[route_indices.astype(np.intp, copy=False)] = True
+        eligible_mask = eligible_mask & subset_mask
     stats.model_routes_pool = len(model_rows)
     stats.holding_groups = len(holding_groups)
     stats.cargo_groups = len(cargo_groups)
@@ -932,6 +944,8 @@ def compute_fallout_arrays(
             current_charge = float(charge_by_year[route_index, year_index])
             current_tariff = current_charge / turnover if turnover else initial
             charge_ratio = current_tariff / initial if initial > 0 else 1.0
+            if abs(charge_ratio - 1.0) < 1e-12:
+                continue
             prev_charge = current_charge
 
             direct_message_type_id = _optional_id(

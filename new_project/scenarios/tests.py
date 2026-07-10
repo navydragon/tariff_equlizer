@@ -1775,6 +1775,17 @@ class RetentionCoefficientModeTests(TestCase):
         self.assertLessEqual(coefficient, Decimal("1"))
 
         self.scenario.retention_coefficient_mode = (
+            Scenario.RetentionCoefficientMode.ABSOLUTE
+        )
+        self.scenario.save(update_fields=["retention_coefficient_mode"])
+        absolute = self.compute_retention_coefficient(
+            self.route,
+            self.scenario,
+            Decimal("0.125"),
+        )
+        self.assertEqual(coefficient, min(Decimal("1"), absolute))
+
+        self.scenario.retention_coefficient_mode = (
             Scenario.RetentionCoefficientMode.RELATIVE_TO_BASE
         )
         self.scenario.save(update_fields=["retention_coefficient_mode"])

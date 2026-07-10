@@ -2255,6 +2255,9 @@ class ScenarioRuleWarmTests(TariffLoadServiceTestMixin, TestCase):
         from calculations.domain.services.scenario_effects_cache import (
             compute_scenario_data_version,
         )
+        from calculations.domain.services.scenario_effects_deferred import (
+            _run_deferred_full_compute,
+        )
         from calculations.domain.services.scenario_compute_store import (
             scenario_compute_dir,
             try_load_scenario_compute,
@@ -2278,7 +2281,12 @@ class ScenarioRuleWarmTests(TariffLoadServiceTestMixin, TestCase):
                 created, errors = self.tariff_rule_service.create_rule(dto, self.user)
         self.assertEqual(errors, [])
         assert created is not None
-        self._recompute_scenario(scenario)
+        # Run deferred compute synchronously to make purge deterministic.
+        with patch(
+            "calculations.domain.services.scenario_effects_warm.schedule_deferred_full_compute",
+            side_effect=_run_deferred_full_compute,
+        ):
+            self._recompute_scenario(scenario)
 
         context = self.pandas_service._tariff_load.build_scenario_context(scenario)
         old_version = compute_scenario_data_version(
@@ -2302,7 +2310,11 @@ class ScenarioRuleWarmTests(TariffLoadServiceTestMixin, TestCase):
         self.assertTrue(old_dir.is_dir())
 
         scenario = Scenario.objects.select_related("route_set").get(pk=self.scenario.pk)
-        self._recompute_scenario(scenario)
+        with patch(
+            "calculations.domain.services.scenario_effects_warm.schedule_deferred_full_compute",
+            side_effect=_run_deferred_full_compute,
+        ):
+            self._recompute_scenario(scenario)
 
         self.assertFalse(old_dir.is_dir())
 

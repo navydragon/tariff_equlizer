@@ -31,6 +31,7 @@ def _model_row(**kwargs) -> ModelRouteEconomicsRow:
         "operators_cost_per_ton": Decimal("100"),
         "transshipment_cost_per_ton": Decimal("50"),
         "enterprise_load_coefficient": Decimal("0.8"),
+        "fixed_retention_coefficient": None,
     }
     defaults.update(kwargs)
     return ModelRouteEconomicsRow(**defaults)

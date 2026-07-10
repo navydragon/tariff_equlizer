@@ -144,6 +144,13 @@ class ScenarioEffectsPandasService:
             )
             t_load = t_compute = t_post_compute = time.perf_counter()
             if not compact_ready:
+                from calculations.domain.services.scenario_effects_cache import (
+                    get_scenario_effects_revision,
+                )
+                from calculations.domain.services.scenario_compute_store import (
+                    resolve_incremental_base_data_version,
+                )
+
                 parquet_path = resolve_mart_parquet_path(
                     route_set_id=scenario.route_set_id,
                 )
@@ -158,6 +165,11 @@ class ScenarioEffectsPandasService:
                     years=years,
                     rule_specs=rule_specs,
                     data_version=data_version,
+                    base_data_version=resolve_incremental_base_data_version(
+                        scenario_id=scenario.id,
+                        current_data_version=data_version,
+                        preferred=get_scenario_effects_revision(scenario_id=scenario.id),
+                    ),
                     global_totals=global_totals,
                     filter_options=filter_options,
                     skipped_charge=skipped_charge,
@@ -214,6 +226,18 @@ class ScenarioEffectsPandasService:
             t_post_compute = time.perf_counter()
 
             t_snapshot_save = time.perf_counter()
+            from calculations.domain.services.scenario_effects_cache import (
+                get_scenario_effects_revision,
+            )
+            from calculations.domain.services.scenario_compute_store import (
+                resolve_incremental_base_data_version,
+            )
+
+            base_data_version = resolve_incremental_base_data_version(
+                scenario_id=scenario.id,
+                current_data_version=data_version,
+                preferred=get_scenario_effects_revision(scenario_id=scenario.id),
+            )
             save_scenario_compute_kpi_only(
                 scenario_id=scenario.id,
                 data_version=data_version,
@@ -226,7 +250,10 @@ class ScenarioEffectsPandasService:
             )
             purge_stale_scenario_compute(
                 scenario_id=scenario.id,
-                keep_data_version=data_version,
+                keep_data_versions=tuple(
+                    x for x in (data_version, base_data_version) if x and x != data_version
+                )
+                or (data_version,),
             )
             scenario_snapshot_save_ms = int(
                 (time.perf_counter() - t_snapshot_save) * 1000,
@@ -238,6 +265,7 @@ class ScenarioEffectsPandasService:
                 years=years,
                 rule_specs=rule_specs,
                 data_version=data_version,
+                base_data_version=base_data_version,
                 global_totals=global_totals,
                 filter_options=filter_options,
                 skipped_charge=skipped_charge,
@@ -359,6 +387,7 @@ class ScenarioEffectsPandasService:
         years: list[int],
         rule_specs,
         data_version: str,
+        base_data_version: str | None = None,
         global_totals: GlobalTotals,
         filter_options: dict[str, list[str]],
         skipped_charge: int,
@@ -382,6 +411,7 @@ class ScenarioEffectsPandasService:
             scenario_id=scenario.id,
             route_set_id=scenario.route_set_id,
             data_version=data_version,
+            base_data_version=base_data_version,
             years=years,
             base_coef_by_year=context.base_coef_by_year,
             rule_specs=rule_specs,

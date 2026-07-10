@@ -10,7 +10,7 @@ class Scenario(models.Model):
         BY_FX = "by_fx", "По курсу $"
 
     class RetentionCoefficientMode(models.TextChoices):
-        COMBINED = "combined", "Комбинированный (как в IPEM)"
+        COMBINED = "combined", "Комбинированный (снижение — от базы, рост — по текущей ≤1)"
         ABSOLUTE = "absolute", "По текущей маржинальности"
         RELATIVE_TO_BASE = "relative_to_base", "Относительно базовой маржинальности"
 

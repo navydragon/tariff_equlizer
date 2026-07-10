@@ -64,14 +64,12 @@ def build_rzd_tariff_sensitivity(
 
     point_repo = ElasticityRulePointRepository()
     points: list[RzdTariffSensitivityPointDTO] = []
-    previous_coefficient: Decimal | None = None
 
     for tariff_change in _iter_tariff_changes():
         coefficient = compute_retention_at_tariff_change(
             route=route,
             scenario=scenario,
             tariff_change=tariff_change,
-            previous_coefficient=previous_coefficient,
             rule=rule,
             point_repo=point_repo,
         )
@@ -85,8 +83,6 @@ def build_rzd_tariff_sensitivity(
                 ),
             ),
         )
-        if coefficient is not None:
-            previous_coefficient = coefficient
 
     if all(point.coefficient is None for point in points):
         return RzdTariffSensitivityResponseDTO(points=[])

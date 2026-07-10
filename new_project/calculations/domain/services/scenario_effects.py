@@ -196,9 +196,10 @@ class ScenarioEffectsService:
                 ),
             )
 
-        show_fallout_column = bool(
-            scenario.consider_demand_elasticity and getattr(scenario, "elasticity_set_id", None)
-        )
+        # Колонка выпадения показывается по флагу сценария.
+        # Наличие/готовность данных (fallout_ready/pending) управляет тем,
+        # заполняем ли мы значения или показываем только структуру.
+        show_fallout_column = bool(scenario.consider_demand_elasticity)
         fallout_pending = bool(
             show_fallout_column
             and payload.compact is not None
@@ -229,6 +230,11 @@ class ScenarioEffectsService:
                 holdings=request.holdings,
             )
             grand_fallout = (volume_fallout, money_fallout)
+        elif show_fallout_column:
+            # Структуру колонок показываем даже когда массивы выпадения ещё не готовы
+            # (или отсутствуют из-за невыбранного набора эластичности).
+            fallout_by_group = {}
+            grand_fallout = (Decimal("0"), Decimal("0"))
 
         table_rows = self._format_table_rows(
             buckets,

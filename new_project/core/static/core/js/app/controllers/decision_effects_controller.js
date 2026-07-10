@@ -1526,7 +1526,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
       }
 
       const falloutHeader = showFallout
-        ? '<th class="text-end" title="Δ дохода и объёма от эластичности спроса; «+» — рост, «−» — снижение">Δ эластичности</th>'
+        ? '<th class="text-center" title="Δ дохода и объёма от эластичности спроса; «+» — рост, «−» — снижение"><span class="decision-effects-th">Δ<br />эласт.</span></th>'
         : "";
 
       const body = rows
@@ -1567,9 +1567,15 @@ import { clearToasts, showToast } from "../lib/toast.js";
             <thead>
               <tr>
                 <th></th>
-                <th class="text-end">Базовые решения</th>
-                <th class="text-end">Отдельные решения</th>
-                <th class="text-end">Увеличение нагрузки</th>
+                <th class="text-center">
+                  <span class="decision-effects-th">Базовые<br />решения</span>
+                </th>
+                <th class="text-center">
+                  <span class="decision-effects-th">Отдельные<br />решения</span>
+                </th>
+                <th class="text-center">
+                  <span class="decision-effects-th">Увеличение<br />нагрузки</span>
+                </th>
                 ${falloutHeader}
               </tr>
             </thead>
