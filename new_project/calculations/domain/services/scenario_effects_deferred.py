@@ -15,13 +15,10 @@ from calculations.domain.services.route_mart_store import (
     load_mart_meta,
     load_mart_sidecar,
     load_route_mart_parquet,
-    ensure_compute_sidecars,
 )
 from calculations.domain.services.scenario_compute_store import (
     ScenarioComputeBundle,
-    purge_stale_scenario_compute,
     save_scenario_compute,
-    try_load_scenario_compute,
 )
 from calculations.domain.services.scenario_effects_cache import (
     update_payload_compact,
@@ -85,7 +82,6 @@ class DeferredFullComputeJob:
     filter_options: dict[str, list[str]]
     skipped_charge: int
     routes_without_volume: int
-    base_data_version: str | None = None
     include_rule_breakdown: bool = False
     consider_turnover_changes: bool = False
     consider_demand_elasticity: bool = False
@@ -101,19 +97,21 @@ class DeferredFullComputeJob:
 
 
 def _job_data_version_stale(job: DeferredFullComputeJob) -> bool:
-    """
-    Возвращает True, если job устарел и его результат нельзя публиковать.
-
-    Определяем устаревание по текущей revision в кеше (Redis), а не по наличию
-    других папок на диске: во время инкрементального fallout мы можем держать
-    `base_data_version` рядом с текущей.
-    """
-    from calculations.domain.services.scenario_effects_cache import (
-        get_scenario_effects_revision,
+    from calculations.domain.services.scenario_compute_store import (
+        METADATA_FILENAME,
+        scenario_compute_cache_root,
     )
 
-    current = get_scenario_effects_revision(scenario_id=job.scenario_id)
-    return bool(current and current != job.data_version)
+    scenario_dir = scenario_compute_cache_root() / str(job.scenario_id)
+    if not scenario_dir.is_dir():
+        return False
+
+    for child in scenario_dir.iterdir():
+        if not child.is_dir() or child.name == job.data_version:
+            continue
+        if (child / METADATA_FILENAME).is_file():
+            return True
+    return False
 
 
 def _run_deferred_full_compute(job: DeferredFullComputeJob) -> None:
@@ -305,7 +303,6 @@ def _run_deferred_full_compute(job: DeferredFullComputeJob) -> None:
             )
             from calculations.domain.services.scenario_compute_store import (
                 compute_fallout_fingerprint,
-                resolve_incremental_base_data_version,
                 save_fallout_cache,
                 save_scenario_fallout_arrays,
                 try_load_fallout_cache,
@@ -344,51 +341,9 @@ def _run_deferred_full_compute(job: DeferredFullComputeJob) -> None:
                     years_count=n_years,
                 )
                 detail["fallout_cache_hit"] = 1
-                detail["fallout_mode"] = "fingerprint_cache"
             else:
-                # Инкрементальный fallout: пересчитываем только маршруты,
-                # у которых реально изменился charge_by_year относительно base_data_version.
-                resolved_base_version = resolve_incremental_base_data_version(
-                    scenario_id=job.scenario_id,
-                    current_data_version=job.data_version,
-                    preferred=job.base_data_version,
-                )
-                if resolved_base_version and resolved_base_version != job.base_data_version:
-                    detail["fallout_base_resolved"] = resolved_base_version
-
-                base_bundle: ScenarioComputeBundle | None = None
-                fallout_full_reason = ""
-                if resolved_base_version:
-                    base_bundle = try_load_scenario_compute(
-                        scenario_id=job.scenario_id,
-                        data_version=resolved_base_version,
-                    )
-
-                use_incremental = False
-                affected: np.ndarray | None = None
-                if base_bundle is None:
-                    fallout_full_reason = "no_base_snapshot"
-                elif base_bundle.compact is None:
-                    fallout_full_reason = "base_kpi_only"
-                elif base_bundle.compact.charge_by_year is None:
-                    fallout_full_reason = "base_missing_charge"
-                elif (
-                    base_bundle.compact.volume_fallout_by_year is None
-                    or base_bundle.compact.money_fallout_by_year is None
-                ):
-                    fallout_full_reason = "base_missing_fallout"
-                else:
-                    prev_charge = np.asarray(base_bundle.compact.charge_by_year)
-                    cur_charge = np.asarray(arrays.charge_by_year)
-                    if prev_charge.shape != cur_charge.shape:
-                        fallout_full_reason = "charge_shape_mismatch"
-                    else:
-                        diff = np.any(np.abs(prev_charge - cur_charge) > 1e-6, axis=1)
-                        affected = np.flatnonzero(diff)
-                        use_incremental = True
-
-                if use_incremental and affected is not None and affected.size > 0:
-                    partial_volume, partial_money, fallout_stats = compute_fallout_arrays(
+                volume_fallout_by_year, money_fallout_by_year, fallout_stats = (
+                    compute_fallout_arrays(
                         sidecar,
                         scenario=scenario_stub,
                         years=job.years,
@@ -399,52 +354,8 @@ def _run_deferred_full_compute(job: DeferredFullComputeJob) -> None:
                         dimension_labels=(
                             mart_meta.dimension_labels if mart_meta is not None else None
                         ),
-                        route_indices=affected,
                     )
-                    volume_fallout_by_year = np.asarray(
-                        base_bundle.compact.volume_fallout_by_year
-                    ).copy()
-                    money_fallout_by_year = np.asarray(
-                        base_bundle.compact.money_fallout_by_year
-                    ).copy()
-                    volume_fallout_by_year[affected] = partial_volume[affected]
-                    money_fallout_by_year[affected] = partial_money[affected]
-                    detail["fallout_mode"] = "incremental"
-                    detail["fallout_affected_routes"] = int(affected.size)
-                    detail["fallout_base_data_version"] = str(resolved_base_version)
-                elif use_incremental and affected is not None and affected.size == 0:
-                    # Ничего не изменилось: переиспользуем fallout полностью.
-                    volume_fallout_by_year = np.asarray(
-                        base_bundle.compact.volume_fallout_by_year
-                    )
-                    money_fallout_by_year = np.asarray(
-                        base_bundle.compact.money_fallout_by_year
-                    )
-                    fallout_stats = FalloutComputeStats(
-                        routes_total=n_routes,
-                        years_count=n_years,
-                    )
-                    detail["fallout_mode"] = "incremental_noop"
-                    detail["fallout_affected_routes"] = 0
-                    detail["fallout_base_data_version"] = str(resolved_base_version)
-                else:
-                    volume_fallout_by_year, money_fallout_by_year, fallout_stats = (
-                        compute_fallout_arrays(
-                            sidecar,
-                            scenario=scenario_stub,
-                            years=job.years,
-                            initial_charge=arrays.initial,
-                            charge_by_year=arrays.charge_by_year,
-                            turnover_coef=turnover_matrix,
-                            model_rows=job.model_rows,
-                            dimension_labels=(
-                                mart_meta.dimension_labels if mart_meta is not None else None
-                            ),
-                        )
-                    )
-                    detail["fallout_mode"] = "full"
-                    if fallout_full_reason:
-                        detail["fallout_full_reason"] = fallout_full_reason
+                )
                 try:
                     save_fallout_cache(
                         scenario_id=job.scenario_id,
@@ -462,17 +373,6 @@ def _run_deferred_full_compute(job: DeferredFullComputeJob) -> None:
             detail["elasticity_fallout_ms"] = int((time.perf_counter() - t_fallout) * 1000)
             for key, value in fallout_stats.to_timings().items():
                 detail[key] = int(value)
-            logger.info(
-                "Fallout compute scenario_id=%s data_version=%s mode=%s base=%s "
-                "affected=%s reason=%s loop_routes=%s",
-                job.scenario_id,
-                job.data_version,
-                detail.get("fallout_mode"),
-                detail.get("fallout_base_data_version") or detail.get("fallout_base_resolved"),
-                detail.get("fallout_affected_routes"),
-                detail.get("fallout_full_reason") or "",
-                fallout_stats.loop_routes,
-            )
 
             if _job_data_version_stale(job):
                 return
@@ -502,9 +402,6 @@ def _run_deferred_full_compute(job: DeferredFullComputeJob) -> None:
             data_version=job.data_version,
             rules=len(job.rule_specs),
             include_rule_breakdown=job.include_rule_breakdown,
-            fallout_mode=detail.get("fallout_mode"),
-            fallout_affected=detail.get("fallout_affected_routes"),
-            fallout_reason=detail.get("fallout_full_reason"),
         )
         rebuild_message = format_warm_timings_message(
             label="compact",
@@ -533,20 +430,6 @@ def _run_deferred_full_compute(job: DeferredFullComputeJob) -> None:
             scenario_id=job.scenario_id,
             error="Ошибка фоновой сборки детализации",
         )
-    finally:
-        # base_data_version держали временно для инкрементального fallout.
-        try:
-            purge_stale_scenario_compute(
-                scenario_id=job.scenario_id,
-                keep_data_version=job.data_version,
-            )
-        except Exception:
-            logger.warning(
-                "Deferred compute: failed to purge stale compute dirs scenario_id=%s data_version=%s",
-                job.scenario_id,
-                job.data_version,
-                exc_info=True,
-            )
 
 
 def _deferred_lock_for(job: DeferredFullComputeJob) -> threading.Lock:

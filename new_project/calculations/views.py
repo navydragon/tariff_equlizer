@@ -60,48 +60,11 @@ def _get_user_scenario(request, scenario_id: int):
 
 
 def _build_cache_readiness_payload(*, scenario) -> dict[str, object]:
-    from calculations.domain.services.route_mart_warm_status import (
-        get_route_mart_warm_status,
-        is_route_mart_ready,
-    )
-    from calculations.domain.services.scenario_warm_status import get_warm_status
-
-    mart_status = get_route_mart_warm_status(route_set_id=scenario.route_set_id)
-    scenario_status = get_warm_status(scenario_id=scenario.id)
-    mart_ready = is_route_mart_ready(route_set_id=scenario.route_set_id)
-    mart_phase = mart_status["phase"] if mart_status else None
-    scenario_phase = scenario_status["phase"] if scenario_status else None
-    kpi_ready = bool(scenario_status and scenario_status.get("kpi_ready"))
-    compact_ready = bool(scenario_status and scenario_status.get("compact_ready"))
-    ready_for_compute = mart_ready and (
-        scenario_status is None or kpi_ready or scenario_phase == "done"
+    from calculations.domain.services.decision_effects_status import (
+        _build_cache_readiness_payload as build_payload,
     )
 
-    if not mart_ready and mart_phase in {"queued", "building"}:
-        message = "Пересборка витрины маршрутов…"
-    elif scenario_phase == "mask":
-        message = "Пересборка масок сценария…"
-    elif scenario_phase == "kpi":
-        message = "Обновление итогов сценария…"
-    elif scenario_phase == "compact":
-        message = "Детализация в фоне…"
-    elif mart_phase == "error":
-        message = mart_status.get("error") or "Ошибка пересборки витрины"
-    elif scenario_phase == "error":
-        message = scenario_status.get("error") or "Ошибка пересчёта сценария"
-    else:
-        message = "Данные обновляются…"
-
-    return {
-        "route_set_id": scenario.route_set_id,
-        "mart_phase": mart_phase,
-        "mart_ready": mart_ready,
-        "scenario_phase": scenario_phase,
-        "kpi_ready": kpi_ready,
-        "compact_ready": compact_ready,
-        "ready_for_compute": ready_for_compute,
-        "message": message,
-    }
+    return build_payload(scenario=scenario)
 
 
 @login_required
@@ -245,6 +208,63 @@ def scenario_effects_compute_pandas_api(request):
             "timings": meta.get("timings"),
         },
     )
+
+
+@login_required
+@require_http_methods(["GET"])
+def decision_effects_status_api(request):
+    scenario_id_raw = request.GET.get("scenario_id")
+    try:
+        scenario_id = int(scenario_id_raw)
+    except (TypeError, ValueError):
+        return JsonResponse(
+            {"success": False, "errors": ["Некорректный scenario_id"]},
+            status=400,
+        )
+
+    scenario, error_response = _get_user_scenario(request, scenario_id)
+    if error_response:
+        return error_response
+
+    cache_key = (request.GET.get("cache_key") or "").strip() or None
+    client_data_version = (request.GET.get("client_data_version") or "").strip() or None
+
+    if cache_key:
+        from calculations.domain.services.scenario_effects_cache import (
+            get_payload,
+            validate_cache_access,
+        )
+
+        payload = get_payload(cache_key)
+        if payload is None:
+            return JsonResponse(
+                {"success": False, "errors": ["Кэш расчёта недоступен"]},
+                status=404,
+            )
+        access_errors = validate_cache_access(
+            payload=payload,
+            user_id=request.user.id,
+            scenario_id=payload.scenario_id,
+        )
+        if access_errors:
+            return JsonResponse({"success": False, "errors": access_errors}, status=403)
+        if payload.scenario_id != scenario.id:
+            return JsonResponse(
+                {"success": False, "errors": ["cache_key не соответствует сценарию"]},
+                status=400,
+            )
+
+    scenario = Scenario.objects.select_related("route_set").get(pk=scenario.pk)
+    from calculations.domain.services.decision_effects_status import (
+        build_decision_effects_status,
+    )
+
+    status_payload = build_decision_effects_status(
+        scenario=scenario,
+        cache_key=cache_key,
+        client_data_version=client_data_version,
+    )
+    return JsonResponse({"success": True, **status_payload})
 
 
 @login_required

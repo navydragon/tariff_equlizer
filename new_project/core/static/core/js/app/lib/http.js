@@ -1,7 +1,7 @@
 // Простые обертки вокруг fetch для JSON-запросов.
 
 export async function fetchJson(url, options = {}) {
-  const { method = "GET", body, csrf = true, headers = {} } = options;
+  const { method = "GET", body, csrf = true, headers = {}, signal } = options;
 
   const finalHeaders = {
     "Accept": "application/json",
@@ -26,6 +26,7 @@ export async function fetchJson(url, options = {}) {
     method,
     headers: finalHeaders,
     body: finalBody,
+    signal,
   });
 
   const data = await response.json().catch(() => null);
@@ -58,6 +59,7 @@ export async function fetchBlob(url, options = {}) {
     method,
     headers: finalHeaders,
     body: finalBody,
+    signal,
   });
 
   const blob = await response.blob();

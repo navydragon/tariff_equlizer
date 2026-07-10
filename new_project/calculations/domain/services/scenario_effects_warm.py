@@ -186,19 +186,9 @@ def warm_scenario_after_rule_change(
 
         t_save = time.perf_counter()
         from calculations.domain.services.scenario_effects_cache import (
-            get_scenario_effects_revision,
             set_scenario_effects_revision,
         )
 
-        from calculations.domain.services.scenario_compute_store import (
-            resolve_incremental_base_data_version,
-        )
-
-        base_data_version = resolve_incremental_base_data_version(
-            scenario_id=scenario.id,
-            current_data_version=data_version,
-            preferred=get_scenario_effects_revision(scenario_id=scenario.id),
-        )
         save_scenario_compute_kpi_only(
             scenario_id=scenario.id,
             data_version=data_version,
@@ -215,10 +205,7 @@ def warm_scenario_after_rule_change(
         )
         purge_stale_scenario_compute(
             scenario_id=scenario.id,
-            keep_data_versions=tuple(
-                x for x in (data_version, base_data_version) if x and x != data_version
-            )
-            or (data_version,),
+            keep_data_version=data_version,
         )
         from calculations.domain.services.route_mask_cache import (
             purge_stale_mask_cache_dirs,
@@ -239,7 +226,6 @@ def warm_scenario_after_rule_change(
             years=years,
             rule_specs=rule_specs,
             data_version=data_version,
-            base_data_version=base_data_version,
             global_totals=global_totals,
             filter_options=filter_options,
             skipped_charge=skipped_charge,

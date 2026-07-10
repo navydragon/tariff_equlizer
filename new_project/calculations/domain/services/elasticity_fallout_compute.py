@@ -775,7 +775,6 @@ def compute_fallout_arrays(
     turnover_coef: np.ndarray,
     model_rows: list[ModelRouteEconomicsRow],
     dimension_labels: dict[str, list[str]] | None = None,
-    route_indices: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray, FalloutComputeStats]:
     n_routes = len(sidecar)
     n_years = len(years)
@@ -864,13 +863,6 @@ def compute_fallout_arrays(
         initial_charge=initial_charge,
         n_routes=n_routes,
     )
-    if route_indices is not None:
-        # Считаем fallout только для subset маршрутов. Остальные остаются нулями,
-        # а снаружи caller может сделать merge со старыми массивами.
-        subset_mask = np.zeros(n_routes, dtype=bool)
-        if route_indices.size:
-            subset_mask[route_indices.astype(np.intp, copy=False)] = True
-        eligible_mask = eligible_mask & subset_mask
     stats.model_routes_pool = len(model_rows)
     stats.holding_groups = len(holding_groups)
     stats.cargo_groups = len(cargo_groups)

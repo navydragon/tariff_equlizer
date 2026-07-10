@@ -460,24 +460,17 @@ def save_scenario_compute_kpi_only(
 def purge_stale_scenario_compute(
     *,
     scenario_id: int,
-    keep_data_version: str | None = None,
-    keep_data_versions: list[str] | tuple[str, ...] | None = None,
+    keep_data_version: str,
 ) -> int:
     scenario_dir = scenario_compute_cache_root() / str(scenario_id)
     if not scenario_dir.is_dir():
         return 0
 
-    keep: set[str] = {FALLOUT_CACHE_DIRNAME}
-    if keep_data_version:
-        keep.add(keep_data_version)
-    if keep_data_versions:
-        keep.update([x for x in keep_data_versions if x])
-
     removed = 0
     for child in scenario_dir.iterdir():
         if not child.is_dir():
             continue
-        if child.name in keep:
+        if child.name in (keep_data_version, FALLOUT_CACHE_DIRNAME):
             continue
         shutil.rmtree(child, ignore_errors=True)
         removed += 1
@@ -637,75 +630,6 @@ def is_scenario_fallout_on_disk(*, scenario_id: int, data_version: str) -> bool:
     return (cache_dir / VOLUME_FALLOUT_BY_YEAR_FILENAME).is_file() and (
         cache_dir / MONEY_FALLOUT_BY_YEAR_FILENAME
     ).is_file()
-
-
-def find_latest_fallout_ready_data_version(
-    *,
-    scenario_id: int,
-    exclude: str | None = None,
-) -> str | None:
-    """Последний на диске snapshot с готовым fallout (по mtime metadata.json)."""
-    scenario_dir = scenario_compute_cache_root() / str(scenario_id)
-    if not scenario_dir.is_dir():
-        return None
-
-    best_version: str | None = None
-    best_mtime = -1.0
-    for child in scenario_dir.iterdir():
-        if not child.is_dir() or child.name in {FALLOUT_CACHE_DIRNAME, exclude}:
-            continue
-        if not is_scenario_fallout_on_disk(
-            scenario_id=scenario_id,
-            data_version=child.name,
-        ):
-            continue
-        meta_path = child / METADATA_FILENAME
-        mtime = meta_path.stat().st_mtime if meta_path.is_file() else child.stat().st_mtime
-        if mtime > best_mtime:
-            best_mtime = mtime
-            best_version = child.name
-    return best_version
-
-
-def resolve_incremental_base_data_version(
-    *,
-    scenario_id: int,
-    current_data_version: str,
-    preferred: str | None = None,
-) -> str | None:
-    """
-    Версия snapshot для инкрементального fallout.
-
-    Redis-revision может быть пуст после рестарта — тогда берём последний
-    fallout-ready snapshot с диска.
-    """
-    candidates: list[str] = []
-    for version in (preferred,):
-        if version and version != current_data_version and version not in candidates:
-            candidates.append(version)
-
-    from calculations.domain.services.scenario_effects_cache import (
-        get_scenario_effects_revision,
-    )
-
-    revision = get_scenario_effects_revision(scenario_id=scenario_id)
-    if revision and revision != current_data_version and revision not in candidates:
-        candidates.append(revision)
-
-    disk_version = find_latest_fallout_ready_data_version(
-        scenario_id=scenario_id,
-        exclude=current_data_version,
-    )
-    if disk_version and disk_version not in candidates:
-        candidates.append(disk_version)
-
-    for version in candidates:
-        if is_scenario_fallout_on_disk(
-            scenario_id=scenario_id,
-            data_version=version,
-        ):
-            return version
-    return None
 
 
 def is_scenario_compact_on_disk(*, scenario_id: int, data_version: str) -> bool:

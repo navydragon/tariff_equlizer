@@ -902,6 +902,105 @@ class ScenarioEffectsApiTests(TariffLoadServiceTestMixin, TestCase):
         self.assertEqual(payload["route_set_id"], self.scenario.route_set_id)
         self.assertIn("ready_for_compute", payload)
 
+    def test_decision_effects_status_api_success(self) -> None:
+        from calculations.domain.services.route_effects_loader import (
+            fetch_routes_dataframe_cached_timed,
+        )
+
+        fetch_routes_dataframe_cached_timed(self.scenario.route_set_id)
+
+        url = reverse("calculations:decision_effects_status_api")
+        response = self.client.get(url, {"scenario_id": self.scenario.id})
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["success"])
+        self.assertIn(payload["stage"], {"ready_for_compute", "done", "scenario_warming"})
+        self.assertIn("data_version_changed", payload)
+        self.assertTrue(payload["mart_ready"])
+
+    def test_decision_effects_status_api_mart_rebuilding(self) -> None:
+        import shutil
+
+        from calculations.domain.services.route_mart_store import (
+            get_route_mart_refs_version,
+            route_mart_cache_dir,
+        )
+        from calculations.domain.services.route_mart_warm_status import (
+            init_route_mart_warm_status,
+        )
+
+        shutil.rmtree(
+            route_mart_cache_dir(route_set_id=self.scenario.route_set_id),
+            ignore_errors=True,
+        )
+        init_route_mart_warm_status(
+            route_set_id=self.scenario.route_set_id,
+            refs_version=get_route_mart_refs_version(),
+            phase="queued",
+        )
+
+        url = reverse("calculations:decision_effects_status_api")
+        response = self.client.get(url, {"scenario_id": self.scenario.id})
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["success"])
+        self.assertEqual(payload["stage"], "mart_rebuilding")
+        self.assertFalse(payload["mart_ready"])
+
+    def test_decision_effects_status_api_with_cache_key(self) -> None:
+        from calculations.domain.services.route_effects_loader import (
+            fetch_routes_dataframe_cached_timed,
+        )
+
+        fetch_routes_dataframe_cached_timed(self.scenario.route_set_id)
+
+        compute_url = reverse("calculations:scenario_effects_compute_pandas_api")
+        compute_response = self.client.post(
+            compute_url,
+            data=json.dumps({"scenario_id": self.scenario.id}),
+            content_type="application/json",
+        )
+        self.assertEqual(compute_response.status_code, 200)
+        cache_key = compute_response.json()["cache_key"]
+
+        url = reverse("calculations:decision_effects_status_api")
+        response = self.client.get(
+            url,
+            {"scenario_id": self.scenario.id, "cache_key": cache_key},
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["success"])
+        self.assertIn(
+            payload["stage"],
+            {"compact_pending", "fallout_pending", "done"},
+        )
+        self.assertIn("compact_ready", payload)
+        self.assertIn("fallout_ready", payload)
+
+    def test_decision_effects_status_data_version_changed(self) -> None:
+        from calculations.domain.services.scenario_effects_cache import (
+            set_scenario_effects_revision,
+        )
+
+        set_scenario_effects_revision(
+            scenario_id=self.scenario.id,
+            data_version="client-old-version",
+        )
+
+        url = reverse("calculations:decision_effects_status_api")
+        response = self.client.get(
+            url,
+            {
+                "scenario_id": self.scenario.id,
+                "client_data_version": "stale-client-version",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["success"])
+        self.assertTrue(payload["data_version_changed"])
+
     def test_compute_pandas_api_returns_409_while_mart_rebuilding(self) -> None:
         import shutil
 
@@ -2255,9 +2354,6 @@ class ScenarioRuleWarmTests(TariffLoadServiceTestMixin, TestCase):
         from calculations.domain.services.scenario_effects_cache import (
             compute_scenario_data_version,
         )
-        from calculations.domain.services.scenario_effects_deferred import (
-            _run_deferred_full_compute,
-        )
         from calculations.domain.services.scenario_compute_store import (
             scenario_compute_dir,
             try_load_scenario_compute,
@@ -2281,12 +2377,7 @@ class ScenarioRuleWarmTests(TariffLoadServiceTestMixin, TestCase):
                 created, errors = self.tariff_rule_service.create_rule(dto, self.user)
         self.assertEqual(errors, [])
         assert created is not None
-        # Run deferred compute synchronously to make purge deterministic.
-        with patch(
-            "calculations.domain.services.scenario_effects_warm.schedule_deferred_full_compute",
-            side_effect=_run_deferred_full_compute,
-        ):
-            self._recompute_scenario(scenario)
+        self._recompute_scenario(scenario)
 
         context = self.pandas_service._tariff_load.build_scenario_context(scenario)
         old_version = compute_scenario_data_version(
@@ -2310,11 +2401,7 @@ class ScenarioRuleWarmTests(TariffLoadServiceTestMixin, TestCase):
         self.assertTrue(old_dir.is_dir())
 
         scenario = Scenario.objects.select_related("route_set").get(pk=self.scenario.pk)
-        with patch(
-            "calculations.domain.services.scenario_effects_warm.schedule_deferred_full_compute",
-            side_effect=_run_deferred_full_compute,
-        ):
-            self._recompute_scenario(scenario)
+        self._recompute_scenario(scenario)
 
         self.assertFalse(old_dir.is_dir())
 

@@ -1,9 +1,5 @@
 import { fetchBlob, fetchJson } from "../lib/http.js";
-import {
-  cacheReadinessMessage,
-  cacheReadinessVariant,
-  pollCacheReadiness,
-} from "../lib/cache_readiness.js";
+import { DecisionEffectsPipeline } from "../lib/decision_effects_pipeline.js";
 import { escapeHtml } from "../lib/dom.js";
 import { persistActiveScenario } from "../lib/scenario_active.js";
 import { clearToasts, showToast } from "../lib/toast.js";
@@ -49,10 +45,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
       computeUrl: String,
       computePandasUrl: String,
       aggregateUrl: String,
-      revisionUrl: String,
-      cacheReadinessUrl: String,
-      warmStatusUrl: String,
-      compactStatusUrl: String,
+      statusUrl: String,
       revenuesUrl: String,
       volumesUrl: String,
       absoluteBothUrl: String,
@@ -83,14 +76,15 @@ import { clearToasts, showToast } from "../lib/toast.js";
         awaitingCompact: false,
         earlyGroupReady: false,
         lastDataVersion: null,
-        revisionTimer: null,
+        lastStage: null,
+        tablesLoadedForGen: null,
+        falloutRefreshKinds: new Set(),
         scenarioEditModal: null,
         scenarioEditModalEl: null,
         scenarioEditFrame: null,
         boundScenarioEditModalHiddenHandler: null,
         showFalloutAdjustedRevenues: false,
         showFalloutAdjustedVolumes: false,
-        absoluteBothInFlight: null,
         lastRebuildToastVersion: null,
       };
 
@@ -118,10 +112,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
       document.addEventListener("visibilitychange", this._onVisibilityChange);
       document.addEventListener("scenario-recalculated", this._onScenarioRecalculated);
       window.addEventListener("message", this._onScenarioEditMessage);
-      this.state.revisionTimer = setInterval(
-        () => this._checkRevision(),
-        30000,
-      );
+      this._initPipeline();
 
       this.state.routeMartRebuildModalEl = document.getElementById(
         "routeMartRebuildModal",
@@ -158,10 +149,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
           this.state.boundScenarioEditModalHiddenHandler,
         );
       }
-      if (this.state?.revisionTimer) {
-        clearInterval(this.state.revisionTimer);
-        this.state.revisionTimer = null;
-      }
+      this.pipeline?.stop();
       this._destroyChart();
       this._destroyTomSelects();
     }
@@ -177,7 +165,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
       this._updateFalloutControlsVisibility();
       this._updateScenarioEditButtonState();
       this._persistActiveScenario(scenarioId);
-      this._computeEffects();
+      this._startPipeline();
     }
 
     openScenarioEditModal() {
@@ -238,13 +226,14 @@ import { clearToasts, showToast } from "../lib/toast.js";
       }
 
       if (!this.state.cacheKey) {
-        this._computeEffects();
+        this._startPipeline();
         return;
       }
 
+      const filterGen = this.pipeline?.bumpFilterGeneration();
       clearTimeout(this.state.aggregateTimer);
       this.state.aggregateTimer = setTimeout(() => {
-        this._aggregateEffects();
+        this._aggregateEffects({ filterGen });
       }, this.debounceMsValue || 350);
     }
 
@@ -254,9 +243,10 @@ import { clearToasts, showToast } from "../lib/toast.js";
         this.revenuesGroupByInnerSelectTarget,
       );
       this._setRevenuesTableLoading(true);
+      const filterGen = this.pipeline?.bumpFilterGeneration();
       clearTimeout(this.state.revenuesTimer);
       this.state.revenuesTimer = setTimeout(() => {
-        this._aggregateRevenues();
+        this._aggregateRevenues({ filterGen });
       }, this.debounceMsValue || 350);
     }
 
@@ -266,9 +256,10 @@ import { clearToasts, showToast } from "../lib/toast.js";
         this.volumesGroupByInnerSelectTarget,
       );
       this._setVolumesTableLoading(true);
+      const filterGen = this.pipeline?.bumpFilterGeneration();
       clearTimeout(this.state.volumesTimer);
       this.state.volumesTimer = setTimeout(() => {
-        this._aggregateVolumes();
+        this._aggregateVolumes({ filterGen });
       }, this.debounceMsValue || 350);
     }
 
@@ -302,17 +293,16 @@ import { clearToasts, showToast } from "../lib/toast.js";
       }
 
       const includeFallout = this._includeFalloutForKind(kind);
-      if (includeFallout) {
+      if (includeFallout && this.state.falloutPending) {
+        this.state.falloutRefreshKinds.add(kind);
         if (kind === "revenues") {
           this._setRevenuesTableLoading(true, "Расчёт выпадения…");
         } else {
           this._setVolumesTableLoading(true, "Расчёт выпадения…");
         }
-        await this._ensureCompactReady();
+        return;
       }
 
-      // Важно: тумблер относится только к одной таблице.
-      // Даже при наличии общего эндпоинта `both/` перезагружаем только нужную.
       await this._aggregateAbsoluteSingle(kind);
     }
 
@@ -445,7 +435,195 @@ import { clearToasts, showToast } from "../lib/toast.js";
         this.state.selectedScenarioId = selectedId;
         this._updateScenarioEditButtonState();
         this._updateFalloutControlsVisibility();
-        this._computeEffects();
+        this._startPipeline();
+      }
+    }
+
+    _initPipeline() {
+      if (!this.hasStatusUrlValue) {
+        return;
+      }
+      this.pipeline = new DecisionEffectsPipeline({
+        statusUrl: this.statusUrlValue,
+        fetchJson,
+      });
+      this.pipeline.onStageChange = (stage, status, gen) =>
+        this._applyStage(stage, status, gen);
+    }
+
+    _startPipeline() {
+      const scenarioId = this.state.selectedScenarioId;
+      if (!scenarioId || !this.pipeline) {
+        return;
+      }
+      this.state.cacheKey = null;
+      this.state.tablesLoadedForGen = null;
+      this.state.falloutRefreshKinds.clear();
+      this.state.lastStage = null;
+      this._clearToasts();
+      this.pipeline.start(scenarioId, {
+        clientDataVersion: this.state.lastDataVersion,
+      });
+    }
+
+    async _applyStage(stage, status, gen) {
+      if (!this.pipeline?.isCurrent(gen)) {
+        return;
+      }
+
+      const prevStage = this.state.lastStage;
+      this.state.lastStage = stage;
+
+      if (status?.data_version) {
+        this.state.lastDataVersion = status.data_version;
+        this.pipeline.setClientDataVersion(status.data_version);
+      }
+
+      if (stage === "data_version_changed") {
+        this.state.cacheKey = null;
+        this.pipeline.restart();
+        return;
+      }
+
+      if (stage === "error") {
+        this._hideRouteMartRebuildModal();
+        this._showRebuildStatus(
+          status?.message || status?.error || "Ошибка пересчёта",
+          "danger",
+        );
+        return;
+      }
+
+      if (stage === "mart_rebuilding") {
+        this._hideRebuildStatus();
+        this._showRouteMartRebuildModal(status?.message);
+        return;
+      }
+
+      if (stage === "scenario_warming") {
+        this._hideRouteMartRebuildModal();
+        this._showRebuildStatus(status?.message || "Обновление данных…", "info");
+        return;
+      }
+
+      this._hideRebuildStatus();
+      this._hideRouteMartRebuildModal();
+
+      if (stage === "ready_for_compute") {
+        this.pipeline.markComputeTriggered();
+        await this._computeEffects(gen);
+        return;
+      }
+
+      this._syncStatusFlags(status);
+
+      if (stage === "compact_pending") {
+        this._setCompactPendingIndicator(true, status?.message || "Обновление детализации…");
+        if (prevStage !== "compact_pending" && this.state.cacheKey) {
+          await this._loadTablesAfterCompute(gen, { showTableLoading: false });
+        }
+        return;
+      }
+
+      if (stage === "fallout_pending") {
+        this._setCompactPendingIndicator(true, status?.message || "Расчёт эластичности…", {
+          affectTables: false,
+        });
+        if (prevStage !== "fallout_pending" && this.state.cacheKey) {
+          await this._aggregateEffects({ gen, showTableLoading: false });
+        }
+        return;
+      }
+
+      if (stage === "done") {
+        this._setCompactPendingIndicator(false);
+        this._setKpiLoading(false);
+        this._setTableLoading(false);
+        this._setChartLoading(false);
+        this._setRevenuesTableLoading(false);
+        this._setVolumesTableLoading(false);
+
+        const message = (status?.rebuild_message || "").trim();
+        const dataVersion = status?.data_version || null;
+        if (
+          message &&
+          dataVersion &&
+          this.state.lastRebuildToastVersion !== dataVersion
+        ) {
+          this.state.lastRebuildToastVersion = dataVersion;
+          showToast(message, this._toastOptions({ variant: "info", delay: 10000 }));
+        }
+
+        if (
+          prevStage === "fallout_pending" ||
+          prevStage === "compact_pending" ||
+          this.state.falloutRefreshKinds.size
+        ) {
+          await this._refreshTablesForStage(gen);
+          this.state.falloutRefreshKinds.clear();
+        }
+      }
+    }
+
+    _syncStatusFlags(status) {
+      if (!status) return;
+      this.state.compactPending = status.compact_ready === false;
+      this.state.effectsCompactPending = status.compact_ready === false;
+      this.state.awaitingCompact = status.compact_ready === false;
+      this.state.falloutPending =
+        Boolean(status.compact_ready) && status.fallout_ready === false;
+      this.state.earlyGroupReady = Boolean(
+        status.early_group_ready ?? status.compact_ready,
+      );
+    }
+
+    async _refreshTablesForStage(gen) {
+      if (!this.pipeline?.isCurrent(gen) || !this.state.cacheKey) {
+        return;
+      }
+      const kinds = this.state.falloutRefreshKinds;
+      const tasks = [this._aggregateEffects({ gen, showTableLoading: false })];
+      if (!kinds.size || kinds.has("revenues")) {
+        tasks.push(this._aggregateRevenues({ gen }));
+      }
+      if (!kinds.size || kinds.has("volumes")) {
+        tasks.push(this._aggregateVolumes({ gen }));
+      }
+      await Promise.all(tasks);
+      if (this.pipeline?.isCurrent(gen)) {
+        this.state.tablesLoadedForGen = gen;
+      }
+    }
+
+    async _loadTablesAfterCompute(gen, { showTableLoading = true } = {}) {
+      if (!this.pipeline?.isCurrent(gen) || !this.state.cacheKey) {
+        return;
+      }
+      if (this.state.tablesLoadedForGen === gen) {
+        return;
+      }
+
+      const useEarlyAbsolute = this._canUseEarlyAbsolute();
+      await Promise.all([
+        this._aggregateEffects({ gen, showTableLoading }),
+        ...(useEarlyAbsolute
+          ? [this._aggregateRevenues({ gen }), this._aggregateVolumes({ gen })]
+          : []),
+      ]);
+
+      if (!this.pipeline?.isCurrent(gen)) {
+        return;
+      }
+
+      if (!useEarlyAbsolute && !this.state.awaitingCompact) {
+        await Promise.all([
+          this._aggregateRevenues({ gen }),
+          this._aggregateVolumes({ gen }),
+        ]);
+      }
+
+      if (this.pipeline?.isCurrent(gen)) {
+        this.state.tablesLoadedForGen = gen;
       }
     }
 
@@ -453,25 +631,22 @@ import { clearToasts, showToast } from "../lib/toast.js";
       return this.computePandasUrlValue || this.computeUrlValue;
     }
 
-    async _computeEffects() {
+    async _computeEffects(gen) {
       const computeUrl = this._resolveComputeUrl();
-      if (!computeUrl || !this.state.selectedScenarioId) return;
-
-      this._clearToasts();
-      const readiness = await this._waitForCacheReadiness(
-        this.state.selectedScenarioId,
-      );
       if (
-        readiness &&
-        (readiness.mart_phase === "error" || readiness.scenario_phase === "error")
+        !computeUrl ||
+        !this.state.selectedScenarioId ||
+        !this.pipeline?.isCurrent(gen)
       ) {
         return;
       }
+
       this._setKpiLoading(true);
       this._setChartLoading(true, "Расчёт данных…");
       this._setRevenuesTableLoading(true, "Расчёт данных…");
       this._setVolumesTableLoading(true, "Расчёт данных…");
       this.state.computing = true;
+      this.pipeline.setComputing(true);
 
       try {
         const { response, data } = await fetchJson(computeUrl, {
@@ -480,25 +655,21 @@ import { clearToasts, showToast } from "../lib/toast.js";
             scenario_id: this.state.selectedScenarioId,
             include_rule_breakdown: false,
           },
+          signal: this.pipeline.getSignal(),
         });
+
+        if (!this.pipeline?.isCurrent(gen)) {
+          return;
+        }
 
         if (!response.ok || !data || !data.success) {
           if (response.status === 409 && data && data.code === "mart_rebuilding") {
-            this._hideRebuildStatus();
-            this._showRouteMartRebuildModal(cacheReadinessMessage(data));
-            const waited = await this._waitForCacheReadiness(
-              this.state.selectedScenarioId,
-            );
-            if (
-              !waited ||
-              waited.mart_phase === "error" ||
-              waited.scenario_phase === "error"
-            ) {
-              return;
-            }
-            return this._computeEffects();
+            this.pipeline.setComputing(false);
+            this.pipeline.restart();
+            return;
           }
           this.state.cacheKey = null;
+          this.pipeline.setCacheKey(null);
           this._renderKpiCards([]);
           this._setChartLoading(false);
           this._setRevenuesTableLoading(false);
@@ -528,13 +699,19 @@ import { clearToasts, showToast } from "../lib/toast.js";
           data.early_group_ready ?? data.compact_ready,
         );
         this.state.lastDataVersion = data.data_version || null;
+        this.pipeline.setCacheKey(data.cache_key || null, data.data_version || null);
+        this.state.tablesLoadedForGen = null;
+
         if (this.state.compactPending) {
           this._setCompactPendingIndicator(true, "Обновление детализации…");
         } else if (this.state.falloutPending) {
           this._setCompactPendingIndicator(true, "Расчёт эластичности…", {
             affectTables: false,
           });
+        } else {
+          this._setCompactPendingIndicator(false);
         }
+
         this.state.scenarioYears = data.years || [];
         this._renderWarning(
           data.routes_without_charge,
@@ -550,37 +727,19 @@ import { clearToasts, showToast } from "../lib/toast.js";
         this._syncYearOptions(data.years || []);
         this._syncFilterOptions(data.filter_options || {});
         this._renderKpiCards(data.cards || []);
+        this._setKpiLoading(false);
 
-        const useEarlyAbsolute = this._canUseEarlyAbsolute();
-        await Promise.all([
-          this._aggregateEffects({ showTableLoading: true }),
-          ...(useEarlyAbsolute
-            ? [this._aggregateRevenues(), this._aggregateVolumes()]
-            : []),
-        ]);
-
-        if (this.state.awaitingCompact) {
-          if (useEarlyAbsolute) {
-            await this._refreshAbsoluteWhenCompactReady();
-          } else {
-            await this._ensureCompactReady();
-            await Promise.all([
-              this._aggregateEffects({ showTableLoading: true }),
-              this._aggregateRevenues(),
-              this._aggregateVolumes(),
-            ]);
-          }
-        } else if (!useEarlyAbsolute) {
-          await Promise.all([
-            this._aggregateRevenues(),
-            this._aggregateVolumes(),
-          ]);
-        }
-
-        this.state.awaitingCompact = false;
+        await this._loadTablesAfterCompute(gen, { showTableLoading: true });
       } catch (error) {
+        if (error?.name === "AbortError") {
+          return;
+        }
         console.error("[decision-effects] compute failed", error);
+        if (!this.pipeline?.isCurrent(gen)) {
+          return;
+        }
         this.state.cacheKey = null;
+        this.pipeline.setCacheKey(null);
         this._renderKpiCards([]);
         this._setChartLoading(false);
         this._setRevenuesTableLoading(false);
@@ -598,7 +757,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
         );
       } finally {
         this.state.computing = false;
-        this._setKpiLoading(false);
+        this.pipeline?.setComputing(false);
       }
     }
 
@@ -643,70 +802,22 @@ import { clearToasts, showToast } from "../lib/toast.js";
       this.state.routeMartRebuildModal.hide();
     }
 
-    async _waitForCacheReadiness(scenarioId) {
-      if (!scenarioId || !this.cacheReadinessUrlValue) {
-        return;
+    _isRequestCurrent({ gen, filterGen } = {}) {
+      if (gen != null && !this.pipeline?.isCurrent(gen)) {
+        return false;
       }
-      const status = await pollCacheReadiness({
-        scenarioId,
-        cacheReadinessUrl: this.cacheReadinessUrlValue,
-        timeoutMs: 15 * 60 * 1000,
-        onStatus: (payload) => {
-          if (payload.mart_phase === "queued" || payload.mart_phase === "building") {
-            this._hideRebuildStatus();
-            this._showRouteMartRebuildModal(cacheReadinessMessage(payload));
-            return;
-          }
-
-          if (
-            payload.ready_for_compute ||
-            (!payload.mart_phase && !payload.scenario_phase)
-          ) {
-            this._hideRebuildStatus();
-            this._hideRouteMartRebuildModal();
-            return;
-          }
-
-          this._hideRouteMartRebuildModal();
-          this._showRebuildStatus(
-            cacheReadinessMessage(payload),
-            cacheReadinessVariant(payload),
-          );
-        },
-      });
-      if (
-        status &&
-        (status.ready_for_compute ||
-          (!status.mart_phase && !status.scenario_phase))
-      ) {
-        this._hideRebuildStatus();
-        this._hideRouteMartRebuildModal();
-      } else if (
-        status &&
-        (status.mart_phase === "queued" || status.mart_phase === "building")
-      ) {
-        this._hideRebuildStatus();
-        this._showRouteMartRebuildModal(cacheReadinessMessage(status));
-      } else if (status) {
-        this._showRebuildStatus(
-          cacheReadinessMessage(status),
-          cacheReadinessVariant(status),
-        );
-      } else {
-        this._hideRouteMartRebuildModal();
-        this._showRebuildStatus(
-          "Пересборка витрины занимает больше ожидаемого времени. Попробуйте обновить страницу через пару минут.",
-          "danger",
-        );
+      if (filterGen != null && !this.pipeline?.isFilterCurrent(filterGen)) {
+        return false;
       }
-      return status;
+      return true;
     }
 
-    async _aggregateEffects({ showTableLoading = false, attempt = 0 } = {}) {
+    async _aggregateEffects({ gen, filterGen, showTableLoading = false } = {}) {
       if (
         !this.aggregateUrlValue ||
         !this.state.selectedScenarioId ||
-        !this.state.cacheKey
+        !this.state.cacheKey ||
+        !this._isRequestCurrent({ gen, filterGen })
       ) {
         return;
       }
@@ -720,12 +831,10 @@ import { clearToasts, showToast } from "../lib/toast.js";
         return;
       }
 
-      if (showTableLoading && attempt === 0) {
+      if (showTableLoading) {
         this._setTableLoading(true);
         this._setChartLoading(true, "Обновление диаграммы…");
       }
-
-      const maxAttempts = this.state.effectsCompactPending ? 45 : 5;
 
       try {
         const payload = {
@@ -745,7 +854,12 @@ import { clearToasts, showToast } from "../lib/toast.js";
         const { response, data } = await fetchJson(this.aggregateUrlValue, {
           method: "POST",
           body: payload,
+          signal: this.pipeline?.getSignal(),
         });
+
+        if (!this._isRequestCurrent({ gen, filterGen })) {
+          return;
+        }
 
         if (!response.ok || !data || !data.success) {
           const message =
@@ -756,19 +870,14 @@ import { clearToasts, showToast } from "../lib/toast.js";
             message.includes("недоступен")
           ) {
             this.state.cacheKey = null;
-            await this._computeEffects();
+            this.pipeline?.restart();
             return;
           }
           if (
-            (this.state.effectsCompactPending ||
-              this._isAggregatePendingMessage(message)) &&
-            attempt + 1 < maxAttempts
+            this.state.effectsCompactPending ||
+            this._isAggregatePendingMessage(message)
           ) {
-            await this._waitForCompactReady();
-            return this._aggregateEffects({
-              showTableLoading,
-              attempt: attempt + 1,
-            });
+            return;
           }
           this._showError(message);
           if (showTableLoading) {
@@ -778,9 +887,9 @@ import { clearToasts, showToast } from "../lib/toast.js";
           return;
         }
 
-        this.state.effectsCompactPending = false;
         if (!this.state.awaitingCompact) {
           this.state.compactPending = false;
+          this.state.effectsCompactPending = false;
           this._setCompactPendingIndicator(false);
         }
         const showFallout = Boolean(data?.table?.show_fallout);
@@ -791,22 +900,17 @@ import { clearToasts, showToast } from "../lib/toast.js";
           falloutPending,
         );
         this._renderChart(data.chart || null);
-        if (showFallout && falloutPending && !this.state.falloutRefreshInFlight) {
-          this.state.falloutRefreshInFlight = true;
-          void this._waitForFalloutReadyAndRefreshTable();
-        }
         if (showTableLoading) {
           this._setTableLoading(false);
           this._setChartLoading(false);
         }
       } catch (error) {
+        if (error?.name === "AbortError") {
+          return;
+        }
         console.error("[decision-effects] aggregate failed", error);
-        if (attempt + 1 < maxAttempts) {
-          await this._sleep(2000);
-          return this._aggregateEffects({
-            showTableLoading,
-            attempt: attempt + 1,
-          });
+        if (!this._isRequestCurrent({ gen, filterGen })) {
+          return;
         }
         this._showError("Не удалось обновить таблицу и график.");
         if (showTableLoading) {
@@ -824,123 +928,9 @@ import { clearToasts, showToast } from "../lib/toast.js";
       );
     }
 
-    _sleep(ms) {
-      return new Promise((resolve) => setTimeout(resolve, ms));
-    }
-
-    async _waitForCompactReady() {
-      if (!this.compactStatusUrlValue || !this.state.cacheKey) {
-        await this._sleep(2000);
-        return;
-      }
-
-      try {
-        const { data } = await fetchJson(this.compactStatusUrlValue, {
-          method: "POST",
-          body: { cache_key: this.state.cacheKey },
-        });
-        if (data && data.success) {
-          if (!data.compact_ready) {
-            this.state.compactPending = true;
-            this.state.falloutPending = false;
-          }
-          if (data.compact_ready) {
-            this.state.awaitingCompact = false;
-            this.state.falloutPending = data.fallout_ready === false;
-          }
-          if (data.early_group_ready) {
-            this.state.earlyGroupReady = true;
-          }
-          if (data.data_version) {
-            this.state.lastDataVersion = data.data_version;
-          }
-        }
-      } catch (error) {
-        console.error("[decision-effects] compact-status failed", error);
-      }
-      await this._sleep(2000);
-    }
-
-    async _waitForFalloutReadyAndRefreshTable() {
-      if (!this.compactStatusUrlValue || !this.state.cacheKey) {
-        this.state.falloutRefreshInFlight = false;
-        return;
-      }
-
-      const maxAttempts = 45;
-      for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-        try {
-          const { data } = await fetchJson(this.compactStatusUrlValue, {
-            method: "POST",
-            body: { cache_key: this.state.cacheKey },
-          });
-
-          if (data?.success && data.fallout_ready === true) {
-            this.state.falloutPending = false;
-            this._setCompactPendingIndicator(false);
-            this.state.falloutRefreshInFlight = false;
-            this._aggregateEffects({ showTableLoading: false, attempt: 0 });
-            return;
-          }
-        } catch (error) {
-          console.error("[decision-effects] compact-status failed", error);
-        }
-        await this._sleep(2000);
-      }
-
-      this.state.falloutRefreshInFlight = false;
-    }
-
-    async _ensureCompactReady() {
-      if (!this.state.awaitingCompact && !this.state.compactPending) {
-        return true;
-      }
-
-      const maxAttempts = 45;
-      for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-        if (!this.state.cacheKey) {
-          return false;
-        }
-
-        if (this.compactStatusUrlValue) {
-          try {
-            const { data } = await fetchJson(this.compactStatusUrlValue, {
-              method: "POST",
-              body: { cache_key: this.state.cacheKey },
-            });
-            if (data?.success && data.compact_ready) {
-              this.state.compactPending = false;
-              this.state.awaitingCompact = false;
-              this.state.earlyGroupReady = true;
-              this.state.falloutPending = data.fallout_ready === false;
-              if (this.state.falloutPending) {
-                this._setCompactPendingIndicator(true, "Расчёт эластичности…", {
-                  affectTables: false,
-                });
-              } else {
-                this._setCompactPendingIndicator(false);
-              }
-              return true;
-            }
-            if (data?.success && data.early_group_ready) {
-              this.state.earlyGroupReady = true;
-            }
-          } catch (error) {
-            console.error("[decision-effects] compact-status failed", error);
-          }
-        }
-
-        this._setRevenuesTableLoading(true, "Обновление детализации…");
-        this._setVolumesTableLoading(true, "Обновление детализации…");
-        await this._sleep(2000);
-      }
-
-      return false;
-    }
-
     _onVisibilityChange() {
       if (document.visibilityState === "visible") {
-        this._checkRevision();
+        this.pipeline?.pollNow();
       }
     }
 
@@ -977,142 +967,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
       if (this.state.computing) {
         return;
       }
-      this._setKpiLoading(true);
-      await this._waitForWarmKpi(this.state.selectedScenarioId);
-      await this._waitForWarmComplete(this.state.selectedScenarioId);
-      await this._maybeShowRebuildToast(this.state.selectedScenarioId);
-      await this._checkRevision(true);
-    }
-
-    async _waitForWarmComplete(scenarioId, startedAt = Date.now()) {
-      if (!this.hasWarmStatusUrlValue || !scenarioId) {
-        return;
-      }
-      const timeoutMs = 120000;
-      if (Date.now() - startedAt > timeoutMs) {
-        return;
-      }
-
-      const url = `${this.warmStatusUrlValue}?scenario_id=${encodeURIComponent(
-        String(scenarioId),
-      )}`;
-      try {
-        const { data } = await fetchJson(url);
-        if (!data || !data.success) {
-          await this._sleep(300);
-          return this._waitForWarmComplete(scenarioId, startedAt);
-        }
-        if (data.phase === "error") {
-          console.error("[decision-effects] scenario warm failed", data.error);
-          return;
-        }
-        const message = (data.rebuild_message || "").trim();
-        if (data.phase === "done" && message) {
-          return;
-        }
-        await this._sleep(300);
-        return this._waitForWarmComplete(scenarioId, startedAt);
-      } catch (error) {
-        console.error("[decision-effects] warm complete poll failed", error);
-        await this._sleep(500);
-        return this._waitForWarmComplete(scenarioId, startedAt);
-      }
-    }
-
-    async _maybeShowRebuildToast(scenarioId) {
-      if (!this.hasWarmStatusUrlValue || !scenarioId) {
-        return;
-      }
-      const url = `${this.warmStatusUrlValue}?scenario_id=${encodeURIComponent(
-        String(scenarioId),
-      )}`;
-      try {
-        const { data } = await fetchJson(url);
-        if (!data || !data.success) {
-          return;
-        }
-        const message = (data.rebuild_message || "").trim();
-        const dataVersion = data.data_version || null;
-        if (!message || !dataVersion) {
-          return;
-        }
-        if (this.state.lastRebuildToastVersion === dataVersion) {
-          return;
-        }
-        this.state.lastRebuildToastVersion = dataVersion;
-        showToast(message, this._toastOptions({ variant: "info", delay: 10000 }));
-      } catch (_e) {
-        // ignore
-      }
-    }
-
-    async _waitForWarmKpi(scenarioId, startedAt = Date.now()) {
-      if (!this.hasWarmStatusUrlValue || !scenarioId) {
-        return;
-      }
-      const timeoutMs = 120000;
-      if (Date.now() - startedAt > timeoutMs) {
-        return;
-      }
-
-      const url = `${this.warmStatusUrlValue}?scenario_id=${encodeURIComponent(
-        String(scenarioId),
-      )}`;
-      try {
-        const { data } = await fetchJson(url);
-        if (!data || !data.success) {
-          await this._sleep(300);
-          return this._waitForWarmKpi(scenarioId, startedAt);
-        }
-        if (!data.phase) {
-          return;
-        }
-        if (data.phase === "error") {
-          console.error("[decision-effects] scenario warm failed", data.error);
-          return;
-        }
-        if (data.kpi_ready || data.phase === "done") {
-          return;
-        }
-        await this._sleep(300);
-        return this._waitForWarmKpi(scenarioId, startedAt);
-      } catch (error) {
-        console.error("[decision-effects] warm status poll failed", error);
-        await this._sleep(500);
-        return this._waitForWarmKpi(scenarioId, startedAt);
-      }
-    }
-
-    _sleep(ms) {
-      return new Promise((resolve) => setTimeout(resolve, ms));
-    }
-
-    async _checkRevision(forceRecompute = false) {
-      if (!this.revisionUrlValue || !this.state.selectedScenarioId) {
-        return;
-      }
-      if (this.state.computing) {
-        return;
-      }
-
-      try {
-        const url = `${this.revisionUrlValue}?scenario_id=${encodeURIComponent(
-          String(this.state.selectedScenarioId),
-        )}`;
-        const { data } = await fetchJson(url);
-        if (!data || !data.success || !data.data_version) {
-          return;
-        }
-        if (
-          forceRecompute ||
-          (this.state.lastDataVersion &&
-            data.data_version !== this.state.lastDataVersion)
-        ) {
-          await this._computeEffects();
-        }
-      } catch (error) {
-        console.error("[decision-effects] revision check failed", error);
-      }
+      this._startPipeline();
     }
 
     _setCompactPendingIndicator(
@@ -1749,20 +1604,6 @@ import { clearToasts, showToast } from "../lib/toast.js";
       return !this._absoluteGroupingIsDefault();
     }
 
-    async _refreshAbsoluteWhenCompactReady() {
-      const ready = await this._ensureCompactReady();
-      if (!ready) {
-        return;
-      }
-      const tasks = [
-        this._aggregateEffects({ showTableLoading: true }),
-      ];
-      if (this._absoluteGroupingIsDefault()) {
-        tasks.push(this._aggregateRevenues(), this._aggregateVolumes());
-      }
-      await Promise.all(tasks);
-    }
-
     _absolutePayload(kind) {
       const isRevenues = kind === "revenues";
       return {
@@ -1793,8 +1634,6 @@ import { clearToasts, showToast } from "../lib/toast.js";
     }
 
     async _aggregateAbsoluteSingle(kind, options = {}) {
-      // Обходит `both/`, чтобы не дергать вторую таблицу.
-      // Временно отключаем `both/` для данного вызова.
       const saved = this.absoluteBothUrlValue;
       this.absoluteBothUrlValue = null;
       try {
@@ -1805,28 +1644,26 @@ import { clearToasts, showToast } from "../lib/toast.js";
     }
 
     async _aggregateAbsoluteBoth(options = {}) {
-      // `revenues` и `volumes` оба могут вызвать `both/` параллельно.
-      // Чтобы не делать два одинаковых запроса (и не мигать лоадерами),
-      // дедуплицируем in-flight запрос.
-      if (this.state.absoluteBothInFlight) {
-        return this.state.absoluteBothInFlight;
+      if (this._absoluteBothInFlight) {
+        return this._absoluteBothInFlight;
       }
       const promise = this._aggregateAbsoluteBothImpl(options);
-      this.state.absoluteBothInFlight = promise;
+      this._absoluteBothInFlight = promise;
       try {
         return await promise;
       } finally {
-        if (this.state.absoluteBothInFlight === promise) {
-          this.state.absoluteBothInFlight = null;
+        if (this._absoluteBothInFlight === promise) {
+          this._absoluteBothInFlight = null;
         }
       }
     }
 
-    async _aggregateAbsoluteBothImpl({ attempt = 0 } = {}) {
+    async _aggregateAbsoluteBothImpl({ gen, filterGen, showLoading = true } = {}) {
       if (
         !this.absoluteBothUrlValue ||
         !this.state.cacheKey ||
-        !this.state.selectedScenarioId
+        !this.state.selectedScenarioId ||
+        !this._isRequestCurrent({ gen, filterGen })
       ) {
         return;
       }
@@ -1838,8 +1675,6 @@ import { clearToasts, showToast } from "../lib/toast.js";
         (!this._canUseEarlyAbsolute() ||
           includeFalloutRevenues ||
           includeFalloutVolumes);
-      const maxAttempts =
-        needsCompactWait || includeFalloutRevenues || includeFalloutVolumes ? 45 : 5;
       const loadingMessage =
         includeFalloutRevenues || includeFalloutVolumes
           ? "Расчёт выпадения…"
@@ -1847,11 +1682,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
             ? "Обновление детализации…"
             : "Расчёт данных…";
 
-      if (attempt === 0 && (includeFalloutRevenues || includeFalloutVolumes)) {
-        await this._ensureCompactReady();
-      }
-
-      if (attempt === 0 || needsCompactWait || includeFalloutRevenues || includeFalloutVolumes) {
+      if (showLoading) {
         this._setRevenuesTableLoading(true, loadingMessage);
         this._setVolumesTableLoading(true, loadingMessage);
       }
@@ -1867,24 +1698,24 @@ import { clearToasts, showToast } from "../lib/toast.js";
         const { response, data } = await fetchJson(this.absoluteBothUrlValue, {
           method: "POST",
           body: payload,
+          signal: this.pipeline?.getSignal(),
         });
+
+        if (!this._isRequestCurrent({ gen, filterGen })) {
+          return;
+        }
 
         if (!response.ok || !data || !data.success) {
           const message =
             (data && data.errors && data.errors.join("; ")) ||
             "Ошибка загрузки абсолютных таблиц";
           if (
-            (needsCompactWait ||
-              includeFalloutRevenues ||
-              includeFalloutVolumes) &&
-            attempt + 1 < maxAttempts
+            needsCompactWait ||
+            includeFalloutRevenues ||
+            includeFalloutVolumes ||
+            this._isAggregatePendingMessage(message)
           ) {
-            await this._waitForCompactReady();
-            return this._aggregateAbsoluteBothImpl({ attempt: attempt + 1 });
-          }
-          if (this._isAggregatePendingMessage(message) && attempt + 1 < maxAttempts) {
-            await this._sleep(2000);
-            return this._aggregateAbsoluteBothImpl({ attempt: attempt + 1 });
+            return;
           }
           this._showError(message);
           if (this.hasRevenuesTableWrapTarget) {
@@ -1900,20 +1731,6 @@ import { clearToasts, showToast } from "../lib/toast.js";
           return;
         }
 
-        const revenuesRows = (data.revenues?.table && data.revenues.table.rows) || [];
-        const volumesRows = (data.volumes?.table && data.volumes.table.rows) || [];
-        const shouldRetry =
-          (this._absoluteRowsLookEmpty(revenuesRows) ||
-            this._absoluteRowsLookEmpty(volumesRows) ||
-            !revenuesRows.length ||
-            !volumesRows.length) &&
-          (needsCompactWait || includeFalloutRevenues || includeFalloutVolumes) &&
-          attempt + 1 < maxAttempts;
-        if (shouldRetry) {
-          await this._waitForCompactReady();
-          return this._aggregateAbsoluteBothImpl({ attempt: attempt + 1 });
-        }
-
         if (this.hasRevenuesTableWrapTarget) {
           this._renderAbsoluteTable(this.revenuesTableWrapTarget, data.revenues || {});
         }
@@ -1921,10 +1738,12 @@ import { clearToasts, showToast } from "../lib/toast.js";
           this._renderAbsoluteTable(this.volumesTableWrapTarget, data.volumes || {});
         }
       } catch (error) {
+        if (error?.name === "AbortError") {
+          return;
+        }
         console.error("[decision-effects] absolute both aggregate failed", error);
-        if (attempt + 1 < maxAttempts) {
-          await this._sleep(2000);
-          return this._aggregateAbsoluteBothImpl({ attempt: attempt + 1 });
+        if (!this._isRequestCurrent({ gen, filterGen })) {
+          return;
         }
         if (this.hasRevenuesTableWrapTarget) {
           this._setRevenuesTableLoading(false);
@@ -1939,7 +1758,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
       }
     }
 
-    async _aggregateAbsoluteTable(kind, { attempt = 0 } = {}) {
+    async _aggregateAbsoluteTable(kind, { gen, filterGen, showLoading = true } = {}) {
       const isRevenues = kind === "revenues";
       const url = isRevenues ? this.revenuesUrlValue : this.volumesUrlValue;
       const wrapTarget = isRevenues
@@ -1957,7 +1776,12 @@ import { clearToasts, showToast } from "../lib/toast.js";
       };
       const errorLabel = isRevenues ? "выручки" : "объёмов";
 
-      if (!url || !this.state.cacheKey || !this.state.selectedScenarioId) {
+      if (
+        !url ||
+        !this.state.cacheKey ||
+        !this.state.selectedScenarioId ||
+        !this._isRequestCurrent({ gen, filterGen })
+      ) {
         return;
       }
 
@@ -1965,18 +1789,13 @@ import { clearToasts, showToast } from "../lib/toast.js";
       const needsCompactWait =
         (this.state.awaitingCompact || this.state.compactPending) &&
         (!this._canUseEarlyAbsolute() || includeFallout);
-      const maxAttempts = needsCompactWait || includeFallout ? 45 : 5;
       const loadingMessage = includeFallout
         ? "Расчёт выпадения…"
         : needsCompactWait
           ? "Обновление детализации…"
           : "Расчёт данных…";
 
-      if (attempt === 0 && includeFallout) {
-        await this._ensureCompactReady();
-      }
-
-      if (attempt === 0 || needsCompactWait || includeFallout) {
+      if (showLoading) {
         setLoading(true, loadingMessage);
       }
 
@@ -1984,29 +1803,23 @@ import { clearToasts, showToast } from "../lib/toast.js";
         const { response, data } = await fetchJson(url, {
           method: "POST",
           body: this._absolutePayload(kind),
+          signal: this.pipeline?.getSignal(),
         });
+
+        if (!this._isRequestCurrent({ gen, filterGen })) {
+          return;
+        }
 
         if (!response.ok || !data || !data.success) {
           const message =
             (data && data.errors && data.errors.join("; ")) ||
             `Ошибка загрузки ${errorLabel}`;
           if (
-            (needsCompactWait || includeFallout) &&
-            attempt + 1 < maxAttempts
+            needsCompactWait ||
+            includeFallout ||
+            this._isAggregatePendingMessage(message)
           ) {
-            await this._waitForCompactReady();
-            return this._aggregateAbsoluteTable(kind, {
-              attempt: attempt + 1,
-            });
-          }
-          if (
-            this._isAggregatePendingMessage(message) &&
-            attempt + 1 < maxAttempts
-          ) {
-            await this._sleep(2000);
-            return this._aggregateAbsoluteTable(kind, {
-              attempt: attempt + 1,
-            });
+            return;
           }
           this._showError(message);
           if (hasTarget) {
@@ -2017,22 +1830,14 @@ import { clearToasts, showToast } from "../lib/toast.js";
           return;
         }
 
-        const rows = (data.table && data.table.rows) || [];
-        if (
-          (this._absoluteRowsLookEmpty(rows) || !rows.length) &&
-          (needsCompactWait || includeFallout) &&
-          attempt + 1 < maxAttempts
-        ) {
-          await this._waitForCompactReady();
-          return this._aggregateAbsoluteTable(kind, { attempt: attempt + 1 });
-        }
-
         this._renderAbsoluteTable(wrapTarget, data);
       } catch (error) {
+        if (error?.name === "AbortError") {
+          return;
+        }
         console.error(`[decision-effects] ${kind} aggregate failed`, error);
-        if (attempt + 1 < maxAttempts) {
-          await this._sleep(2000);
-          return this._aggregateAbsoluteTable(kind, { attempt: attempt + 1 });
+        if (!this._isRequestCurrent({ gen, filterGen })) {
+          return;
         }
         if (hasTarget) {
           setLoading(false);

@@ -41,7 +41,7 @@ def log_warm_timings(
         numeric_detail = {
             name: value
             for name, value in detail.items()
-            if isinstance(value, int) and not name.startswith("fallout_")
+            if isinstance(value, int)
         }
         top_detail = sorted(
             numeric_detail.items(),
@@ -89,7 +89,7 @@ def format_warm_timings_message(
         numeric_detail = {
             name: value
             for name, value in detail.items()
-            if isinstance(value, int) and not name.startswith("fallout_")
+            if isinstance(value, int)
         }
         top_detail = sorted(
             numeric_detail.items(),

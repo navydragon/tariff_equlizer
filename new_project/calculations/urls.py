@@ -36,6 +36,11 @@ urlpatterns = [
         name="scenario_warm_status_api",
     ),
     path(
+        "api/decision-effects/status/",
+        views.decision_effects_status_api,
+        name="decision_effects_status_api",
+    ),
+    path(
         "api/cache-readiness/",
         views.cache_readiness_api,
         name="cache_readiness_api",
