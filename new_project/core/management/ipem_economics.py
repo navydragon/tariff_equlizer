@@ -699,11 +699,45 @@ def parse_ipem_coal_2026_economics_row(row: dict[str, str]) -> dict[str, Optiona
     return economics
 
 
+IPEM_SHIPMENT_TYPE_COLUMN_CANDIDATES: tuple[str, ...] = (
+    "Категория отправки",
+    "Вид отправки",
+)
+
+# Сокращения и варианты из IPEM/выгрузки РЖД → имя в ShipmentType.
+IPEM_SHIPMENT_TYPE_LABEL_ALIASES: dict[str, str] = {
+    "пов. отправка": "повагонная",
+    "повагонная отправка": "повагонная",
+    "маршрут": "маршрутная",
+    "маршрутная отправка": "маршрутная",
+    "групповая": "группа вагонов",
+    "сцеп": "сцеп вагонов",
+    "сборная конт": "сборная конт.",
+    "сборная поваг": "сборная поваг.",
+}
+
+
+def shipment_type_label_from_ipem_row(row: dict[str, str]) -> str:
+    for column_name in IPEM_SHIPMENT_TYPE_COLUMN_CANDIDATES:
+        raw = (row.get(column_name) or "").strip()
+        if raw:
+            return raw
+    return ""
+
+
+def _canonical_shipment_type_label(raw_name: str) -> str:
+    name_norm = normalize_name(raw_name)
+    if not name_norm:
+        return ""
+    return IPEM_SHIPMENT_TYPE_LABEL_ALIASES.get(name_norm, raw_name.strip())
+
+
 def resolve_shipment_type(
     raw_name: str,
     shipment_by_name: Optional[dict[str, ShipmentType]] = None,
 ) -> tuple[Optional[ShipmentType], Optional[str]]:
-    name_norm = normalize_name(raw_name)
+    canonical = _canonical_shipment_type_label(raw_name)
+    name_norm = normalize_name(canonical)
     if not name_norm:
         return None, "no_shipment_type"
 
@@ -713,9 +747,14 @@ def resolve_shipment_type(
         }
 
     shipment = shipment_by_name.get(name_norm)
-    if shipment is None:
-        return None, "no_shipment_type"
-    return shipment, None
+    if shipment is not None:
+        return shipment, None
+
+    for key, candidate in shipment_by_name.items():
+        if key.startswith(name_norm) or name_norm.startswith(key):
+            return candidate, None
+
+    return None, "no_shipment_type"
 
 
 def resolve_shipper_from_ipem_row(row: dict[str, str]) -> Optional[Shipper]:
@@ -781,7 +820,7 @@ def resolve_ipem_coal_2026_row(
         reasons.append(wagon_issue)
 
     shipment_type, shipment_issue = resolve_shipment_type(
-        row.get("Категория отправки", ""),
+        shipment_type_label_from_ipem_row(row),
         shipment_by_name,
     )
     if shipment_issue:

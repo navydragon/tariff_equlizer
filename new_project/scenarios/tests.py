@@ -1347,6 +1347,60 @@ class ElasticityMatchingTests(TestCase):
         selected = self.select_rule_for_route(self.route, self.rules)
         self.assertEqual(selected.id, self.specific.id)
 
+    def test_coke_route_matches_coal_elasticity_rules(self) -> None:
+        from core.models import Cargo, CargoGroup, Route
+        from scenarios.domain.utils.elasticity_matching import (
+            build_rule_index,
+            select_rule_for_route,
+            select_rule_for_route_indexed,
+        )
+        from scenarios.models import ElasticityRule
+
+        coal_group = CargoGroup.objects.get(code=1)
+        coke_group, _ = CargoGroup.objects.update_or_create(
+            code=2,
+            defaults={"name": "Кокс каменноугольный", "position": 2},
+        )
+        coke_cargo = Cargo.objects.create(
+            code="16199",
+            name="КОКС ДОМЕН",
+            cargo_group=coke_group,
+        )
+        coal_export = ElasticityRule.objects.create(
+            elasticity_set=self.specific.elasticity_set,
+            name="Уголь экспорт",
+            position=0,
+            cargo_group=coal_group,
+            message_type=self.message_type,
+        )
+        metals_fallback = ElasticityRule.objects.create(
+            elasticity_set=self.specific.elasticity_set,
+            name="IPEM: Металлы (5)",
+            position=21,
+            cargo_group=CargoGroup.objects.create(
+                code=5,
+                name="Черные металлы",
+                position=5,
+            ),
+        )
+        coke_route = Route.objects.create(
+            route_set=self.route_set,
+            cargo=coke_cargo,
+            origin_station=self.route.origin_station,
+            destination_station=self.route.destination_station,
+            wagon_kind=self.route.wagon_kind,
+            shipment_type=self.route.shipment_type,
+            message_type=self.message_type,
+            route_code="COKE-1",
+            is_model=True,
+        )
+        rules = [self.fallback, coal_export, metals_fallback]
+        selected = select_rule_for_route(coke_route, rules)
+        self.assertEqual(selected, coal_export)
+
+        indexed = select_rule_for_route_indexed(coke_route, build_rule_index(rules))
+        self.assertEqual(indexed, coal_export)
+
 
 class ElasticityPointLookupTests(TestCase):
     def setUp(self) -> None:
@@ -2331,11 +2385,42 @@ class IpemMetallurgyElasticitySeedTests(TestCase):
             cargo_group=coal_group,
             message_type=internal_mt,
         )
+        ElasticityRule.objects.create(
+            elasticity_set=elasticity_set,
+            name="IPEM: Металлы (2)",
+            position=20,
+            cargo_group=CargoGroup.objects.create(
+                code=2,
+                name="Кокс каменноугольный",
+                position=2,
+            ),
+        )
+
+        from scenarios.domain.services.ipem_elasticity_seed import (
+            _default_workbook_path,
+        )
+
+        xlsx_path = _default_workbook_path()
+        if not xlsx_path.exists():
+            self.skipTest("IPEM metallurgy workbook is missing")
+
+        CargoGroup.objects.update_or_create(
+            code=4,
+            defaults={"name": "Руда", "position": 4},
+        )
+        CargoGroup.objects.update_or_create(
+            code=5,
+            defaults={"name": "Черные металлы", "position": 5},
+        )
+        CargoGroup.objects.update_or_create(
+            code=10,
+            defaults={"name": "Прочие", "position": 10},
+        )
 
         seed_ipem_elasticity_for_scenario(
             scenario,
             attach=True,
-            xlsx_path=Path("/nonexistent.xlsx"),
+            xlsx_path=xlsx_path,
         )
 
         self.assertTrue(
@@ -2348,6 +2433,18 @@ class IpemMetallurgyElasticitySeedTests(TestCase):
             ElasticityRule.objects.filter(
                 elasticity_set=elasticity_set,
                 name=INTERNAL_RULE_NAME,
+            ).exists(),
+        )
+        self.assertFalse(
+            ElasticityRule.objects.filter(
+                elasticity_set=elasticity_set,
+                name="IPEM: Металлы (2)",
+            ).exists(),
+        )
+        self.assertTrue(
+            ElasticityRule.objects.filter(
+                elasticity_set=elasticity_set,
+                name="IPEM: Металлы (5)",
             ).exists(),
         )
 

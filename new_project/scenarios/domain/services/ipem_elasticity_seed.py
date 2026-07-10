@@ -105,7 +105,9 @@ def seed_ipem_elasticity_for_scenario(
 
     Правила (металлургия):
     - Руда: cargo_group=4.
-    - Металлы: cargo_group in {2, 5, 10} (общая кривая).
+    - Металлы: cargo_group in {5, 10} (общая кривая).
+    - Кокс (cargo_group=2) не сидится: мэтчится с угольными правилами
+      («Уголь экспорт» / «Уголь внутренние») через алиас в elasticity_matching.
 
     Важно: угольные правила НЕ создаются и НЕ удаляются — ими управляет
     отдельная команда `import_ipem_coal_2026_routes`.
@@ -148,6 +150,7 @@ def seed_ipem_elasticity_for_scenario(
     elasticity_set = _resolve_elasticity_set(owner)
 
     # Delete only rules we manage (by name), keep user-defined rules intact.
+    # «IPEM: Металлы (2)» удаляем навсегда: кокс идёт через угольную эластичность.
     managed_rule_names = {
         "IPEM: Руда",
         "IPEM: Металлы (2)",
@@ -163,7 +166,6 @@ def seed_ipem_elasticity_for_scenario(
     points_upserted = 0
 
     ore_group = _resolve_cargo_group_by_code(4)
-    coke_group = _resolve_cargo_group_by_code(2)
     metals_group = _resolve_cargo_group_by_code(5)
     other_group = _resolve_cargo_group_by_code(10)
 
@@ -190,12 +192,6 @@ def seed_ipem_elasticity_for_scenario(
         position=10,
         cargo_group=ore_group,
         points=points_ore,
-    )
-    _create_rule(
-        name="IPEM: Металлы (2)",
-        position=20,
-        cargo_group=coke_group,
-        points=points_metals,
     )
     _create_rule(
         name="IPEM: Металлы (5)",

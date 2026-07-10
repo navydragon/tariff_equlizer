@@ -204,6 +204,44 @@ class IpemCoal2026ImportTests(TestCase):
         )
         self.assertEqual(economics["rzd_cost_total_per_ton"], Decimal("1215.07"))
 
+    def test_resolve_shipment_type_accepts_ipem_aliases_and_fallback_column(self) -> None:
+        from core.management.ipem_economics import (
+            resolve_shipment_type,
+            shipment_type_label_from_ipem_row,
+        )
+
+        shipment_by_name = {
+            self.shipment_type.name.casefold(): self.shipment_type,
+        }
+        povag, _ = ShipmentType.objects.get_or_create(
+            code="ST_POV",
+            defaults={"name": "повагонная"},
+        )
+        shipment_by_name[povag.name.casefold()] = povag
+
+        resolved, issue = resolve_shipment_type("Пов. отправка", shipment_by_name)
+        self.assertIsNone(issue)
+        self.assertEqual(resolved, povag)
+
+        label = shipment_type_label_from_ipem_row(
+            {
+                "Категория отправки": "",
+                "Вид отправки": "Маршрут",
+            },
+        )
+        resolved_route, issue = resolve_shipment_type(label, shipment_by_name)
+        self.assertIsNone(issue)
+        self.assertEqual(resolved_route, self.shipment_type)
+
+        group_wagons, _ = ShipmentType.objects.get_or_create(
+            code="ST_GROUP",
+            defaults={"name": "группа вагонов"},
+        )
+        shipment_by_name[group_wagons.name.casefold()] = group_wagons
+        resolved_group, issue = resolve_shipment_type("групповая", shipment_by_name)
+        self.assertIsNone(issue)
+        self.assertEqual(resolved_group, group_wagons)
+
     def test_load_ipem_coal_2026_xlsx_reads_both_route_sheets(self) -> None:
         xlsx_path = _ipem_xlsx_path()
         if not xlsx_path.exists():

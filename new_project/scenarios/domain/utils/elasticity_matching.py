@@ -21,6 +21,20 @@ RuleKey = tuple[int | None, int | None, int | None]
 RuleIndex = dict[RuleKey, list[ElasticityRule]]
 PointsIndex = dict[int, tuple[list[Decimal], list[Decimal]]]
 
+# Кокс каменноугольный (2) использует кривую эластичности угля каменного (1).
+ELASTICITY_CARGO_GROUP_ALIASES: dict[int, int] = {
+    2: 1,
+}
+
+
+def _cargo_group_lookup_ids(cargo_group_id: int | None) -> tuple[int | None, ...]:
+    if cargo_group_id is None:
+        return (None,)
+    alias = ELASTICITY_CARGO_GROUP_ALIASES.get(cargo_group_id)
+    if alias is None:
+        return (cargo_group_id,)
+    return (cargo_group_id, alias)
+
 
 def rule_specificity(rule: ElasticityRule) -> int:
     return sum(
@@ -39,7 +53,7 @@ def rule_matches_route(route: Route, rule: ElasticityRule) -> bool:
         cargo_group_id = (
             route.cargo.cargo_group_id if route.cargo_id else None
         )
-        if cargo_group_id != rule.cargo_group_id:
+        if rule.cargo_group_id not in _cargo_group_lookup_ids(cargo_group_id):
             return False
     if rule.cargo_id is not None and route.cargo_id != rule.cargo_id:
         return False
@@ -85,6 +99,34 @@ def _cargo_group_id_from_route_like(route: Route) -> int | None:
     return getattr(cargo, "cargo_group_id", None)
 
 
+def _rule_lookup_keys(
+    cargo_group_id: int | None,
+    cargo_id: int | None,
+    message_type_id: int | None,
+) -> tuple[RuleKey, ...]:
+    """
+    Ключи поиска от наиболее специфичного к общему.
+
+    Для групп с алиасом (кокс → уголь) на каждом уровне специфичности
+    сначала пробуем собственную группу, затем алиас.
+    """
+    cg_ids = _cargo_group_lookup_ids(cargo_group_id)
+    keys: list[RuleKey] = []
+    for cg in cg_ids:
+        keys.append((cg, cargo_id, message_type_id))
+    for cg in cg_ids:
+        keys.append((cg, cargo_id, None))
+    for cg in cg_ids:
+        keys.append((cg, None, message_type_id))
+    keys.append((None, cargo_id, message_type_id))
+    for cg in cg_ids:
+        keys.append((cg, None, None))
+    keys.append((None, cargo_id, None))
+    keys.append((None, None, message_type_id))
+    keys.append((None, None, None))
+    return tuple(keys)
+
+
 def select_rule_for_route_indexed(route: Route, rule_index: RuleIndex) -> ElasticityRule | None:
     """
     Быстрый выбор правила с тем же приоритетом специфичности, что и `select_rule_for_route`.
@@ -97,17 +139,7 @@ def select_rule_for_route_indexed(route: Route, rule_index: RuleIndex) -> Elasti
     cargo_id = getattr(route, "cargo_id", None)
     message_type_id = getattr(route, "message_type_id", None)
 
-    keys: tuple[RuleKey, ...] = (
-        (cargo_group_id, cargo_id, message_type_id),
-        (cargo_group_id, cargo_id, None),
-        (cargo_group_id, None, message_type_id),
-        (None, cargo_id, message_type_id),
-        (cargo_group_id, None, None),
-        (None, cargo_id, None),
-        (None, None, message_type_id),
-        (None, None, None),
-    )
-    for key in keys:
+    for key in _rule_lookup_keys(cargo_group_id, cargo_id, message_type_id):
         rules = rule_index.get(key)
         if rules:
             return rules[0]
@@ -122,17 +154,7 @@ def select_rule_for_keys_indexed(
     message_type_id: int | None,
 ) -> ElasticityRule | None:
     """Быстрый выбор правила по id полям (без Route/proxy)."""
-    keys: tuple[RuleKey, ...] = (
-        (cargo_group_id, cargo_id, message_type_id),
-        (cargo_group_id, cargo_id, None),
-        (cargo_group_id, None, message_type_id),
-        (None, cargo_id, message_type_id),
-        (cargo_group_id, None, None),
-        (None, cargo_id, None),
-        (None, None, message_type_id),
-        (None, None, None),
-    )
-    for key in keys:
+    for key in _rule_lookup_keys(cargo_group_id, cargo_id, message_type_id):
         rules = rule_index.get(key)
         if rules:
             return rules[0]
