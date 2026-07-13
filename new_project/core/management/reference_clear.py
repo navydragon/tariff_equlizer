@@ -30,19 +30,51 @@ def _route_table_sql() -> str:
     return connection.ops.quote_name(Route._meta.db_table)
 
 
+def _equalizer_preset_table_sql() -> str:
+    from core.models import RouteEqualizerPreset
+
+    return connection.ops.quote_name(RouteEqualizerPreset._meta.db_table)
+
+
+def _delete_equalizer_presets_for_route_set(
+    cursor,
+    *,
+    route_table: str,
+    preset_table: str,
+    route_set_id: int,
+) -> None:
+    """Удаляет пресеты эквалайзера для маршрутов указанного набора."""
+    cursor.execute(
+        f"DELETE FROM {preset_table} "
+        f"WHERE route_id IN ("
+        f"SELECT id FROM {route_table} WHERE route_set_id = %s"
+        f")",
+        [route_set_id],
+    )
+
+
 def _fast_clear_routes(*, route_set_id: int | None = None) -> int:
-    """Быстрое удаление маршрутов без ORM-сигналов (post_delete на каждую строку)."""
+    """Быстрое удаление маршрутов без ORM-сигналов (post_delete на каждую строку).
+
+    Перед TRUNCATE/DELETE очищает ``RouteEqualizerPreset`` (FK на Route),
+    иначе PostgreSQL блокирует TRUNCATE.
+    """
     from core.models import Route, RouteSet
+
+    table = _route_table_sql()
+    preset_table = _equalizer_preset_table_sql()
 
     if route_set_id is None:
         pending = Route.objects.count()
         if pending == 0:
             return 0
-        table = _route_table_sql()
         with connection.cursor() as cursor:
             if connection.vendor == "postgresql":
-                cursor.execute(f"TRUNCATE TABLE {table} RESTART IDENTITY")
+                cursor.execute(
+                    f"TRUNCATE TABLE {preset_table}, {table} RESTART IDENTITY"
+                )
             else:
+                cursor.execute(f"DELETE FROM {preset_table}")
                 cursor.execute(f"DELETE FROM {table}")
         return pending
 
@@ -50,24 +82,26 @@ def _fast_clear_routes(*, route_set_id: int | None = None) -> int:
     if pending == 0:
         return 0
 
-    table = _route_table_sql()
     has_other_route_sets = Route.objects.exclude(route_set_id=route_set_id).exists()
     with connection.cursor() as cursor:
-        if has_other_route_sets:
+        if has_other_route_sets or connection.vendor != "postgresql":
+            _delete_equalizer_presets_for_route_set(
+                cursor,
+                route_table=table,
+                preset_table=preset_table,
+                route_set_id=route_set_id,
+            )
             cursor.execute(
                 f"DELETE FROM {table} WHERE route_set_id = %s",
                 [route_set_id],
             )
             deleted = cursor.rowcount
-        elif connection.vendor == "postgresql":
-            cursor.execute(f"TRUNCATE TABLE {table} RESTART IDENTITY")
-            deleted = pending
         else:
+            # Единственный набор — TRUNCATE обеих таблиц (FK не мешает).
             cursor.execute(
-                f"DELETE FROM {table} WHERE route_set_id = %s",
-                [route_set_id],
+                f"TRUNCATE TABLE {preset_table}, {table} RESTART IDENTITY"
             )
-            deleted = cursor.rowcount
+            deleted = pending
 
     RouteSet.objects.filter(pk=route_set_id).update(updated_at=timezone.now())
     return deleted
