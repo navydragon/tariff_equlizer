@@ -339,6 +339,11 @@ urlpatterns = [
         name="route_analysis_api",
     ),
     path(
+        "analysis/api/route-analysis/equalizer-preset/",
+        views.route_equalizer_preset_api,
+        name="route_equalizer_preset_api",
+    ),
+    path(
         "analysis/api/route-analytics/aggregate/",
         views.route_analytics_aggregate_api,
         name="route_analytics_aggregate_api",

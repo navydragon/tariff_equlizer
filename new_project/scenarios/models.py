@@ -16,7 +16,7 @@ class Scenario(models.Model):
 
     name = models.CharField("Название", max_length=255)
     description = models.TextField("Описание", blank=True)
-    start_year = models.IntegerField("Год начала", default=2025)
+    start_year = models.IntegerField("Год начала", default=2026)
     end_year = models.IntegerField("Год окончания", default=2035)
     route_set = models.ForeignKey(
         RouteSet,

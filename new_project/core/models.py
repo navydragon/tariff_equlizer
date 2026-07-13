@@ -863,3 +863,43 @@ class Route(models.Model):
 
     def __str__(self) -> str:
         return f"{self.route_set.code if self.route_set_id else '-'} / {self.route_code or self.id}"
+
+
+class RouteEqualizerPreset(models.Model):
+    class Variant(models.TextChoices):
+        BASE = "base", "Базовый"
+        USER = "user", "Пользовательский"
+
+    user = models.ForeignKey(
+        User,
+        verbose_name="Пользователь",
+        on_delete=models.CASCADE,
+        related_name="equalizer_presets",
+    )
+    route = models.ForeignKey(
+        Route,
+        verbose_name="Маршрут",
+        on_delete=models.CASCADE,
+        related_name="equalizer_presets",
+    )
+    variant = models.CharField(
+        "Вариант",
+        max_length=8,
+        choices=Variant.choices,
+        default=Variant.BASE,
+    )
+    overrides = models.JSONField("Переопределения", default=dict, blank=True)
+    updated_at = models.DateTimeField("Обновлено", auto_now=True)
+
+    class Meta:
+        verbose_name = "Пресет эквалайзера маршрута"
+        verbose_name_plural = "Пресеты эквалайзера маршрутов"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "route"],
+                name="uniq_equalizer_preset_user_route",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.user.login} / маршрут #{self.route_id} ({self.variant})"

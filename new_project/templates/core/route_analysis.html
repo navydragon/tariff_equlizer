@@ -35,6 +35,7 @@
   data-route-analysis-route-picker-routes-url-value="{% url 'route_list_api' %}"
   data-route-analysis-route-picker-picker-options-url-value="{% url 'route_picker_options_api' %}"
   data-route-analysis-route-picker-route-analysis-url-value="{% url 'route_analysis_api' %}"
+  data-route-analysis-route-picker-equalizer-preset-url-value="{% url 'route_equalizer_preset_api' %}"
   data-route-analysis-route-picker-active-scenario-id-value="{{ request.user.active_scenario_id|default:'' }}"
   data-route-analysis-route-picker-scenario-edit-url-value="{% url 'scenarios:edit' 0 %}"
 >
@@ -140,6 +141,30 @@
                 data-route-analysis-route-picker-target="equalizerTypeSelect"
                 data-action="change->route-analysis-route-picker#onEqualizerTypeChange"
               ></select>
+              <div class="d-flex align-items-end gap-2 mt-2 mb-2 route-analysis-equalizer__variant-row">
+                <div class="flex-grow-1">
+                  <label class="form-label mb-1" for="routeAnalysisEqualizerVariantSelect">
+                    Вариант
+                  </label>
+                  <select
+                    id="routeAnalysisEqualizerVariantSelect"
+                    class="form-select form-select-sm"
+                    data-route-analysis-route-picker-target="equalizerVariantSelect"
+                    data-action="change->route-analysis-route-picker#onEqualizerVariantChange"
+                  >
+                    <option value="base">Базовый</option>
+                    <option value="user" disabled>Пользовательский</option>
+                  </select>
+                </div>
+                <button
+                  type="button"
+                  class="btn btn-sm btn-primary"
+                  data-route-analysis-route-picker-target="equalizerSaveButton"
+                  data-action="click->route-analysis-route-picker#saveEqualizerPreset"
+                >
+                  Сохранить
+                </button>
+              </div>
               <div
                 class="route-analysis-equalizer__unit text-muted mb-2"
                 data-route-analysis-route-picker-target="equalizerUnitHint"

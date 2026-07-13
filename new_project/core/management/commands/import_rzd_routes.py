@@ -19,7 +19,6 @@ from core.domain.cargo.formatting import (
     resolve_route_cargo_fields,
 )
 from core.domain.route.turnover_coefficients import (
-    TURNOVER_COEF_YEARS,
     coefs_from_row,
     coefs_to_route_kwargs,
     sqlite_loading_column_for_year,
@@ -55,12 +54,9 @@ COL_OKPO = "ОКПО_компании_отпр"
 COL_INN = "ИНН_компании"
 COL_SHIPPER_NAME = "Наименование_компании"
 COL_HOLDING = "Холдинг"
-COL_VOLUME_TONS = "2025 Погрузка,т"
-COL_TURNOVER_TKM = "2025 Грузоб,ткм"
-COL_CHARGE_RUB = "2025 Доходы,руб"
-COL_VOLUME_TONS_PLAN_2026 = "2026 Погрузка,т"
-COL_TURNOVER_TKM_PLAN_2026 = "2026 Грузоб,ткм"
-COL_CHARGE_RUB_PLAN_2026 = "2026 Доходы,руб"
+COL_VOLUME_TONS = "2026 Погрузка,т"
+COL_TURNOVER_TKM = "2026 Грузоб,ткм"
+COL_CHARGE_RUB = "2026 Доходы,руб"
 
 DEFAULT_ROUTE_SET_CODE = "RZD_2026"
 DEFAULT_ROUTE_SET_NAME = "РЖД 2026"
@@ -89,16 +85,11 @@ _BASE_SELECT_COLS = [
 ]
 
 _TURNOVER_COEF_OPTIONAL_COLS = (
+    sqlite_loading_column_for_year(2025),
     sqlite_loading_column_for_year(2027),
     sqlite_loading_column_for_year(2028),
     sqlite_loading_column_for_year(2029),
     sqlite_loading_column_for_year(2030),
-)
-
-_PLAN_2026_OPTIONAL_COLS = (
-    COL_VOLUME_TONS_PLAN_2026,
-    COL_TURNOVER_TKM_PLAN_2026,
-    COL_CHARGE_RUB_PLAN_2026,
 )
 
 
@@ -109,9 +100,6 @@ def _rzd_table_columns(conn: sqlite3.Connection) -> set[str]:
 
 def _build_select_sql(available_columns: set[str]) -> str:
     cols = list(_BASE_SELECT_COLS)
-    for col in _PLAN_2026_OPTIONAL_COLS:
-        if col in available_columns:
-            cols.append(col)
     for col in _TURNOVER_COEF_OPTIONAL_COLS:
         if col in available_columns:
             cols.append(col)
@@ -161,12 +149,6 @@ def _parse_decimal(value: Any) -> Optional[Decimal]:
         return Decimal(raw)
     except (InvalidOperation, ValueError):
         return None
-
-
-def _row_decimal_optional(row: sqlite3.Row, column: str) -> Optional[Decimal]:
-    if column not in row.keys():
-        return None
-    return _parse_decimal(row[column])
 
 
 class Command(BaseCommand):
@@ -692,9 +674,6 @@ class Command(BaseCommand):
         volume = _parse_decimal(row[COL_VOLUME_TONS])
         turnover = _parse_decimal(row[COL_TURNOVER_TKM])
         charge = _parse_decimal(row[COL_CHARGE_RUB])
-        volume_plan_2026 = _row_decimal_optional(row, COL_VOLUME_TONS_PLAN_2026)
-        turnover_plan_2026 = _row_decimal_optional(row, COL_TURNOVER_TKM_PLAN_2026)
-        charge_plan_2026 = _row_decimal_optional(row, COL_CHARGE_RUB_PLAN_2026)
 
         cargo_group_izpod = (row[COL_CARGO_GROUP_IZPOD] or "").strip()
 
@@ -731,8 +710,5 @@ class Command(BaseCommand):
             transport_volume_tons=volume,
             freight_turnover_tkm=turnover,
             freight_charge_rub=charge,
-            transport_volume_tons_plan_2026=volume_plan_2026,
-            freight_turnover_tkm_plan_2026=turnover_plan_2026,
-            freight_charge_rub_plan_2026=charge_plan_2026,
             **turnover_coefs,
         )

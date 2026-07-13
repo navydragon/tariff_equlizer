@@ -151,7 +151,7 @@ class RouteAnalyticsServiceTests(TestCase):
         *,
         dimension: str,
         metric: str,
-        kpi_year: int = 2025,
+        kpi_year: int = 2026,
     ) -> RouteAnalyticsRequestDTO:
         return RouteAnalyticsRequestDTO(
             route_set_id=self.route_set.id,
@@ -240,30 +240,8 @@ class RouteAnalyticsServiceTests(TestCase):
         self.assertIsNone(result)
         self.assertIn("Набор маршрутов не найден", errors)
 
-    def test_aggregate_totals_kpi_year_2026(self) -> None:
-        result, errors = self.service.aggregate_totals(self.route_set.id, kpi_year=2026)
-        self.assertEqual(errors, [])
-        assert result is not None
-        cards_by_metric = {card.metric: card for card in result.cards}
-        self.assertEqual(cards_by_metric["count"].value, Decimal("3"))
-        self.assertEqual(cards_by_metric["money"].value, Decimal("6600000.00"))
-        self.assertEqual(cards_by_metric["volume"].value, Decimal("6600.00"))
-        self.assertEqual(cards_by_metric["turnover"].value, Decimal("33000000.00"))
-
-    def test_money_by_cargo_group_kpi_year_2026(self) -> None:
-        result, errors = self.service.aggregate(
-            self._request(dimension="cargo_group", metric="money", kpi_year=2026),
-        )
-        self.assertEqual(errors, [])
-        assert result is not None
-        coal = next(row for row in result.rows if row.label == "Уголь" and not row.is_total)
-        oil = next(row for row in result.rows if row.label == "Нефть" and not row.is_total)
-        self.assertEqual(coal.value, Decimal("3300000.00"))
-        self.assertEqual(oil.value, Decimal("3300000.00"))
-        self.assertEqual(result.total, Decimal("6600000.00"))
-
     def test_invalid_kpi_year(self) -> None:
-        result, errors = self.service.aggregate_totals(self.route_set.id, kpi_year=2024)
+        result, errors = self.service.aggregate_totals(self.route_set.id, kpi_year=2025)
         self.assertIsNone(result)
         self.assertIn("Некорректный kpi_year", errors)
 
@@ -272,7 +250,7 @@ class RouteAnalyticsServiceTests(TestCase):
                 route_set_id=self.route_set.id,
                 dimension="cargo_group",
                 metric="money",
-                kpi_year=2024,
+                kpi_year=2025,
             )
         )
         self.assertIsNone(result)

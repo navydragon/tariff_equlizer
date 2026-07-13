@@ -18,6 +18,11 @@ from core.domain.cargo_category.dto import AddPositionDTO
 from core.domain.cargo_category.services import CargoCategoryService
 from core.domain.route_analysis.dto import RouteAnalysisRequestDTO
 from core.domain.route_analysis.services import RouteAnalysisService
+from core.domain.route_equalizer_preset.dto import (
+    parse_save_request,
+    parse_variant_request,
+)
+from core.domain.route_equalizer_preset.services import RouteEqualizerPresetService
 from core.domain.route_analytics.dimensions import RZD_2026_ROUTE_SET_CODE
 from core.domain.route_analytics.dimensions import VALID_KPI_YEARS
 from core.domain.route_analytics.dto import RouteAnalyticsRequestDTO
@@ -2275,10 +2280,86 @@ def route_analysis_api(request):
     )
 
 
+@login_required
+@require_http_methods(["GET", "POST", "PATCH"])
+def route_equalizer_preset_api(request):
+    """
+    Сохранение и загрузка пользовательских значений эквалайзера маршрута.
+    """
+    service = RouteEqualizerPresetService()
+
+    if request.method == "GET":
+        try:
+            route_id = int(request.GET.get("route_id", "0"))
+        except (TypeError, ValueError):
+            return JsonResponse(
+                {"success": False, "errors": ["Некорректный route_id"]},
+                status=400,
+            )
+
+        result, errors = service.get_preset(
+            user_id=request.user.id,
+            route_id=route_id,
+        )
+        if errors:
+            status = 404 if "не найден" in errors[0] else 400
+            return JsonResponse({"success": False, "errors": errors}, status=status)
+
+        assert result is not None
+        return JsonResponse({"success": True, **result.to_api_dict()})
+
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse(
+            {"success": False, "errors": ["Неверный формат JSON"]},
+            status=400,
+        )
+
+    if request.method == "POST":
+        dto, errors = parse_save_request(
+            route_id=data.get("route_id"),
+            overrides_raw=data.get("overrides"),
+        )
+        if errors:
+            return JsonResponse({"success": False, "errors": errors}, status=400)
+
+        assert dto is not None
+        result, errors = service.save_preset(
+            user_id=request.user.id,
+            request_dto=dto,
+        )
+        if errors:
+            status = 404 if "не найден" in errors[0] else 400
+            return JsonResponse({"success": False, "errors": errors}, status=status)
+
+        assert result is not None
+        return JsonResponse({"success": True, **result.to_api_dict()})
+
+    dto, errors = parse_variant_request(
+        route_id=data.get("route_id"),
+        variant=data.get("variant"),
+    )
+    if errors:
+        return JsonResponse({"success": False, "errors": errors}, status=400)
+
+    assert dto is not None
+    result, errors = service.set_variant(
+        user_id=request.user.id,
+        request_dto=dto,
+    )
+    if errors:
+        status = 404 if "не найден" in errors[0] else 400
+        return JsonResponse({"success": False, "errors": errors}, status=status)
+
+    assert result is not None
+    return JsonResponse({"success": True, **result.to_api_dict()})
+
+
 def _parse_kpi_year_param(request) -> tuple[int | None, list[str]]:
     raw = request.GET.get("kpi_year")
     if raw is None or not str(raw).strip():
-        return 2025, []
+        return 2026, []
     try:
         year = int(str(raw).strip())
     except (TypeError, ValueError):

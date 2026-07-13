@@ -55,7 +55,7 @@ def _format_turnover(value: Decimal) -> tuple[str, str]:
     return f"{format(_quantize(bln, 2), 'f')}", "млрд т·км"
 
 
-def _metric_formatters(kpi_year: int = 2025) -> dict[str, tuple]:
+def _metric_formatters(kpi_year: int = 2026) -> dict[str, tuple]:
     fields = KPI_FIELDS_BY_YEAR[kpi_year]
     return {
         "count": (_format_count, Count("id")),
@@ -165,7 +165,7 @@ class RouteAnalyticsService:
         self,
         route_set_id: int,
         *,
-        kpi_year: int = 2025,
+        kpi_year: int = 2026,
     ) -> tuple[RouteSetTotalsDTO | None, list[str]]:
         if not isinstance(route_set_id, int) or route_set_id <= 0:
             return None, ["Некорректный route_set_id"]

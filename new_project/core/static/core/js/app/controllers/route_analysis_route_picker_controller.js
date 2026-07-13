@@ -55,6 +55,8 @@ import { persistActiveScenario } from "../lib/scenario_active.js";
       "equalizerEmpty",
       "equalizerControls",
       "equalizerUnitHint",
+      "equalizerVariantSelect",
+      "equalizerSaveButton",
     ];
 
     static values = {
@@ -62,6 +64,7 @@ import { persistActiveScenario } from "../lib/scenario_active.js";
       routesUrl: String,
       pickerOptionsUrl: String,
       routeAnalysisUrl: String,
+      equalizerPresetUrl: String,
       activeScenarioId: String,
       scenarioEditUrl: String,
       pageSize: { type: Number, default: 20 },
@@ -119,6 +122,9 @@ import { persistActiveScenario } from "../lib/scenario_active.js";
         activeCalculateData: null,
         equalizerBaseline: null,
         equalizerOverrides: {},
+        equalizerSavedOverrides: {},
+        equalizerVariant: "base",
+        equalizerPresetLoaded: false,
         equalizerDebounceTimer: null,
         equalizerRecalcInFlight: false,
         scenarioEditModal: null,
@@ -442,6 +448,7 @@ import { persistActiveScenario } from "../lib/scenario_active.js";
 
         if (hadSelectedRoute && this.state.selectedRoute) {
           await this._loadEqualizerBaseline();
+          await this._loadEqualizerPreset();
         } else {
           this._resetEqualizer();
         }
@@ -489,10 +496,61 @@ import { persistActiveScenario } from "../lib/scenario_active.js";
       this.state.routeAnalysisCache.clear();
       this.state.equalizerOverrides = {};
       await this._loadEqualizerBaseline();
-      this._renderDiagram();
+      await this._loadEqualizerPreset();
+      await this._renderDiagram();
     }
 
     onEqualizerTypeChange() {
+      this._renderEqualizerPanel();
+    }
+
+    async onEqualizerVariantChange() {
+      const variant = this.hasEqualizerVariantSelectTarget
+        ? this.equalizerVariantSelectTarget.value
+        : "base";
+      const ok = await this._applyEqualizerVariant(variant);
+      if (!ok && variant === "user") {
+        window.alert("Пользовательский вариант не сохранён");
+        this._syncEqualizerVariantUi();
+        return;
+      }
+      await this._renderDiagram();
+    }
+
+    async saveEqualizerPreset() {
+      if (!this.state.selectedRoute || !this.equalizerPresetUrlValue) return;
+
+      const overrides = this._buildOverridesPayload();
+      if (!overrides) {
+        window.alert("Нет изменённых значений для сохранения");
+        return;
+      }
+
+      const { data } = await fetchJson(this.equalizerPresetUrlValue, {
+        method: "POST",
+        body: {
+          route_id: this.state.selectedRoute.id,
+          overrides,
+        },
+      });
+
+      if (!data || !data.success) {
+        window.alert(
+          (data && data.errors && data.errors.join("\n")) ||
+            "Не удалось сохранить эквалайзер",
+        );
+        return;
+      }
+
+      this.state.equalizerVariant = data.variant || "user";
+      this.state.equalizerSavedOverrides = this._parseOverridesPayload(
+        data.overrides,
+      );
+      this.state.equalizerPresetLoaded = true;
+      this.state.equalizerOverrides = this._cloneOverrides(
+        this.state.equalizerSavedOverrides,
+      );
+      this._syncEqualizerVariantUi();
       this._renderEqualizerPanel();
     }
 
@@ -2332,6 +2390,9 @@ import { persistActiveScenario } from "../lib/scenario_active.js";
     _resetEqualizer() {
       this.state.equalizerBaseline = null;
       this.state.equalizerOverrides = {};
+      this.state.equalizerSavedOverrides = {};
+      this.state.equalizerVariant = "base";
+      this.state.equalizerPresetLoaded = false;
       clearTimeout(this.state.equalizerDebounceTimer);
       this._updateEqualizerVisibility(false);
       if (this.hasEqualizerPanelTarget) {
@@ -2340,6 +2401,135 @@ import { persistActiveScenario } from "../lib/scenario_active.js";
       if (this.hasEqualizerTypeSelectTarget) {
         this.equalizerTypeSelectTarget.innerHTML = "";
       }
+      this._syncEqualizerVariantUi();
+    }
+
+    _cloneOverrides(overrides) {
+      const result = {};
+      for (const [typeKey, yearMap] of Object.entries(overrides || {})) {
+        result[typeKey] = { ...yearMap };
+      }
+      return result;
+    }
+
+    _parseOverridesPayload(overrides) {
+      const result = {};
+      if (!overrides || typeof overrides !== "object") return result;
+      for (const [typeKey, yearMap] of Object.entries(overrides)) {
+        if (!yearMap || typeof yearMap !== "object") continue;
+        result[typeKey] = {};
+        for (const [year, value] of Object.entries(yearMap)) {
+          const num = Number(String(value).replace(",", "."));
+          if (Number.isFinite(num)) {
+            result[typeKey][Number(year)] = num;
+          }
+        }
+      }
+      return result;
+    }
+
+    _syncEqualizerVariantUi() {
+      if (!this.hasEqualizerVariantSelectTarget) return;
+      const select = this.equalizerVariantSelectTarget;
+      const userOption = select.querySelector('option[value="user"]');
+      const hasSaved = Object.keys(this.state.equalizerSavedOverrides || {}).length > 0;
+      if (userOption) {
+        userOption.disabled = !hasSaved;
+      }
+      let variant = this.state.equalizerVariant || "base";
+      if (variant === "user" && !hasSaved) {
+        variant = "base";
+        this.state.equalizerVariant = "base";
+      }
+      select.value = variant;
+    }
+
+    async _loadEqualizerPreset() {
+      if (!this.equalizerPresetUrlValue || !this.state.selectedRoute) {
+        this.state.equalizerSavedOverrides = {};
+        this.state.equalizerVariant = "base";
+        this.state.equalizerPresetLoaded = false;
+        this._syncEqualizerVariantUi();
+        return;
+      }
+
+      const url = `${this.equalizerPresetUrlValue}?route_id=${encodeURIComponent(
+        String(this.state.selectedRoute.id),
+      )}`;
+      const { data } = await fetchJson(url);
+      if (!data || !data.success) {
+        this.state.equalizerSavedOverrides = {};
+        this.state.equalizerVariant = "base";
+        this.state.equalizerPresetLoaded = false;
+        this._syncEqualizerVariantUi();
+        return;
+      }
+
+      this.state.equalizerVariant = data.variant || "base";
+      this.state.equalizerSavedOverrides = this._parseOverridesPayload(
+        data.overrides,
+      );
+      this.state.equalizerPresetLoaded = true;
+      this._syncEqualizerVariantUi();
+      await this._applyEqualizerVariant(this.state.equalizerVariant, {
+        skipPatch: true,
+      });
+    }
+
+    async _applyEqualizerVariant(variant, options = {}) {
+      const skipPatch = options.skipPatch === true;
+      let nextVariant = variant || "base";
+      const hasSaved = Object.keys(this.state.equalizerSavedOverrides || {}).length > 0;
+
+      if (nextVariant === "user" && !hasSaved) {
+        nextVariant = "base";
+      }
+
+      this.state.equalizerVariant = nextVariant;
+      if (nextVariant === "base") {
+        this.state.equalizerOverrides = {};
+      } else {
+        this.state.equalizerOverrides = this._cloneOverrides(
+          this.state.equalizerSavedOverrides,
+        );
+      }
+      this._syncEqualizerVariantUi();
+      this._renderEqualizerPanel();
+
+      if (
+        !skipPatch &&
+        this.equalizerPresetUrlValue &&
+        this.state.selectedRoute
+      ) {
+        const { data } = await fetchJson(this.equalizerPresetUrlValue, {
+          method: "PATCH",
+          body: {
+            route_id: this.state.selectedRoute.id,
+            variant: nextVariant,
+          },
+        });
+        if (!data || !data.success) {
+          return false;
+        }
+        this.state.equalizerVariant = data.variant || nextVariant;
+        this.state.equalizerSavedOverrides = this._parseOverridesPayload(
+          data.overrides,
+        );
+        this._syncEqualizerVariantUi();
+      }
+
+      if (!this.state.selectedRoute || !this.state.selectedScenarioId) {
+        return true;
+      }
+
+      const overrides = this._buildOverridesPayload();
+      const result = await this._loadRouteAnalysis({
+        scenarioId: this.state.selectedScenarioId,
+        routeId: this.state.selectedRoute.id,
+        overrides,
+        useCache: false,
+      });
+      return result.ok;
     }
 
     _getVisibleEqualizerTypes() {

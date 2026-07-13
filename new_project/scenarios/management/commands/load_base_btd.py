@@ -10,7 +10,7 @@ from scenarios.models import Scenario
 class Command(BaseCommand):
     help = (
         "Загружает базовые тарифные решения (BTD) в базовый сценарий "
-        f'"{BASE_SCENARIO_NAME}" (2025–2035, см. матрицу на UI).'
+        f'"{BASE_SCENARIO_NAME}" (2026–2035, см. матрицу на UI).'
     )
 
     def add_arguments(self, parser) -> None:

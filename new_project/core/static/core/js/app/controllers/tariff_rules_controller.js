@@ -134,7 +134,7 @@ import { renderErrors } from "../lib/errors.js";
       yearValues.map((item) => [String(item.year), String(item.coefficient)]),
     );
     const years = [];
-    const start = startYear || 2025;
+    const start = startYear || 2026;
     const end = endYear || start;
     for (let year = start; year <= end; year += 1) {
       years.push(year);
@@ -249,7 +249,7 @@ import { renderErrors } from "../lib/errors.js";
         return;
       }
 
-      const startYear = this.startYearValue || 2025;
+      const startYear = this.startYearValue || 2026;
       const endYear = this.endYearValue || startYear;
 
       this.tbodyTarget.innerHTML = this.state.rules
@@ -681,7 +681,7 @@ import { renderErrors } from "../lib/errors.js";
     // === Years grid ===
     initYearsGrid() {
       if (!this.hasYearsTarget) return;
-      const start = this.startYearValue || 2025;
+      const start = this.startYearValue || 2026;
       const end = this.endYearValue || start;
       const years = [];
       for (let y = start; y <= end; y += 1) years.push(y);

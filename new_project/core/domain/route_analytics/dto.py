@@ -12,7 +12,7 @@ class RouteAnalyticsRequestDTO:
     route_set_id: int
     dimension: str
     metric: str
-    kpi_year: int = 2025
+    kpi_year: int = 2026
 
     def validate(self) -> list[str]:
         errors: list[str] = []

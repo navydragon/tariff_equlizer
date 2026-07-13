@@ -50,3 +50,7 @@
 .route-analysis-equalizer__unit {
   font-size: 0.75rem;
 }
+
+.route-analysis-equalizer__variant-row .btn {
+  margin-bottom: 0.125rem;
+}
