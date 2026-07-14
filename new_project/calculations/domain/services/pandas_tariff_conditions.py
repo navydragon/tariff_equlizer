@@ -353,6 +353,15 @@ def build_rule_mask_numpy(
             continue
 
         if not _sidecar_has_column(sidecar, column):
+            # Известные rule-параметры без sidecar нельзя silent-skip: иначе
+            # условие include молча покрывает все маршруты (устаревшая витрина).
+            if parameter in {
+                "cargo_code_3",
+                "cargo_code_izpod_3",
+                "cargo_group_izpod",
+                "special_container_type",
+            }:
+                mask &= False
             continue
 
         if parameter in {"wagon_kind", "shipment_type", "message_type", "shipper"}:

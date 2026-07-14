@@ -3724,7 +3724,7 @@ class RouteCargoIzpodTariffConditionsTests(TariffLoadServiceTestMixin, TestCase)
         self.assertLess(total_mask_bytes, 50 * 1024 * 1024)
 
         sample = _mask_sidecar_array(
-            __import__("pandas").Series(["abcdefgh"] * 1000),
+            __import__("pandas").Series(["161"] * 1000),
             "cargo_code_3",
         )
         assert sample is not None

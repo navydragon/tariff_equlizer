@@ -1,7 +1,16 @@
 from django.test import SimpleTestCase
 
-from calculations.domain.services.pandas_tariff_conditions import _label_codes
-from calculations.domain.services.route_mart_store import _normalize_mask_label_values
+import pandas as pd
+
+from calculations.domain.services.pandas_tariff_conditions import (
+    _label_codes,
+    build_rule_mask_numpy,
+)
+from calculations.domain.services.route_mart_store import (
+    MartMeta,
+    _factorize_mask_column,
+    _normalize_mask_label_values,
+)
 from scenarios.domain.services.tariff_rule_options import mask_sidecar_option_items
 
 
@@ -37,3 +46,34 @@ class CargoCode3OptionFormattingTests(SimpleTestCase):
                 {"value": "810", "text": "810"},
             ],
         )
+
+    def test_factorize_mask_column_keeps_empty_aligned_with_labels(self) -> None:
+        series = pd.Series(["", "161", "0", "161", ""])
+        factored = _factorize_mask_column(series, "cargo_code_izpod_3")
+        assert factored is not None
+        codes, labels = factored
+        self.assertEqual(labels, ["", "161", "000"])
+        self.assertEqual(codes.tolist(), [0, 1, 2, 1, 0])
+        matched = _label_codes(["161"], labels, column="cargo_code_izpod_3")
+        self.assertEqual(matched, [1])
+        self.assertEqual(int((codes == matched[0]).sum()), 2)
+
+    def test_missing_cargo_code_izpod_3_mask_fails_closed(self) -> None:
+        df = pd.DataFrame(
+            {
+                "cargo_code_3": ["421", "161"],
+                "freight_charge_rub": [1.0, 2.0],
+            },
+        )
+        mask = build_rule_mask_numpy(
+            df,
+            [
+                {
+                    "parameter": "cargo_code_izpod_3",
+                    "operator": "include",
+                    "values": ["161"],
+                },
+            ],
+            mart_meta=MartMeta(dimension_labels={}),
+        )
+        self.assertFalse(bool(mask.any()))

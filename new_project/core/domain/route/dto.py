@@ -14,7 +14,11 @@ from core.models import (
     Station,
     WagonKind,
 )
-from core.domain.cargo.formatting import format_app_cargo_code, parse_etsng_code
+from core.domain.cargo.formatting import (
+    format_app_cargo_code,
+    parse_etsng_code,
+    resolve_route_cargo_fields,
+)
 
 
 def _decimal_to_api_str(value: Decimal) -> str:
@@ -545,12 +549,20 @@ class RouteWriteDTO:
             "park_type",
             "special_container_type",
             "cargo_group_cmtp",
-            "cargo_code_izpod",
             "cargo_group_izpod",
-            "cargo_code_3",
-            "cargo_code_izpod_3",
         ):
             payload[name] = (data.get(name) or "").strip()
+
+        cargo = payload.get("cargo")
+        main_raw = cargo.code if cargo is not None else data.get("cargo_code")
+        cargo_fields = resolve_route_cargo_fields(
+            main_raw,
+            data.get("cargo_code_izpod"),
+        )
+        payload["cargo_code_izpod"] = cargo_fields.izpod_code
+        payload["cargo_code_3"] = cargo_fields.code_3
+        # Клиентский cargo_code_izpod_3 игнорируем — только деривация из нормализованного из-под.
+        payload["cargo_code_izpod_3"] = cargo_fields.izpod_3
 
         def parse_int_field(field_name: str) -> int | None:
             raw = data.get(field_name)

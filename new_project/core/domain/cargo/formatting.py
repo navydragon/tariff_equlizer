@@ -93,6 +93,32 @@ class RouteCargoFields:
     warnings: tuple[str, ...]
 
 
+def normalize_optional_izpod_cargo_code(value: Any) -> tuple[str, str, tuple[str, ...]]:
+    """Нормализует код груза из-под; невалидный результат → пустые строки.
+
+    Возвращает (izpod_code, izpod_3, warnings).
+    izpod_3 всегда берётся из нормализованного 5-значного кода, не из внешнего поля.
+    """
+    parsed = parse_etsng_code(value)
+    if parsed is None:
+        return "", "", ()
+
+    izpod_code, izpod_warn = normalize_rzd_cargo_code(value)
+    warnings: list[str] = []
+    if izpod_warn:
+        warnings.append(izpod_warn)
+
+    if len(izpod_code) != APP_CARGO_CODE_WIDTH:
+        if izpod_code and not izpod_warn:
+            warnings.append(
+                f"невалидный код груза из-под (ожидалась длина {APP_CARGO_CODE_WIDTH}): "
+                f"{izpod_code}"
+            )
+        return "", "", tuple(warnings)
+
+    return izpod_code, cargo_code_3_from_normalized(izpod_code), tuple(warnings)
+
+
 def resolve_route_cargo_fields(main_raw: Any, izpod_raw: Any) -> RouteCargoFields:
     """Вычисляет коды груза маршрута из сырых значений SQLite."""
     warnings: list[str] = []
@@ -101,15 +127,8 @@ def resolve_route_cargo_fields(main_raw: Any, izpod_raw: Any) -> RouteCargoField
     if main_warn:
         warnings.append(main_warn)
 
-    izpod_parsed = parse_etsng_code(izpod_raw)
-    if izpod_parsed is None:
-        izpod_code = ""
-        izpod_3 = ""
-    else:
-        izpod_code, izpod_warn = normalize_rzd_cargo_code(izpod_raw)
-        if izpod_warn:
-            warnings.append(izpod_warn)
-        izpod_3 = cargo_code_3_from_normalized(izpod_code)
+    izpod_code, izpod_3, izpod_warnings = normalize_optional_izpod_cargo_code(izpod_raw)
+    warnings.extend(izpod_warnings)
 
     return RouteCargoFields(
         main_code=main_code,

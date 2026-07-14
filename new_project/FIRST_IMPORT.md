@@ -50,6 +50,8 @@ ADMIN_PASSWORD=ваш_пароль
 | `data/refs-01/shippers.csv` | Грузоотправители |
 | `../data/01_2026-05-19.db` | SQLite РЖД (таблица `ИХ_ГП`) — **вне** `new_project`, в `data/` корня репозитория |
 | `../data/ipem/Уголь_эластика_2026.xlsx` | Model-маршруты угля, коэффициент загрузки предприятия, эластичность |
+| `../data/ipem/Металлургия_эластика.xlsx` | Model-маршруты металлургии, эластичность руды/металлов |
+| `../data/ipem/Удобрения_эластика.xlsx` | Model-маршруты удобрений, эластичность cargo_group=8 |
 | `total_ipem.csv` | Маршруты и экономика IPEM (~550 строк), legacy-пайплайн |
 
 Опционально: `core/data/settings.csv` — `import_settings`.
@@ -138,7 +140,8 @@ python manage.py import_rzd_routes --clear
 IPEM импортируется двумя командами:
 
 - **уголь**: model-маршруты + угольные правила эластичности (лист `Уголь_коэфф`);
-- **металлургия**: model-маршруты + правила эластичности для руды/металлов (лист `Технический лист`).
+- **металлургия**: model-маршруты + правила эластичности для руды/металлов (лист `Технический лист`);
+- **удобрения**: model-маршруты + правило эластичности «IPEM: Удобрения» (лист `Технический лист`).
 
 Operational-маршруты РЖД связываются через `model_route_id` по ключу: **станция + станция + груз + род вагона + тип отправки**.
 
@@ -156,6 +159,11 @@ python manage.py import_ipem_metallurgy_2026_routes ^
   --scenario-id 1 ^
   --route-set-code RZD_2026 ^
   --file ../data/ipem/Металлургия_эластика.xlsx
+
+python manage.py import_ipem_fertilizers_routes ^
+  --scenario-id 1 ^
+  --route-set-code RZD_2026 ^
+  --file ../data/ipem/Удобрения_эластика.xlsx
 ```
 
 Проверка без записи:
@@ -166,6 +174,9 @@ python manage.py import_ipem_coal_2026_routes --scenario-id 1 --dry-run ^
 
 python manage.py import_ipem_metallurgy_2026_routes --scenario-id 1 --dry-run ^
   --file ../data/ipem/Металлургия_эластика.xlsx
+
+python manage.py import_ipem_fertilizers_routes --scenario-id 1 --dry-run ^
+  --file ../data/ipem/Удобрения_эластика.xlsx
 ```
 
 После импорта пересобрать витрины:

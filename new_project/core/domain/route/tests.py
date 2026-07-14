@@ -7,6 +7,7 @@ from django.test import Client, TestCase
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 
+from core.domain.route.cargo_izpod_recompute import recompute_route_cargo_izpod_codes
 from core.domain.route.dto import CreateRouteSetDTO, RouteWriteDTO
 from core.domain.route.services import RouteSetService
 from core.models import (
@@ -766,6 +767,136 @@ class RouteWriteDTOTests(TestCase):
         assert write_dto is not None
         self.assertEqual(write_dto.payload["transport_volume_tons"], Decimal("1500000"))
         self.assertIsNone(write_dto.payload["freight_turnover_tkm"])
+
+    def test_from_request_data_normalizes_izpod_and_derives_code3(self) -> None:
+        write_dto, errors = RouteWriteDTO.from_request_data(
+            {
+                "route_set_id": self.route_set.id,
+                "cargo_code": self.cargo.code,
+                "origin_esr_code": self.origin.esr_code,
+                "destination_esr_code": self.destination.esr_code,
+                "wagon_kind_id": self.wagon_kind.id,
+                "shipment_type_id": self.shipment_type.id,
+                "cargo_code_izpod": "8101",
+                "cargo_code_izpod_3": "999",
+                "cargo_code_3": "zzz",
+            }
+        )
+        self.assertEqual(errors, [])
+        assert write_dto is not None
+        self.assertEqual(write_dto.payload["cargo_code_izpod"], "08101")
+        self.assertEqual(write_dto.payload["cargo_code_izpod_3"], "081")
+        self.assertEqual(write_dto.payload["cargo_code_3"], "040")
+
+    def test_from_request_data_clears_invalid_izpod(self) -> None:
+        write_dto, errors = RouteWriteDTO.from_request_data(
+            {
+                "route_set_id": self.route_set.id,
+                "cargo_code": self.cargo.code,
+                "origin_esr_code": self.origin.esr_code,
+                "destination_esr_code": self.destination.esr_code,
+                "wagon_kind_id": self.wagon_kind.id,
+                "shipment_type_id": self.shipment_type.id,
+                "cargo_code_izpod": "0",
+                "cargo_code_izpod_3": "0",
+            }
+        )
+        self.assertEqual(errors, [])
+        assert write_dto is not None
+        self.assertEqual(write_dto.payload["cargo_code_izpod"], "")
+        self.assertEqual(write_dto.payload["cargo_code_izpod_3"], "")
+
+
+class RecomputeRouteCargoIzpodCodesTests(TestCase):
+    def setUp(self) -> None:
+        self.route_set = RouteSet.objects.create(name="Recompute", code="RCP")
+        cargo_group = CargoGroup.objects.create(name="G", code=11, position=1)
+        self.cargo = Cargo.objects.create(
+            code="42103",
+            name="On axles",
+            cargo_group=cargo_group,
+        )
+        railroad = RailRoad.objects.create(code="77", name="RR")
+        region = Region.objects.create(
+            short_name="R",
+            full_name="Region",
+            type="область",
+        )
+        origin = Station.objects.create(
+            esr_code=770001,
+            short_name="O",
+            full_name="Origin",
+            region=region,
+            railroad=railroad,
+        )
+        destination = Station.objects.create(
+            esr_code=770002,
+            short_name="D",
+            full_name="Dest",
+            region=region,
+            railroad=railroad,
+        )
+        wagon = WagonKind.objects.create(code="WK_R", name="W")
+        shipment = ShipmentType.objects.create(code="ST_R", name="S")
+        self.base = {
+            "route_set": self.route_set,
+            "cargo": self.cargo,
+            "origin_station": origin,
+            "destination_station": destination,
+            "wagon_kind": wagon,
+            "shipment_type": shipment,
+        }
+
+    def test_clears_invalid_zero_and_normalizes_four_digit(self) -> None:
+        invalid = Route.objects.create(
+            route_code="R1",
+            cargo_code_izpod="0",
+            cargo_code_izpod_3="0",
+            **self.base,
+        )
+        valid = Route.objects.create(
+            route_code="R2",
+            cargo_code_izpod="8101",
+            cargo_code_izpod_3="999",
+            **self.base,
+        )
+        unchanged = Route.objects.create(
+            route_code="R3",
+            cargo_code_izpod="16101",
+            cargo_code_izpod_3="161",
+            **self.base,
+        )
+
+        result = recompute_route_cargo_izpod_codes(route_set_id=self.route_set.id)
+
+        invalid.refresh_from_db()
+        valid.refresh_from_db()
+        unchanged.refresh_from_db()
+
+        self.assertEqual(invalid.cargo_code_izpod, "")
+        self.assertEqual(invalid.cargo_code_izpod_3, "")
+        self.assertEqual(valid.cargo_code_izpod, "08101")
+        self.assertEqual(valid.cargo_code_izpod_3, "081")
+        self.assertEqual(unchanged.cargo_code_izpod, "16101")
+        self.assertEqual(unchanged.cargo_code_izpod_3, "161")
+        self.assertEqual(result.updated, 2)
+        self.assertEqual(result.cleared_invalid, 1)
+
+    def test_dry_run_does_not_write(self) -> None:
+        route = Route.objects.create(
+            route_code="R-DRY",
+            cargo_code_izpod="0",
+            cargo_code_izpod_3="0",
+            **self.base,
+        )
+        result = recompute_route_cargo_izpod_codes(
+            route_set_id=self.route_set.id,
+            dry_run=True,
+        )
+        route.refresh_from_db()
+        self.assertEqual(result.updated, 1)
+        self.assertEqual(route.cargo_code_izpod, "0")
+        self.assertEqual(route.cargo_code_izpod_3, "0")
 
 
 class RouteSetServiceTests(TestCase):

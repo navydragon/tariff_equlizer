@@ -224,6 +224,47 @@ python manage.py refresh_deploy_caches
 
 Правило эластичности для маршрута выбирается runtime по `message_type` (без FK на `Route`).
 
+### `import_ipem_metallurgy_2026_routes`
+
+Импорт **model-маршрутов** металлургии из `Металлургия_эластика.xlsx` (лист `ЧМ,ЦМ,Руда,Кокс`).  
+С `--scenario-id` — правила эластичности для руды/металлов (лист `Технический лист`).
+
+| Параметр | По умолчанию | Описание |
+|----------|--------------|----------|
+| `--file` | `../data/ipem/Металлургия_эластика.xlsx` | XLSX IPEM |
+| `--route-set-code` | `RZD_2026` | Набор маршрутов |
+| `--scenario-id` | — | Сценарий: seed эластичности + привязка набора |
+| `--skip-elasticity` | — | Только маршруты |
+| `--dry-run` | — | Только проверка резолва |
+
+```bash
+python manage.py import_ipem_metallurgy_2026_routes \
+  --scenario-id 1 \
+  --route-set-code RZD_2026
+```
+
+### `import_ipem_fertilizers_routes`
+
+Импорт **model-маршрутов** удобрений из `Удобрения_эластика.xlsx` (лист `Удобрения`, cargo_group=8).  
+С `--scenario-id` — правило эластичности «IPEM: Удобрения» (лист `Технический лист`).
+
+| Параметр | По умолчанию | Описание |
+|----------|--------------|----------|
+| `--file` | `../data/ipem/Удобрения_эластика.xlsx` | XLSX IPEM |
+| `--route-set-code` | `RZD_2026` | Набор маршрутов |
+| `--scenario-id` | — | Сценарий: seed эластичности + привязка набора |
+| `--skip-elasticity` | — | Только маршруты |
+| `--dry-run` | — | Только проверка резолва |
+
+```bash
+python manage.py import_ipem_fertilizers_routes \
+  --scenario-id 1 \
+  --route-set-code RZD_2026 \
+  --file ../data/ipem/Удобрения_эластика.xlsx
+
+python manage.py refresh_deploy_caches
+```
+
 ### `export_ipem_rzd_economics_2025`
 
 Экспорт строк `total_ipem.csv`, совпадающих с маршрутами РЖД по **ЕСР отпр. + ЕСР назн. + груз** (fuzzy по имени груза), с полями экономики в CSV.

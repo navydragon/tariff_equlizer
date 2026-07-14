@@ -100,7 +100,7 @@ _MASK_SIDECAR_BOOL_COLUMNS = frozenset(
 )
 
 # Версия sidecar на диске (отдельные .npy + mmap); bump при смене dtype/колонок.
-SIDECAR_SCHEMA_VERSION = 9
+SIDECAR_SCHEMA_VERSION = 10
 # Legacy npz (до v4).
 MASKS_NPZ_SCHEMA_VERSION = 3
 MASKS_NPZ_META_KEYS = frozenset({"__schema_version__"})
@@ -866,39 +866,57 @@ def _bool_series_to_uint8(series: pd.Series) -> np.ndarray:
     return bool_series.to_numpy(dtype=np.uint8, copy=False)
 
 
-def _mask_sidecar_array(series: pd.Series, column: str) -> np.ndarray | None:
+def _prepare_factorize_mask_series(series: pd.Series, column: str) -> pd.Series:
+    filled = series.fillna("").astype(str).str.strip()
+    if column in _CARGO_CODE_3_MASK_COLUMNS:
+        return filled.map(format_cargo_code_3)
+    return filled
+
+
+def _factorize_mask_column(
+    series: pd.Series,
+    column: str,
+) -> tuple[np.ndarray, list[str]] | None:
+    """Кодирует mask-колонку и возвращает (codes, labels) с одинаковым порядком индексов.
+
+    Пустая строка сохраняется в labels (для выравнивания с factorize), даже если
+    UI-опции её потом отфильтруют.
+    """
     if column in _MASK_SIDECAR_BOOL_COLUMNS:
-        return _bool_series_to_uint8(series)
+        return _bool_series_to_uint8(series), []
     if column in _MASK_SIDECAR_INT_COLUMNS:
         numeric = pd.to_numeric(series, errors="coerce")
-        if column == "shipper_id":
-            return (
-                numeric.fillna(0)
-                .to_numpy(dtype=np.uint16, copy=False)
-            )
         return (
-            numeric.fillna(0)
-            .to_numpy(dtype=np.uint16, copy=False)
+            numeric.fillna(0).to_numpy(dtype=np.uint16, copy=False),
+            [],
         )
     if column == "distance_belt_midpoint_km":
         return (
             pd.to_numeric(series, errors="coerce")
             .fillna(0)
-            .to_numpy(dtype=np.uint16, copy=False)
+            .to_numpy(dtype=np.uint16, copy=False),
+            [],
         )
-    if column in _MASK_SIDECAR_FACTORIZE_COLUMNS:
-        filled = series.fillna("").astype(str).str.strip()
+    if (
+        column in _MASK_SIDECAR_FACTORIZE_COLUMNS
+        or column in MART_RULE_MASK_SIDECAR_COLUMNS
+    ):
+        filled = _prepare_factorize_mask_series(series, column)
         if filled.eq("").all():
             return None
-        codes, _uniques = pd.factorize(filled, sort=False)
-        return _compact_int_codes(codes.astype(np.int32, copy=False))
-    if column in MART_RULE_MASK_SIDECAR_COLUMNS:
-        filled = series.fillna("").astype(str)
-        if filled.str.strip().eq("").all():
-            return None
-        codes, _uniques = pd.factorize(filled, sort=False)
-        return _compact_int_codes(codes.astype(np.int32, copy=False))
+        codes, uniques = pd.factorize(filled, sort=False)
+        return (
+            _compact_int_codes(codes.astype(np.int32, copy=False)),
+            [str(value) for value in uniques.tolist()],
+        )
     raise ValueError(f"Unexpected masks sidecar column: {column}")
+
+
+def _mask_sidecar_array(series: pd.Series, column: str) -> np.ndarray | None:
+    factored = _factorize_mask_column(series, column)
+    if factored is None:
+        return None
+    return factored[0]
 
 
 def _save_npy_array(array: np.ndarray, out_path: Path) -> None:
@@ -998,6 +1016,13 @@ def _masks_npy_needs_rebuild(parquet_path: Path) -> bool:
     allowed = frozenset(MART_RULE_MASK_SIDECAR_COLUMNS)
     if present - allowed:
         return True
+    # Labels без файла (или наоборот) — битая/устаревшая sidecar-пара.
+    for column in MART_MASK_LABEL_COLUMNS:
+        labels = meta.dimension_labels.get(column)
+        has_labels = bool(labels)
+        has_file = column in present
+        if has_labels != has_file:
+            return True
     return False
 
 
@@ -1079,14 +1104,19 @@ def _prune_disallowed_mask_npy_columns(parquet_path: Path) -> None:
             pass
 
 
-def save_masks_npy(df: pd.DataFrame, parquet_path: Path) -> None:
+def save_masks_npy(df: pd.DataFrame, parquet_path: Path) -> dict[str, list[str]]:
+    mask_labels: dict[str, list[str]] = {}
     for column in _mask_sidecar_columns_in_df(df):
-        array = _mask_sidecar_array(df[column], column)
-        if array is None:
+        factored = _factorize_mask_column(df[column], column)
+        if factored is None:
             continue
+        array, labels = factored
         _save_npy_array(array, mask_npy_path(parquet_path, column))
+        if column in MART_MASK_LABEL_COLUMNS:
+            mask_labels[column] = labels
     _remove_legacy_npz_sidecars(parquet_path)
     _prune_disallowed_mask_npy_columns(parquet_path)
+    return mask_labels
 
 
 def save_dims_npy_from_arrays(
@@ -1215,6 +1245,7 @@ def _normalize_mask_label_values(
     values: list[str] | np.ndarray,
     *,
     column: str | None = None,
+    keep_empty: bool = False,
 ) -> list[str]:
     normalized: list[str] = []
     seen: set[str] = set()
@@ -1224,7 +1255,9 @@ def _normalize_mask_label_values(
             if column
             else str(raw).strip()
         )
-        if not text or text in seen:
+        if not text and not keep_empty:
+            continue
+        if text in seen:
             continue
         seen.add(text)
         normalized.append(text)
@@ -1234,21 +1267,29 @@ def _normalize_mask_label_values(
 def _mask_column_labels_from_df(df: pd.DataFrame, column: str) -> list[str]:
     if column not in df.columns:
         return []
-    return _normalize_mask_label_values(
-        df[column].astype(str).unique().tolist(),
-        column=column,
-    )
+    factored = _factorize_mask_column(df[column], column)
+    if factored is None:
+        return []
+    return factored[1]
 
 
-def _merge_mask_labels_into_meta(df: pd.DataFrame, meta: MartMeta | None) -> MartMeta | None:
+def _merge_mask_labels_into_meta(
+    df: pd.DataFrame,
+    meta: MartMeta | None,
+    *,
+    precomputed: dict[str, list[str]] | None = None,
+) -> MartMeta | None:
     if meta is None:
         return None
     updated_labels = dict(meta.dimension_labels)
     changed = False
     for column in MART_MASK_LABEL_COLUMNS:
-        if column not in df.columns:
+        if precomputed is not None and column in precomputed:
+            labels = list(precomputed[column])
+        elif column in df.columns:
+            labels = _mask_column_labels_from_df(df, column)
+        else:
             continue
-        labels = _mask_column_labels_from_df(df, column)
         if updated_labels.get(column) != labels:
             updated_labels[column] = labels
             changed = True
@@ -1281,9 +1322,9 @@ def distinct_mask_sidecar_labels(
     if meta is None:
         return None
     cached = meta.dimension_labels.get(column)
-    if not cached:
+    if cached is None:
         return None
-    labels = _normalize_mask_label_values(cached, column=column)
+    labels = _normalize_mask_label_values(cached, column=column, keep_empty=False)
     return labels or None
 
 
@@ -1376,8 +1417,12 @@ def ensure_compute_sidecars(parquet_path: Path, *, require_turnover: bool = True
     if need_masks:
         if not _mask_sidecar_columns_in_df(df):
             return False
-        save_masks_npy(df, parquet_path)
-        meta = _merge_mask_labels_into_meta(df, meta) or meta
+        mask_labels = save_masks_npy(df, parquet_path)
+        meta = _merge_mask_labels_into_meta(
+            df,
+            meta,
+            precomputed=mask_labels,
+        ) or meta
     if meta is not None and (
         need_dims or need_masks or meta.sidecar_schema_version < SIDECAR_SCHEMA_VERSION
     ):
@@ -1621,18 +1666,18 @@ def save_route_mart(
         sidecar_schema_version=SIDECAR_SCHEMA_VERSION,
         turnover_coef_years=list(TURNOVER_COEF_YEARS),
     )
-    meta = _merge_mask_labels_into_meta(df, meta) or meta
-    save_mart_meta(
-        parquet_path=path,
-        meta=meta,
-    )
     save_charge_npy(df, path)
     save_volume_npy(df, path)
     save_route_id_npy(df, path)
     save_turnover_coef_npy(df, path)
     save_elasticity_npy(df, path)
     save_dims_npy(df, path)
-    save_masks_npy(df, path)
+    mask_labels = save_masks_npy(df, path)
+    meta = _merge_mask_labels_into_meta(df, meta, precomputed=mask_labels) or meta
+    save_mart_meta(
+        parquet_path=path,
+        meta=meta,
+    )
     t_sidecars = time.perf_counter()
     timings["sidecars_write_ms"] = int((t_sidecars - t0) * 1000)
 

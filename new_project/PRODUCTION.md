@@ -72,11 +72,12 @@ python manage.py create_admin --login admin --email admin@example.com --password
 # … import_railroads, import_rzd_routes и т.д. — см. FIRST_IMPORT.md
 ```
 
-После импорта маршрутов РЖД (`import_rzd_routes --clear`) — **IPEM (уголь + металлургия)**: правила эластичности и model-маршруты, коэффициент загрузки предприятия и привязка к сценарию:
+После импорта маршрутов РЖД (`import_rzd_routes --clear`) — **IPEM (уголь + металлургия + удобрения)**: правила эластичности и model-маршруты, коэффициент загрузки предприятия и привязка к сценарию:
 
 ```bash
 python manage.py import_ipem_coal_2026_routes --scenario-id 1 --route-set-code RZD_2026
 python manage.py import_ipem_metallurgy_2026_routes --scenario-id 1 --route-set-code RZD_2026
+python manage.py import_ipem_fertilizers_routes --scenario-id 1 --route-set-code RZD_2026
 
 python manage.py refresh_deploy_caches --warm-scenarios --wait-scenarios
 python manage.py refresh_deploy_caches --warm-only --warm-scenarios --wait-scenarios

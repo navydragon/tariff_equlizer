@@ -89,6 +89,13 @@ IPEM_METALLURGY_2026_XLSX_NAME = "Металлургия_эластика.xlsx"
 IPEM_METALLURGY_2026_HEADER_ROW = 2
 IPEM_METALLURGY_CARGO_GROUP_CODES: tuple[int, ...] = (2, 4, 5, 10)
 
+IPEM_FERTILIZERS_ROUTE_SHEETS: tuple[str, ...] = (
+    "Удобрения",
+)
+IPEM_FERTILIZERS_XLSX_NAME = "Удобрения_эластика.xlsx"
+IPEM_FERTILIZERS_HEADER_ROW = 2
+IPEM_FERTILIZERS_CARGO_GROUP_CODE = 8
+
 IPEM_COAL_2026_OVERLAP_COLUMNS: tuple[str, ...] = (
     "ipem_row",
     "сцеп_цены",
@@ -243,6 +250,14 @@ class IpemCoal2026ImportResult:
 
 def normalize_name(value: str) -> str:
     return (value or "").strip().casefold()
+
+
+def sanitize_ipem_text(value: str) -> str:
+    """Убирает артефакты Excel-текста (ведущий апостроф и пробелы)."""
+    text = (value or "").strip()
+    while text and text[0] in ("'", "\u2018", "\u2019"):
+        text = text[1:].strip()
+    return text
 
 
 def parse_cargo_izpod_fields_from_ipem_row(
@@ -411,7 +426,7 @@ def _ipem_cell_str(value: Any) -> str:
         pass
     if isinstance(value, float) and value != value:
         return ""
-    return str(value).strip()
+    return sanitize_ipem_text(str(value))
 
 
 def resolve_station_by_ipem_name(
@@ -458,7 +473,8 @@ def resolve_wagon_kind(
     raw_name: str,
     wagons: Optional[list[WagonKind]] = None,
 ) -> tuple[Optional[WagonKind], Optional[str]]:
-    name_norm = normalize_name(raw_name)
+    canonical = _canonical_wagon_kind_label(raw_name)
+    name_norm = normalize_name(canonical)
     if not name_norm:
         return None, "no_wagon"
 
@@ -482,6 +498,43 @@ def resolve_wagon_kind(
     if len(prefix_matches) > 1:
         return None, "ambiguous_wagon"
     return None, "no_wagon"
+
+
+def resolve_wagon_kind_from_rzd_context(
+    *,
+    route_set: RouteSet,
+    origin: Station,
+    destination: Station,
+    cargo: Cargo,
+    shipment_type: ShipmentType,
+    wagons: Optional[list[WagonKind]] = None,
+) -> tuple[Optional[WagonKind], Optional[str]]:
+    """Подбирает род вагона по operational-маршрутам РЖД с тем же ключом связи."""
+    from collections import Counter
+
+    wagon_ids = list(
+        Route.objects.operational()
+        .filter(
+            route_set=route_set,
+            origin_station=origin,
+            destination_station=destination,
+            cargo=cargo,
+            shipment_type=shipment_type,
+        )
+        .values_list("wagon_kind_id", flat=True)
+    )
+    if not wagon_ids:
+        return None, "no_wagon"
+
+    if wagons is None:
+        wagons = list(WagonKind.objects.all())
+    wagon_by_id = {wagon.pk: wagon for wagon in wagons}
+
+    most_common_id, _ = Counter(wagon_ids).most_common(1)[0]
+    wagon = wagon_by_id.get(most_common_id)
+    if wagon is None:
+        return None, "no_wagon"
+    return wagon, None
 
 
 def resolve_message_type(
@@ -535,6 +588,24 @@ def load_ipem_metallurgy_2026_xlsx(path: Path) -> list[dict[str, str]]:
         )
         for _, series in df.iterrows():
             # См. load_ipem_coal_2026_xlsx: нормализуем заголовки.
+            row = {str(col).strip(): _ipem_cell_str(series[col]) for col in df.columns}
+            if not any(row.values()):
+                continue
+            rows.append(row)
+    return rows
+
+
+def load_ipem_fertilizers_xlsx(path: Path) -> list[dict[str, str]]:
+    import pandas as pd
+
+    rows: list[dict[str, str]] = []
+    for sheet_name in IPEM_FERTILIZERS_ROUTE_SHEETS:
+        df = pd.read_excel(
+            path,
+            sheet_name=sheet_name,
+            header=IPEM_FERTILIZERS_HEADER_ROW,
+        )
+        for _, series in df.iterrows():
             row = {str(col).strip(): _ipem_cell_str(series[col]) for col in df.columns}
             if not any(row.values()):
                 continue
@@ -716,6 +787,13 @@ IPEM_SHIPMENT_TYPE_LABEL_ALIASES: dict[str, str] = {
     "сборная поваг": "сборная поваг.",
 }
 
+# Сокращения IPEM для удобрений и др. → имя в WagonKind (справочник РЖД).
+IPEM_WAGON_KIND_LABEL_ALIASES: dict[str, str] = {
+    "зерновозы мин.уд": "прочие",
+    "минераловозы": "прочие",
+    "фитинговые": "прочие",
+}
+
 
 def shipment_type_label_from_ipem_row(row: dict[str, str]) -> str:
     for column_name in IPEM_SHIPMENT_TYPE_COLUMN_CANDIDATES:
@@ -730,6 +808,14 @@ def _canonical_shipment_type_label(raw_name: str) -> str:
     if not name_norm:
         return ""
     return IPEM_SHIPMENT_TYPE_LABEL_ALIASES.get(name_norm, raw_name.strip())
+
+
+def _canonical_wagon_kind_label(raw_name: str) -> str:
+    cleaned = sanitize_ipem_text(raw_name)
+    name_norm = normalize_name(cleaned)
+    if not name_norm:
+        return ""
+    return IPEM_WAGON_KIND_LABEL_ALIASES.get(name_norm, cleaned)
 
 
 def resolve_shipment_type(
@@ -795,6 +881,7 @@ def resolve_ipem_coal_2026_row(
     wagons: list[WagonKind],
     shipment_by_name: dict[str, ShipmentType],
     message_by_name: dict[str, MessageType],
+    route_set: RouteSet | None = None,
 ) -> tuple[Optional[IpemCoal2026ResolvedRow], list[str]]:
     reasons: list[str] = []
     origin, origin_issue = resolve_station_by_ipem_name(
@@ -815,16 +902,33 @@ def resolve_ipem_coal_2026_row(
     if cargo is None:
         reasons.append("no_cargo")
 
-    wagon, wagon_issue = resolve_wagon_kind(row.get("Род вагона", ""), wagons)
-    if wagon_issue:
-        reasons.append(wagon_issue)
-
     shipment_type, shipment_issue = resolve_shipment_type(
         shipment_type_label_from_ipem_row(row),
         shipment_by_name,
     )
     if shipment_issue:
         reasons.append(shipment_issue)
+
+    wagon, wagon_issue = resolve_wagon_kind(row.get("Род вагона", ""), wagons)
+    if (
+        wagon_issue
+        and route_set is not None
+        and origin is not None
+        and destination is not None
+        and cargo is not None
+        and shipment_type is not None
+    ):
+        wagon, wagon_issue = resolve_wagon_kind_from_rzd_context(
+            route_set=route_set,
+            origin=origin,
+            destination=destination,
+            cargo=cargo,
+            shipment_type=shipment_type,
+            wagons=wagons,
+        )
+
+    if wagon_issue:
+        reasons.append(wagon_issue)
 
     message_type, message_issue = resolve_message_type(
         row.get("Вид перевозки", ""),
@@ -1160,6 +1264,95 @@ def import_ipem_metallurgy_2026_model_routes(
     clear_ipem_model_routes_for_cargo_groups(route_set, IPEM_METALLURGY_CARGO_GROUP_CODES)
 
     model_routes: list[Route] = [build_model_route_from_resolved_row(route_set, r) for r in resolved_rows]
+    created = Route.objects.bulk_create(model_routes, batch_size=500)
+    result.created_model_routes = len(created)
+    result.linked_operational_routes = link_operational_routes_to_models(route_set, created)
+    sync_model_routes_cargo_izpod_from_operational(route_set, created)
+    if assign_elasticity_sources:
+        from scenarios.domain.services.operational_elasticity import (
+            assign_operational_elasticity_sources,
+        )
+
+        elasticity_stats = assign_operational_elasticity_sources(
+            route_set,
+            progress=progress,
+        )
+        result.elasticity_direct_model = elasticity_stats.direct_model
+        result.elasticity_holding_aggregate = elasticity_stats.holding_aggregate
+        result.elasticity_cargo_group_aggregate = elasticity_stats.cargo_group_aggregate
+        result.elasticity_skipped = elasticity_stats.skipped
+    return result
+
+
+def import_ipem_fertilizers_model_routes(
+    xlsx_path: Path,
+    route_set: RouteSet,
+    *,
+    dry_run: bool = False,
+    assign_elasticity_sources: bool = True,
+    progress: Callable[[str], None] | None = None,
+) -> IpemCoal2026ImportResult:
+    """
+    Импорт model-маршрутов из Удобрения_эластика.xlsx (лист «Удобрения»).
+
+    Использует тот же формат колонок, что и угольные/металлургические листы.
+    """
+    result = IpemCoal2026ImportResult()
+    ipem_rows = load_ipem_fertilizers_xlsx(xlsx_path)
+    result.total_rows = len(ipem_rows)
+
+    wagons = list(WagonKind.objects.all())
+    shipment_by_name = {normalize_name(s.name): s for s in ShipmentType.objects.all()}
+    message_by_name = {normalize_name(m.name): m for m in MessageType.objects.all()}
+
+    resolved_rows: list[IpemCoal2026ResolvedRow] = []
+    seen_link_keys: dict[tuple[Any, ...], str] = {}
+
+    for ipem_row_idx, row in enumerate(ipem_rows, start=1):
+        resolved, reasons = resolve_ipem_coal_2026_row(
+            row,
+            ipem_row=ipem_row_idx,
+            wagons=wagons,
+            shipment_by_name=shipment_by_name,
+            message_by_name=message_by_name,
+            route_set=route_set,
+        )
+        if resolved is None:
+            result.skipped_rows += 1
+            result.skip_reasons.append(
+                f"Строка {ipem_row_idx}: {'; '.join(reasons)}"
+            )
+            continue
+
+        resolved.route_code = f"IPEM-FERT-2026-{ipem_row_idx:03d}"
+
+        link_key = (
+            resolved.origin.pk,
+            resolved.destination.pk,
+            resolved.cargo.pk,
+            resolved.wagon_kind.pk,
+            resolved.shipment_type.pk,
+        )
+        if link_key in seen_link_keys:
+            result.duplicate_link_key_warnings.append(
+                f"Ключ связи {link_key}: повтор в IPEM (строка {ipem_row_idx}, "
+                f"ранее строка {seen_link_keys[link_key]}); при линковке победит последняя"
+            )
+        seen_link_keys[link_key] = str(ipem_row_idx)
+        resolved_rows.append(resolved)
+
+    if dry_run:
+        result.created_model_routes = len(resolved_rows)
+        return result
+
+    clear_ipem_model_routes_for_cargo_groups(
+        route_set,
+        (IPEM_FERTILIZERS_CARGO_GROUP_CODE,),
+    )
+
+    model_routes: list[Route] = [
+        build_model_route_from_resolved_row(route_set, r) for r in resolved_rows
+    ]
     created = Route.objects.bulk_create(model_routes, batch_size=500)
     result.created_model_routes = len(created)
     result.linked_operational_routes = link_operational_routes_to_models(route_set, created)

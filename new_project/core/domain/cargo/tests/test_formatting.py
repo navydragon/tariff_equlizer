@@ -136,6 +136,34 @@ class ResolveRouteCargoFieldsTests(SimpleTestCase):
         self.assertEqual(fields.izpod_code, "")
         self.assertEqual(fields.izpod_3, "")
 
+    def test_invalid_short_izpod_cleared(self) -> None:
+        fields = resolve_route_cargo_fields("016101", "0")
+        self.assertEqual(fields.izpod_code, "")
+        self.assertEqual(fields.izpod_3, "")
+        self.assertTrue(fields.warnings)
+
+    def test_invalid_two_digit_izpod_cleared(self) -> None:
+        fields = resolve_route_cargo_fields("016101", "12")
+        self.assertEqual(fields.izpod_code, "")
+        self.assertEqual(fields.izpod_3, "")
+
+    def test_non_digit_izpod_cleared(self) -> None:
+        fields = resolve_route_cargo_fields("016101", "ABC")
+        self.assertEqual(fields.izpod_code, "")
+        self.assertEqual(fields.izpod_3, "")
+        self.assertEqual(fields.warnings, ())
+
+    def test_six_digit_izpod_with_leading_zero(self) -> None:
+        fields = resolve_route_cargo_fields("42103", "016101")
+        self.assertEqual(fields.izpod_code, "16101")
+        self.assertEqual(fields.izpod_3, "161")
+
+    def test_six_digit_izpod_without_leading_zero_cleared(self) -> None:
+        fields = resolve_route_cargo_fields("42103", "161016")
+        self.assertEqual(fields.izpod_code, "")
+        self.assertEqual(fields.izpod_3, "")
+        self.assertTrue(any("без ведущего нуля" in w for w in fields.warnings))
+
 
 class CargoCode3FromEtsngTests(SimpleTestCase):
     def test_from_int_full_code(self) -> None:
