@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -12,9 +13,29 @@ def parse_etsng_code(value: Any) -> str | None:
     """Нормализует код груза из выгрузки РЖД/CSV: trim, только цифры, без int()."""
     if value is None:
         return None
-    raw = str(value).strip()
-    if not raw or raw == "—":
+    if isinstance(value, bool):
         return None
+    if isinstance(value, int):
+        return str(value) if value >= 0 else None
+    if isinstance(value, float):
+        if math.isnan(value) or value < 0 or not value.is_integer():
+            return None
+        return str(int(value))
+
+    # numpy / pandas скаляры
+    item = getattr(value, "item", None)
+    if callable(item):
+        try:
+            return parse_etsng_code(item())
+        except (ValueError, TypeError, OverflowError):
+            return None
+
+    raw = str(value).strip()
+    if not raw or raw == "—" or raw.lower() == "nan":
+        return None
+    # Arrow/pandas float → «161.0»
+    if raw.endswith(".0") and raw[:-2].isdigit():
+        raw = raw[:-2]
     if not raw.isdigit():
         return None
     return raw

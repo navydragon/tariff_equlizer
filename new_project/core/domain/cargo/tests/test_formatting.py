@@ -28,6 +28,12 @@ class ParseEtsngCodeTests(SimpleTestCase):
         self.assertIsNone(parse_etsng_code(""))
         self.assertIsNone(parse_etsng_code("ABC"))
 
+    def test_float_from_arrow_pandas(self) -> None:
+        self.assertEqual(parse_etsng_code(161.0), "161")
+        self.assertEqual(parse_etsng_code("161.0"), "161")
+        self.assertIsNone(parse_etsng_code(float("nan")))
+        self.assertIsNone(parse_etsng_code(16.5))
+
 
 class FormatAppCargoCodeTests(SimpleTestCase):
     def test_anthracite_code_five_digits(self) -> None:
@@ -72,6 +78,10 @@ class FormatCargoCode3Tests(SimpleTestCase):
     def test_string_preserved(self) -> None:
         self.assertEqual(format_cargo_code_3("016"), "016")
         self.assertEqual(format_cargo_code_3("161"), "161")
+
+    def test_float_preserved_as_digits(self) -> None:
+        self.assertEqual(format_cargo_code_3(161.0), "161")
+        self.assertEqual(format_cargo_code_3(16.0), "016")
 
     def test_empty(self) -> None:
         self.assertEqual(format_cargo_code_3(None), "")
