@@ -591,6 +591,20 @@ def tariff_rule_options_api(request, scenario_id):
             .order_by("destination_station__railroad__code")
         )
         items = [{"value": r["destination_station__railroad__code"], "text": f'{r["destination_station__railroad__code"]} — {r["destination_station__railroad__name"]}'} for r in rows]
+    elif parameter == "origin_station":
+        rows = (
+            qs.values("origin_station_id", "origin_station__short_name")
+            .distinct()
+            .order_by("origin_station_id")
+        )
+        items = [{"value": r["origin_station_id"], "text": f'{r["origin_station_id"]} — {r["origin_station__short_name"]}'} for r in rows]
+    elif parameter == "destination_station":
+        rows = (
+            qs.values("destination_station_id", "destination_station__short_name")
+            .distinct()
+            .order_by("destination_station_id")
+        )
+        items = [{"value": r["destination_station_id"], "text": f'{r["destination_station_id"]} — {r["destination_station__short_name"]}'} for r in rows]
     elif parameter == "wagon_kind":
         rows = qs.values("wagon_kind__id", "wagon_kind__name").distinct().order_by("wagon_kind__name")
         items = [{"value": r["wagon_kind__id"], "text": r["wagon_kind__name"]} for r in rows]

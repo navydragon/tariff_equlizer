@@ -8,6 +8,9 @@ from core.models import Route
 
 _CARGO_CODE_3_PARAMETERS = frozenset({"cargo_code_3", "cargo_code_izpod_3"})
 _BOOL_PARAMETERS = frozenset({"is_consumer_goods", "is_food_goods"})
+_INT_ID_PARAMETERS = frozenset(
+    {"shipper", "origin_station", "destination_station"},
+)
 
 
 FIELD_MAP = {
@@ -18,6 +21,8 @@ FIELD_MAP = {
     "cargo_group_izpod": "cargo_group_izpod",
     "origin_railroad": "origin_station__railroad__code",
     "destination_railroad": "destination_station__railroad__code",
+    "origin_station": "origin_station_id",
+    "destination_station": "destination_station_id",
     "wagon_kind": "wagon_kind__id",
     "shipment_type": "shipment_type__id",
     "message_type": "message_type__id",
@@ -111,6 +116,17 @@ def apply_tariff_conditions(qs, conditions: list[dict]):
             elif operator == "exclude":
                 filtered = filtered.exclude(**{f"{field}__in": bool_vals})
             continue
+
+        if parameter in _INT_ID_PARAMETERS:
+            int_vals: list[int] = []
+            for value in vals:
+                try:
+                    int_vals.append(int(value))
+                except (TypeError, ValueError):
+                    continue
+            if not int_vals:
+                continue
+            vals = int_vals
 
         compare_field = field
         if parameter in _NORMALIZED_STRING_PARAMETERS:

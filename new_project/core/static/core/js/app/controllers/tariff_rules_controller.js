@@ -19,6 +19,8 @@ import { renderErrors } from "../lib/errors.js";
     { code: "is_food_goods", label: "Продовольственные товары", type: "choice" },
     { code: "origin_railroad", label: "Дорога отправления", type: "choice" },
     { code: "destination_railroad", label: "Дорога назначения", type: "choice" },
+    { code: "origin_station", label: "Станция отправления", type: "choice" },
+    { code: "destination_station", label: "Станция назначения", type: "choice" },
     { code: "wagon_kind", label: "Род вагона", type: "choice" },
     { code: "shipment_type", label: "Тип отправки", type: "choice" },
     { code: "shipment_category", label: "Тип парка", type: "choice" },

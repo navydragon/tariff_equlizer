@@ -3106,6 +3106,89 @@ class SpecialContainerTypeTariffConditionsTests(TariffLoadServiceTestMixin, Test
         self.assertNotIn("", values)
 
 
+class StationTariffConditionsTests(TariffLoadServiceTestMixin, TestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        railroad = RailRoad.objects.get(code="01")
+        region = Region.objects.get(short_name="R")
+        self.origin_station = Station.objects.get(esr_code=100001)
+        self.destination_station = Station.objects.get(esr_code=100002)
+        self.other_origin = Station.objects.create(
+            esr_code=100003,
+            short_name="C",
+            full_name="Station C",
+            region=region,
+            railroad=railroad,
+        )
+        self.other_destination = Station.objects.create(
+            esr_code=100004,
+            short_name="D",
+            full_name="Station D",
+            region=region,
+            railroad=railroad,
+        )
+        self.other_route = self._create_route(
+            rzd=Decimal("200.00"),
+            cargo_code=1002,
+            route_code="R-ST-002",
+        )
+        self.other_route.origin_station = self.other_origin
+        self.other_route.destination_station = self.other_destination
+        self.other_route.save(update_fields=["origin_station", "destination_station"])
+
+    def test_apply_tariff_conditions_include_origin_station(self) -> None:
+        qs = Route.objects.filter(route_set=self.route_set)
+        conditions = [
+            {
+                "parameter": "origin_station",
+                "operator": "include",
+                "values": [str(self.origin_station.esr_code)],
+            }
+        ]
+        matched = apply_tariff_conditions(qs, conditions)
+        ids = set(matched.values_list("id", flat=True))
+        self.assertIn(self.route.id, ids)
+        self.assertNotIn(self.other_route.id, ids)
+
+    def test_build_rule_mask_numpy_origin_station_id_on_sidecar(self) -> None:
+        df = pd.DataFrame(
+            {
+                "origin_station_id": [
+                    self.origin_station.esr_code,
+                    self.other_origin.esr_code,
+                    self.origin_station.esr_code,
+                ],
+            },
+        )
+        conditions = [
+            {
+                "parameter": "origin_station",
+                "operator": "include",
+                "values": [str(self.origin_station.esr_code)],
+            }
+        ]
+        mask = build_rule_mask_numpy(df, conditions)
+        self.assertTrue(mask[0])
+        self.assertFalse(mask[1])
+        self.assertTrue(mask[2])
+
+    def test_tariff_rule_options_api_origin_station(self) -> None:
+        self.client = Client()
+        self.client.force_login(self.user)
+        url = reverse("scenarios:tariff_rule_options", args=[self.scenario.id])
+        response = self.client.get(url, {"parameter": "origin_station"})
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["success"])
+        self.assertEqual(
+            payload["items"],
+            [
+                {"value": self.origin_station.esr_code, "text": "100001 — A"},
+                {"value": self.other_origin.esr_code, "text": "100003 — C"},
+            ],
+        )
+
+
 class CargoCategoryFlagsTariffConditionsTests(TariffLoadServiceTestMixin, TestCase):
     def setUp(self) -> None:
         super().setUp()
@@ -3248,7 +3331,7 @@ class CargoCategoryFlagsTariffConditionsTests(TariffLoadServiceTestMixin, TestCa
         meta = load_mart_meta(parquet_path)
         assert meta is not None
         self.assertEqual(meta.sidecar_schema_version, SIDECAR_SCHEMA_VERSION)
-        self.assertEqual(meta.sidecar_schema_version, 8)
+        self.assertEqual(meta.sidecar_schema_version, 11)
 
 
 class ShipmentCategoryTariffConditionsTests(TariffLoadServiceTestMixin, TestCase):

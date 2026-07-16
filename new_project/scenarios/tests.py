@@ -1160,6 +1160,75 @@ class TariffRuleOptionsApiTests(TestCase):
         texts = [item["text"] for item in payload["items"]]
         self.assertEqual(texts, ["Уголь каменный", "Нефтяные грузы"])
 
+    def test_origin_station_options_return_distinct_route_set_stations(self) -> None:
+        from core.models import (
+            Cargo,
+            CargoGroup,
+            MessageType,
+            RailRoad,
+            Region,
+            Route,
+            ShipmentType,
+            Station,
+            WagonKind,
+        )
+
+        railroad, _ = RailRoad.objects.get_or_create(code="02", defaults={"name": "Road 2"})
+        region, _ = Region.objects.get_or_create(
+            short_name="R2",
+            full_name="Region 2",
+            type="область",
+        )
+        other_origin = Station.objects.create(
+            esr_code=200003,
+            short_name="C",
+            full_name="Station C",
+            region=region,
+            railroad=railroad,
+        )
+        other_destination = Station.objects.create(
+            esr_code=200004,
+            short_name="D",
+            full_name="Station D",
+            region=region,
+            railroad=railroad,
+        )
+        cargo_group = CargoGroup.objects.get(code=1)
+        wagon_kind = WagonKind.objects.get(code="WK")
+        shipment_type = ShipmentType.objects.get(code="ST")
+        message_type = MessageType.objects.get(code="MT")
+        cargo = Cargo.objects.create(
+            code=3003,
+            name="Cargo 3",
+            cargo_group=cargo_group,
+        )
+        Route.objects.create(
+            route_set=self.route_set,
+            cargo=cargo,
+            origin_station=other_origin,
+            destination_station=other_destination,
+            wagon_kind=wagon_kind,
+            shipment_type=shipment_type,
+            message_type=message_type,
+            route_code="OPT-3",
+        )
+
+        url = self.reverse(
+            "scenarios:tariff_rule_options",
+            kwargs={"scenario_id": self.scenario.id},
+        )
+        response = self.client.get(url, {"parameter": "origin_station"})
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["success"])
+        self.assertEqual(
+            payload["items"],
+            [
+                {"value": 200001, "text": "200001 — A"},
+                {"value": 200003, "text": "200003 — C"},
+            ],
+        )
+
 
 class ElasticityServiceTests(TestCase):
     def setUp(self) -> None:

@@ -1,6 +1,14 @@
 from __future__ import annotations
 
-from core.models import Cargo, CargoGroup, MessageType, Route, ShipmentType, WagonKind
+from core.models import (
+    Cargo,
+    CargoGroup,
+    MessageType,
+    Route,
+    ShipmentType,
+    Station,
+    WagonKind,
+)
 from core.domain.cargo.formatting import (
     format_app_cargo_code,
     format_cargo_code_3,
@@ -81,7 +89,12 @@ def resolve_condition_value_labels(*, parameter: str, values) -> list[str]:
         labels = {"yes": "Да", "no": "Нет"}
         return [labels.get(str(value).strip().lower(), str(value)) for value in vals]
 
-    if parameter in {"origin_railroad", "destination_railroad", "shipper_holding", "distance_belt"}:
+    if parameter in {
+        "origin_railroad",
+        "destination_railroad",
+        "shipper_holding",
+        "distance_belt",
+    }:
         return [str(value) for value in vals]
 
     if parameter == "shipper":
@@ -104,6 +117,24 @@ def resolve_condition_value_labels(*, parameter: str, values) -> list[str]:
             name = row.get("shipper__name") or shipper_id
             labels[shipper_id] = f"{name} ({holding})" if holding else name
         return [labels.get(str(value), str(value)) for value in vals]
+
+    if parameter in {"origin_station", "destination_station"}:
+        codes = []
+        for value in vals:
+            try:
+                codes.append(int(value))
+            except (TypeError, ValueError):
+                continue
+        names = {
+            str(item.esr_code): (
+                item.short_name or item.full_name or str(item.esr_code)
+            )
+            for item in Station.objects.filter(esr_code__in=codes)
+        }
+        return [
+            f"{value} — {names[str(value)]}" if str(value) in names else str(value)
+            for value in vals
+        ]
 
     return [str(value) for value in vals]
 

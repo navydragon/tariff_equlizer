@@ -3,11 +3,24 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from calculations.domain.services.route_mart_store import MartMeta, MartSidecarView
+from calculations.domain.services.route_mart_store import (
+    MartMeta,
+    MartSidecarView,
+)
 from core.domain.cargo.formatting import format_cargo_code_3
 
 _CARGO_CODE_3_COLUMNS = frozenset({"cargo_code_3", "cargo_code_izpod_3"})
 _BOOL_PARAMETERS = frozenset({"is_consumer_goods", "is_food_goods"})
+_INT_PARAMETERS = frozenset(
+    {
+        "wagon_kind",
+        "shipment_type",
+        "message_type",
+        "shipper",
+        "origin_station",
+        "destination_station",
+    },
+)
 
 PARAMETER_COLUMN_MAP = {
     "cargo_group": "cargo_group_code",
@@ -17,6 +30,8 @@ PARAMETER_COLUMN_MAP = {
     "cargo_group_izpod": "cargo_group_izpod",
     "origin_railroad": "origin_railroad_code",
     "destination_railroad": "destination_railroad_code",
+    "origin_station": "origin_station_id",
+    "destination_station": "destination_station_id",
     "wagon_kind": "wagon_kind_id",
     "shipment_type": "shipment_type_id",
     "message_type": "message_type_id",
@@ -364,7 +379,7 @@ def build_rule_mask_numpy(
                 mask &= False
             continue
 
-        if parameter in {"wagon_kind", "shipment_type", "message_type", "shipper"}:
+        if parameter in _INT_PARAMETERS:
             compare_vals: list = []
             for val in vals:
                 try:
@@ -478,7 +493,7 @@ def build_rule_mask(df: pd.DataFrame, conditions: list[dict]) -> pd.Series:
             continue
 
         series = df[column]
-        if parameter in {"wagon_kind", "shipment_type", "message_type", "shipper"}:
+        if parameter in _INT_PARAMETERS:
             compare_vals = []
             for val in vals:
                 try:
