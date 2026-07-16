@@ -1,6 +1,12 @@
 from typing import Optional
 
-from scenarios.models import TariffRule, TariffRuleCondition, TariffRuleYearValue
+from django.db.models import Case, IntegerField, Max, When
+
+from scenarios.models import (
+    TariffRule,
+    TariffRuleCondition,
+    TariffRuleYearValue,
+)
 
 
 class TariffRuleRepository:
@@ -9,6 +15,46 @@ class TariffRuleRepository:
             TariffRule.objects.filter(scenario_id=scenario_id)
             .prefetch_related("conditions", "year_values")
             .order_by("position", "id")
+        )
+
+    def next_position(self, scenario_id: int) -> int:
+        max_pos = (
+            TariffRule.objects.filter(scenario_id=scenario_id).aggregate(
+                Max("position")
+            )["position__max"]
+        )
+        if max_pos is None:
+            return 1
+        return int(max_pos) + 1
+
+    def reorder_by_ids(
+        self, scenario_id: int, rule_ids: list[int]
+    ) -> None:
+        """Перезаписывает `position` по переданному порядку."""
+        if not rule_ids:
+            return
+
+        # Защита от некорректных/чужих id на уровне слоя БД
+        # (сервис должен делать валидацию).
+        existing_ids = list(
+            TariffRule.objects.filter(
+                scenario_id=scenario_id, id__in=rule_ids
+            ).values_list("id", flat=True)
+        )
+        if not existing_ids:
+            return
+
+        position_by_id = {rid: idx + 1 for idx, rid in enumerate(rule_ids)}
+
+        when_clauses = [
+            When(id=rid, then=position_by_id[rid]) for rid in existing_ids
+        ]
+        TariffRule.objects.filter(
+            scenario_id=scenario_id, id__in=existing_ids
+        ).update(
+            position=Case(
+                *when_clauses, output_field=IntegerField()
+            )
         )
 
     def get_by_id(self, rule_id: int) -> Optional[TariffRule]:
@@ -51,7 +97,9 @@ class TariffRuleRepository:
         except TariffRule.DoesNotExist:
             return False
 
-    def replace_conditions(self, rule: TariffRule, conditions: list[dict]) -> None:
+    def replace_conditions(
+        self, rule: TariffRule, conditions: list[dict]
+    ) -> None:
         TariffRuleCondition.objects.filter(tariff_rule=rule).delete()
         if not conditions:
             return
@@ -77,4 +125,3 @@ class TariffRuleRepository:
                 year=int(year_str),
                 defaults={"coefficient": coef},
             )
-

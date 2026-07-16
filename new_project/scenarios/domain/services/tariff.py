@@ -14,6 +14,9 @@ from scenarios.domain.services.scenario_access import ScenarioAccessHelper
 
 
 ERR_RULE_NOT_FOUND = "Тарифное решение не найдено"
+ERR_RULES_REORDER_INVALID = "Некорректный список правил"
+ERR_RULES_REORDER_INCOMPLETE = "Нужно передать все правила сценария"
+ERR_RULES_REORDER_DUPLICATES = "В списке правил есть дубликаты"
 
 
 class TariffRuleService:
@@ -62,7 +65,9 @@ class TariffRuleService:
         if base_percent_dec < 0 or base_percent_dec > 200:
             return None, ["% покрытия базы должен быть в диапазоне 0–200"]
 
-        position = int(dto.position) if dto.position is not None else 0
+        position = (
+            int(dto.position) if dto.position is not None else self.repository.next_position(scenario.id)
+        )
         is_enabled = dto.is_enabled if dto.is_enabled is not None else True
 
         rule = self.repository.create(
@@ -86,6 +91,74 @@ class TariffRuleService:
 
         refreshed = self.repository.get_by_id(rule.id)
         return TariffRuleDTO.from_model(refreshed), []
+
+    @transaction.atomic
+    def reorder_rules(
+        self,
+        scenario_id: int,
+        rule_ids: list[int],
+        user: User,
+    ) -> tuple[Optional[list[TariffRuleDTO]], list[str]]:
+        scenario, errors = self._access.require_scenario_write(scenario_id, user)
+        if errors:
+            return None, errors
+
+        if not rule_ids:
+            return None, [ERR_RULES_REORDER_INVALID]
+
+        if len(set(rule_ids)) != len(rule_ids):
+            return None, [ERR_RULES_REORDER_DUPLICATES]
+
+        all_rules = self.repository.list_by_scenario(scenario_id)
+        all_ids = {r.id for r in all_rules}
+        if set(rule_ids) != all_ids or len(rule_ids) != len(all_ids):
+            return None, [ERR_RULES_REORDER_INCOMPLETE]
+
+        for rid in rule_ids:
+            if rid not in all_ids:
+                return None, [ERR_RULES_REORDER_INVALID]
+
+        self.repository.reorder_by_ids(scenario_id=scenario.id, rule_ids=rule_ids)
+        refreshed_rules = self.repository.list_by_scenario(scenario.id)
+        return ([TariffRuleDTO.from_model(r) for r in refreshed_rules], [])
+
+    @transaction.atomic
+    def move_rule(
+        self,
+        rule_id: int,
+        direction: str,
+        user: User,
+    ) -> tuple[Optional[list[TariffRuleDTO]], list[str]]:
+        rule = self.repository.get_by_id(rule_id)
+        if not rule:
+            return None, [ERR_RULE_NOT_FOUND]
+
+        scenario_id = rule.scenario_id
+        scenario, errors = self._access.require_scenario_write(scenario_id, user)
+        if errors:
+            return None, errors
+
+        ordered_rules = self.repository.list_by_scenario(scenario_id)
+        ordered_ids = [r.id for r in ordered_rules]
+
+        idx = ordered_ids.index(rule_id) if rule_id in ordered_ids else -1
+        if idx < 0:
+            return None, [ERR_RULE_NOT_FOUND]
+
+        if direction == "up":
+            if idx == 0:
+                return None, ["Уже на первой позиции"]
+            ordered_ids[idx - 1], ordered_ids[idx] = ordered_ids[idx], ordered_ids[idx - 1]
+        elif direction == "down":
+            if idx == len(ordered_ids) - 1:
+                return None, ["Уже на последней позиции"]
+            ordered_ids[idx], ordered_ids[idx + 1] = ordered_ids[idx + 1], ordered_ids[idx]
+        else:
+            return None, ["Неверный direction: ожидается up или down"]
+
+        self.repository.reorder_by_ids(scenario_id=scenario.id, rule_ids=ordered_ids)
+        refreshed_rules = self.repository.list_by_scenario(scenario.id)
+        return ([TariffRuleDTO.from_model(r) for r in refreshed_rules], [])
 
     @transaction.atomic
     def update_rule(

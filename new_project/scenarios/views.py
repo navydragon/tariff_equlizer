@@ -523,6 +523,82 @@ def tariff_rule_set_enabled_api(request, rule_id):
 
 
 @login_required
+@require_http_methods(["POST"])
+def tariff_rule_move_api(request, rule_id):
+    """AJAX endpoint (JSON) для смены позиции тарифного решения (up/down)."""
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse(
+            {"success": False, "error": "Неверный формат JSON"},
+            status=400,
+        )
+
+    direction = data.get("direction")
+    if direction not in ("up", "down"):
+        return JsonResponse(
+            {"success": False, "errors": ["Неверный direction: ожидается up или down"]},
+            status=400,
+        )
+
+    service = TariffRuleService()
+    rules, errors = service.move_rule(
+        rule_id=rule_id,
+        direction=direction,
+        user=request.user,
+    )
+    if errors:
+        return JsonResponse({"success": False, "errors": errors}, status=400)
+
+    return JsonResponse(
+        {
+            "success": True,
+            "rules": [{"id": r.id, "position": r.position} for r in (rules or [])],
+            "rebuild": _NO_REBUILD,
+        }
+    )
+
+
+@login_required
+@require_http_methods(["POST"])
+def tariff_rule_reorder_api(request, scenario_id):
+    """AJAX endpoint (JSON) для перестановки правил по переданному списку id."""
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse(
+            {"success": False, "error": "Неверный формат JSON"},
+            status=400,
+        )
+
+    rule_ids = data.get("rule_ids") or []
+    try:
+        rule_ids = [int(x) for x in rule_ids]
+    except (TypeError, ValueError):
+        return JsonResponse(
+            {"success": False, "errors": ["Некорректный rule_ids"]},
+            status=400,
+        )
+
+    service = TariffRuleService()
+    rules, errors = service.reorder_rules(
+        scenario_id=scenario_id,
+        rule_ids=rule_ids,
+        user=request.user,
+    )
+    if errors:
+        return JsonResponse({"success": False, "errors": errors}, status=400)
+
+    return JsonResponse(
+        {
+            "success": True,
+            "rules": [{"id": r.id, "position": r.position} for r in (rules or [])],
+            "rebuild": _NO_REBUILD,
+        }
+    )
+
+
+@login_required
 @require_http_methods(["GET"])
 def tariff_rule_options_api(request, scenario_id):
     parameter = (request.GET.get("parameter") or "").strip()

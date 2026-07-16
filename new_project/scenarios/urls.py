@@ -73,6 +73,16 @@ urlpatterns = [
         views.tariff_rule_stats_api,
         name="tariff_rule_stats",
     ),
+    path(
+        "api/tariff-rules/<int:rule_id>/move/",
+        views.tariff_rule_move_api,
+        name="tariff_rule_move",
+    ),
+    path(
+        "api/<int:scenario_id>/tariff-rules/reorder/",
+        views.tariff_rule_reorder_api,
+        name="tariff_rule_reorder",
+    ),
 
     # BTD categories API
     path(

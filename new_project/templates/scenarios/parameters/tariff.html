@@ -47,6 +47,46 @@
   .tariff-rule-actions .btn-group {
     flex-shrink: 0;
   }
+
+  .tariff-rule-order-cell {
+    white-space: nowrap;
+    width: 160px;
+  }
+
+  .tariff-rule-order-cell {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .tariff-rule-order-arrows {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    flex-shrink: 0;
+  }
+
+  .tariff-rule-order-arrow-btn {
+    padding: 0.15rem 0.35rem;
+    line-height: 1;
+  }
+
+  .tariff-rule-drag-handle {
+    cursor: grab;
+    user-select: none;
+    display: inline-flex;
+    align-items: center;
+    color: var(--tblr-secondary);
+  }
+
+  .tariff-rule-dragging {
+    opacity: 0.5;
+  }
+
+  .tariff-rule-drag-over {
+    outline: 2px solid var(--tblr-primary);
+    outline-offset: -2px;
+  }
 </style>
 
 <div class="card">
@@ -63,6 +103,8 @@
       data-tariff-rules-update-url-template-value="{% url 'scenarios:tariff_rule_update' 0 %}"
       data-tariff-rules-delete-url-template-value="{% url 'scenarios:tariff_rule_delete' 0 %}"
       data-tariff-rules-set-enabled-url-template-value="{% url 'scenarios:tariff_rule_set_enabled' 0 %}"
+      data-tariff-rules-move-url-template-value="{% url 'scenarios:tariff_rule_move' 0 %}"
+      data-tariff-rules-reorder-url-value="{% url 'scenarios:tariff_rule_reorder' scenario.id %}"
       data-tariff-rules-options-url-template-value="{% url 'scenarios:tariff_rule_options' scenario.id %}"
       data-tariff-rules-stats-url-value="{% url 'scenarios:tariff_rule_stats' scenario.id %}"
       data-tariff-rules-start-year-value="{{ scenario.start_year }}"
@@ -80,7 +122,7 @@
         <table class="table table-vcenter">
           <thead>
             <tr>
-              <th style="width: 56px;">#</th>
+              <th style="width: 160px;">Порядок</th>
               <th style="min-width: 180px;">Название</th>
               <th style="min-width: 280px;">Условия (категории маршрутов)</th>
               <th style="min-width: 160px;">Коэффициенты по годам</th>

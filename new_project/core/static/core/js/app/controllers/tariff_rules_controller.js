@@ -188,6 +188,8 @@ import { renderErrors } from "../lib/errors.js";
       updateUrlTemplate: String,
       deleteUrlTemplate: String,
       setEnabledUrlTemplate: String,
+      moveUrlTemplate: String,
+      reorderUrl: String,
       optionsUrlTemplate: String,
       statsUrl: String,
       startYear: Number,
@@ -202,6 +204,8 @@ import { renderErrors } from "../lib/errors.js";
         editLoadId: 0,
         suppressCoverageRefresh: false,
         togglingRuleIds: new Set(),
+        reordering: false,
+        draggingRuleId: null,
       };
       this.statsDebounceTimer = null;
 
@@ -256,6 +260,8 @@ import { renderErrors } from "../lib/errors.js";
 
       this.tbodyTarget.innerHTML = this.state.rules
         .map((r, idx) => {
+          const isFirst = idx === 0;
+          const isLast = idx === this.state.rules.length - 1;
           const bp = r.base_percent != null ? String(r.base_percent) : "";
           const isEnabled = r.is_enabled !== false;
           const rowClass = isEnabled ? "" : "tariff-rule-disabled";
@@ -273,8 +279,36 @@ import { renderErrors } from "../lib/errors.js";
           );
           const isToggling = this.state.togglingRuleIds.has(r.id);
           return `
-            <tr data-rule-id="${r.id}" class="${rowClass}">
-              <td class="text-muted">${idx + 1}</td>
+            <tr data-rule-id="${r.id}" class="${rowClass}"
+                data-action="dragover->tariff-rules#allowDrop drop->tariff-rules#handleDrop">
+              <td class="tariff-rule-order-cell">
+                <span class="tariff-rule-drag-handle"
+                      draggable="true"
+                      data-rule-id="${r.id}"
+                      title="Перетаскивать"
+                      data-action="dragstart->tariff-rules#handleDragStart dragend->tariff-rules#handleDragEnd">
+                  <i class="ti ti-dots-vertical"></i>
+                </span>
+                <span class="text-muted">${idx + 1}</span>
+                <div class="tariff-rule-order-arrows btn-group-vertical" role="group" aria-label="Порядок">
+                  <button type="button"
+                          class="btn btn-sm btn-ghost-secondary tariff-rule-order-arrow-btn"
+                          data-action="tariff-rules#moveRule"
+                          data-rule-id="${r.id}"
+                          data-direction="up"
+                          ${isFirst ? "disabled" : ""} title="Поднять выше">
+                    <i class="ti ti-arrow-up"></i>
+                  </button>
+                  <button type="button"
+                          class="btn btn-sm btn-ghost-secondary tariff-rule-order-arrow-btn"
+                          data-action="tariff-rules#moveRule"
+                          data-rule-id="${r.id}"
+                          data-direction="down"
+                          ${isLast ? "disabled" : ""} title="Опустить ниже">
+                    <i class="ti ti-arrow-down"></i>
+                  </button>
+                </div>
+              </td>
               <td class="fw-medium">${escapeHtml(r.name || "")}${disabledBadge}</td>
               <td class="small">${conditionsHtml}</td>
               <td class="small">${yearsHtml}</td>
@@ -305,6 +339,134 @@ import { renderErrors } from "../lib/errors.js";
           `;
         })
         .join("");
+    }
+
+    // === Reorder (up/down + drag&drop) ===
+    async moveRule(event) {
+      if (this.state.reordering) return;
+
+      const ruleId = parseInt(event.currentTarget.dataset.ruleId || "0", 10);
+      const direction = event.currentTarget.dataset.direction || "";
+      if (!ruleId) return;
+      if (direction !== "up" && direction !== "down") return;
+
+      this.state.reordering = true;
+      try {
+        const url = buildUrl(this.moveUrlTemplateValue, ruleId);
+        const { data } = await fetchJson(url, {
+          method: "POST",
+          body: { direction },
+        });
+        if (!data || !data.success) {
+          this.showToast("error", "Ошибка смены порядка");
+          return;
+        }
+        await this.loadRules();
+        this.showToast("success", "Порядок обновлён");
+      } catch (_e) {
+        this.showToast("error", "Ошибка смены порядка");
+      } finally {
+        this.state.reordering = false;
+      }
+    }
+
+    handleDragStart(event) {
+      if (this.state.reordering) return;
+
+      const ruleId = parseInt(event.currentTarget.dataset.ruleId || "0", 10);
+      if (!ruleId) return;
+
+      this.state.draggingRuleId = ruleId;
+      const tr = event.currentTarget.closest("tr");
+      if (tr) tr.classList.add("tariff-rule-dragging");
+
+      try {
+        event.dataTransfer.setData("text/plain", String(ruleId));
+        event.dataTransfer.effectAllowed = "move";
+      } catch (_e) {
+        // ignore
+      }
+    }
+
+    handleDragEnd(event) {
+      this.state.draggingRuleId = null;
+      const tr = event.currentTarget.closest("tr");
+      if (tr) tr.classList.remove("tariff-rule-dragging");
+    }
+
+    allowDrop(event) {
+      if (this.state.reordering) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+
+      if (this.tbodyTarget) {
+        this.tbodyTarget
+          .querySelectorAll("tr.tariff-rule-drag-over")
+          .forEach((el) => el.classList.remove("tariff-rule-drag-over"));
+      }
+
+      const tr = event.currentTarget;
+      if (tr && tr.classList) tr.classList.add("tariff-rule-drag-over");
+    }
+
+    handleDrop(event) {
+      if (this.state.reordering) return;
+      event.preventDefault();
+
+      const draggedRuleIdRaw =
+        event.dataTransfer && event.dataTransfer.getData
+          ? event.dataTransfer.getData("text/plain")
+          : null;
+      const draggedRuleId = parseInt(draggedRuleIdRaw || this.state.draggingRuleId || "0", 10);
+      const targetRuleId = parseInt(
+        event.currentTarget.dataset.ruleId || "0",
+        10,
+      );
+
+      if (!draggedRuleId || !targetRuleId) return;
+      // Удаляем визуальную подсветку.
+      event.currentTarget.classList.remove("tariff-rule-drag-over");
+      if (draggedRuleId === targetRuleId) return;
+
+      const rows = Array.from(
+        this.tbodyTarget.querySelectorAll("tr[data-rule-id]"),
+      );
+      const ids = rows
+        .map((tr) => parseInt(tr.dataset.ruleId || "0", 10))
+        .filter((id) => !!id);
+
+      const fromIdx = ids.indexOf(draggedRuleId);
+      const toIdx = ids.indexOf(targetRuleId);
+      if (fromIdx < 0 || toIdx < 0) return;
+
+      ids.splice(fromIdx, 1);
+      const insertionIdx = fromIdx < toIdx ? toIdx - 1 : toIdx;
+      ids.splice(insertionIdx, 0, draggedRuleId);
+
+      this.reorderByIds(ids);
+    }
+
+    async reorderByIds(ruleIds) {
+      if (this.state.reordering) return;
+      if (!Array.isArray(ruleIds) || !ruleIds.length) return;
+
+      this.state.reordering = true;
+      try {
+        const payload = { rule_ids: ruleIds };
+        const { data } = await fetchJson(this.reorderUrlValue, {
+          method: "POST",
+          body: payload,
+        });
+        if (!data || !data.success) {
+          this.showToast("error", "Ошибка перестановки");
+          return;
+        }
+        await this.loadRules();
+      } catch (_e) {
+        this.showToast("error", "Ошибка перестановки");
+      } finally {
+        this.state.reordering = false;
+      }
     }
 
     // === Modal ===

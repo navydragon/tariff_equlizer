@@ -2313,6 +2313,190 @@ class ScenarioCopyElasticityTests(TestCase):
         self.assertEqual(copied.elasticity_set_id, elasticity_set.id)
 
 
+class TariffRuleReorderApiTests(TestCase):
+    def setUp(self) -> None:
+        import json
+
+        from django.test import Client
+        from django.urls import reverse
+
+        self.client = Client()
+        self.user = User.objects.create_user(login="reorder_user", password="test_pass")
+        self.client.force_login(self.user)
+
+        self.route_set = RouteSet.objects.create(
+            name="RS_TARIFF_REORDER",
+            code="RS_TARIFF_REORDER",
+        )
+        self.scenario = Scenario.objects.create(
+            name="Tariff reorder scenario",
+            start_year=2025,
+            end_year=2026,
+            route_set=self.route_set,
+            author=self.user,
+        )
+
+        # Для простоты: без условий/значений, но с непустыми position.
+        self.rule_1 = TariffRule.objects.create(
+            scenario=self.scenario,
+            name="R1",
+            base_percent=Decimal("100"),
+            position=1,
+            is_enabled=True,
+        )
+        self.rule_2 = TariffRule.objects.create(
+            scenario=self.scenario,
+            name="R2",
+            base_percent=Decimal("100"),
+            position=2,
+            is_enabled=True,
+        )
+        self.rule_3 = TariffRule.objects.create(
+            scenario=self.scenario,
+            name="R3",
+            base_percent=Decimal("100"),
+            position=3,
+            is_enabled=True,
+        )
+
+        self.reverse = reverse
+        self.json = json
+
+    def test_move_up_changes_order(self) -> None:
+        url = self.reverse(
+            "scenarios:tariff_rule_move",
+            kwargs={"rule_id": self.rule_2.id},
+        )
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                url,
+                data=self.json.dumps({"direction": "up"}),
+                content_type="application/json",
+            )
+        self.assertEqual(response.status_code, 200)
+        self.rule_1.refresh_from_db()
+        self.rule_2.refresh_from_db()
+        self.assertEqual(self.rule_2.position, 1)
+        self.assertEqual(self.rule_1.position, 2)
+
+        list_url = self.reverse(
+            "scenarios:tariff_rule_list",
+            kwargs={"scenario_id": self.scenario.id},
+        )
+        payload = self.client.get(list_url).json()
+        self.assertTrue(payload["success"])
+        ids = [r["id"] for r in payload["rules"]]
+        self.assertEqual(ids, [self.rule_2.id, self.rule_1.id, self.rule_3.id])
+
+    def test_move_down_changes_order(self) -> None:
+        url = self.reverse(
+            "scenarios:tariff_rule_move",
+            kwargs={"rule_id": self.rule_2.id},
+        )
+        response = self.client.post(
+            url,
+            data=self.json.dumps({"direction": "down"}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+
+        self.rule_3.refresh_from_db()
+        self.rule_2.refresh_from_db()
+        self.assertEqual(self.rule_3.position, 2)
+        self.assertEqual(self.rule_2.position, 3)
+
+        list_url = self.reverse(
+            "scenarios:tariff_rule_list",
+            kwargs={"scenario_id": self.scenario.id},
+        )
+        payload = self.client.get(list_url).json()
+        ids = [r["id"] for r in payload["rules"]]
+        self.assertEqual(ids, [self.rule_1.id, self.rule_3.id, self.rule_2.id])
+
+    def test_move_up_on_first_position_rejected(self) -> None:
+        url = self.reverse(
+            "scenarios:tariff_rule_move",
+            kwargs={"rule_id": self.rule_1.id},
+        )
+        response = self.client.post(
+            url,
+            data=self.json.dumps({"direction": "up"}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+        payload = response.json()
+        self.assertFalse(payload["success"])
+        self.assertTrue(any("первой позиции" in e for e in payload["errors"]))
+
+    def test_move_down_on_last_position_rejected(self) -> None:
+        url = self.reverse(
+            "scenarios:tariff_rule_move",
+            kwargs={"rule_id": self.rule_3.id},
+        )
+        response = self.client.post(
+            url,
+            data=self.json.dumps({"direction": "down"}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+        payload = response.json()
+        self.assertFalse(payload["success"])
+        self.assertTrue(any("последней позиции" in e for e in payload["errors"]))
+
+    def test_reorder_by_rule_ids(self) -> None:
+        reorder_url = self.reverse(
+            "scenarios:tariff_rule_reorder",
+            kwargs={"scenario_id": self.scenario.id},
+        )
+        response = self.client.post(
+            reorder_url,
+            data=self.json.dumps({"rule_ids": [self.rule_3.id, self.rule_1.id, self.rule_2.id]}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+
+        list_url = self.reverse(
+            "scenarios:tariff_rule_list",
+            kwargs={"scenario_id": self.scenario.id},
+        )
+        payload = self.client.get(list_url).json()
+        ids = [r["id"] for r in payload["rules"]]
+        self.assertEqual(ids, [self.rule_3.id, self.rule_1.id, self.rule_2.id])
+
+    def test_create_without_position_appends_to_end(self) -> None:
+        url = self.reverse(
+            "scenarios:tariff_rule_create",
+            kwargs={"scenario_id": self.scenario.id},
+        )
+        response = self.client.post(
+            url,
+            data=self.json.dumps({"name": "R4", "base_percent": "100"}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 201)
+        payload = response.json()
+        self.assertTrue(payload["success"])
+
+        created_id = payload["rule"]["id"]
+        created = TariffRule.objects.get(id=created_id)
+        self.assertEqual(created.position, 4)
+
+    def test_reorder_rejects_incomplete_rule_ids(self) -> None:
+        reorder_url = self.reverse(
+            "scenarios:tariff_rule_reorder",
+            kwargs={"scenario_id": self.scenario.id},
+        )
+        response = self.client.post(
+            reorder_url,
+            data=self.json.dumps({"rule_ids": [self.rule_1.id, self.rule_2.id]}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+        payload = response.json()
+        self.assertFalse(payload["success"])
+        self.assertTrue(any("все правила" in e or "Нужно передать все" in e for e in payload["errors"]))
+
+
 class TariffRuleSetEnabledApiTests(TestCase):
     def setUp(self) -> None:
         import json
