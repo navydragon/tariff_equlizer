@@ -107,6 +107,12 @@ class Cargo(models.Model):
         blank=True,
         related_name="cargos",
     )
+    cargo_class = models.PositiveSmallIntegerField(
+        "Класс",
+        null=True,
+        blank=True,
+        db_index=True,
+    )
     is_consumer_goods = models.BooleanField(
         "Потребительские товары",
         default=False,

@@ -132,7 +132,8 @@
             <tr>
               <th style="width: 10%;">Код</th>
               <th>Наименование</th>
-              <th style="width: 30%;">Группа груза</th>
+              <th style="width: 25%;">Группа груза</th>
+              <th style="width: 8%;">Класс</th>
               <th class="text-end" style="width: 15%;">Действия</th>
             </tr>
           </thead>
@@ -218,6 +219,16 @@
               {% endfor %}
             </select>
           </div>
+          <div class="mb-3">
+            <label class="form-label" for="cargoCreateClass">Класс</label>
+            <input
+              type="number"
+              min="1"
+              class="form-control"
+              id="cargoCreateClass"
+              placeholder="Например: 1, 2, 3"
+            />
+          </div>
         </form>
       </div>
       <div class="modal-footer">
@@ -285,6 +296,16 @@
                 <option value="{{ group.code }}">{{ group.name }}</option>
               {% endfor %}
             </select>
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="cargoEditClass">Класс</label>
+            <input
+              type="number"
+              min="1"
+              class="form-control"
+              id="cargoEditClass"
+              placeholder="Например: 1, 2, 3"
+            />
           </div>
         </form>
       </div>

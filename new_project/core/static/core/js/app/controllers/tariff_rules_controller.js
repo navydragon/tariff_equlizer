@@ -11,6 +11,7 @@ import { renderErrors } from "../lib/errors.js";
 
   const PARAMETERS = [
     { code: "cargo_group", label: "Группа груза", type: "choice" },
+    { code: "cargo_class", label: "Класс", type: "choice" },
     { code: "cargo_code", label: "Код груза", type: "choice" },
     { code: "cargo_code_3", label: "Код груза (3 знака)", type: "choice" },
     { code: "cargo_code_izpod_3", label: "Код груза из-под (3 знака)", type: "choice" },
@@ -39,6 +40,7 @@ import { renderErrors } from "../lib/errors.js";
   ];
 
   const PARAMETER_ALLOWED_OPERATORS = {
+    cargo_class: ["include", "exclude"],
     cargo_code_3: ["include", "exclude"],
     cargo_code_izpod_3: ["include", "exclude"],
     cargo_group_izpod: ["include", "exclude"],

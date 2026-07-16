@@ -3326,12 +3326,107 @@ class CargoCategoryFlagsTariffConditionsTests(TariffLoadServiceTestMixin, TestCa
         mask_keys = set(load_masks_npz(parquet_path))
         self.assertIn("is_consumer_goods", mask_keys)
         self.assertIn("is_food_goods", mask_keys)
+        self.assertIn("cargo_class", mask_keys)
         self.assertTrue(mask_keys.issubset(set(MART_RULE_MASK_SIDECAR_COLUMNS)))
 
         meta = load_mart_meta(parquet_path)
         assert meta is not None
         self.assertEqual(meta.sidecar_schema_version, SIDECAR_SCHEMA_VERSION)
-        self.assertEqual(meta.sidecar_schema_version, 11)
+        self.assertEqual(meta.sidecar_schema_version, 12)
+
+
+class CargoClassTariffConditionsTests(TariffLoadServiceTestMixin, TestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.route_class_1 = self._create_route(
+            rzd=Decimal("100.00"),
+            route_code="R-CL-1",
+            cargo_code=88101,
+        )
+        self.route_class_1.cargo.cargo_class = 1
+        self.route_class_1.cargo.save(update_fields=["cargo_class"])
+
+        self.route_class_2 = self._create_route(
+            rzd=Decimal("200.00"),
+            route_code="R-CL-2",
+            cargo_code=88201,
+        )
+        self.route_class_2.cargo.cargo_class = 2
+        self.route_class_2.cargo.save(update_fields=["cargo_class"])
+
+        self.route_no_class = self._create_route(
+            rzd=Decimal("300.00"),
+            route_code="R-CL-NONE",
+            cargo_code=88301,
+        )
+        self.route_no_class.cargo.cargo_class = None
+        self.route_no_class.cargo.save(update_fields=["cargo_class"])
+
+    def test_apply_tariff_conditions_include_cargo_class(self) -> None:
+        qs = Route.objects.filter(route_set=self.route_set)
+        matched = apply_tariff_conditions(
+            qs,
+            [
+                {
+                    "parameter": "cargo_class",
+                    "operator": "include",
+                    "values": ["1"],
+                }
+            ],
+        )
+        ids = set(matched.values_list("id", flat=True))
+        self.assertIn(self.route_class_1.id, ids)
+        self.assertNotIn(self.route_class_2.id, ids)
+        self.assertNotIn(self.route_no_class.id, ids)
+
+    def test_apply_tariff_conditions_exclude_cargo_class(self) -> None:
+        qs = Route.objects.filter(route_set=self.route_set)
+        matched = apply_tariff_conditions(
+            qs,
+            [
+                {
+                    "parameter": "cargo_class",
+                    "operator": "exclude",
+                    "values": ["1"],
+                }
+            ],
+        )
+        ids = set(matched.values_list("id", flat=True))
+        self.assertNotIn(self.route_class_1.id, ids)
+        self.assertIn(self.route_class_2.id, ids)
+        self.assertIn(self.route_no_class.id, ids)
+
+    def test_build_rule_mask_numpy_cargo_class_include(self) -> None:
+        df = pd.DataFrame({"cargo_class": [1, 2, 0]})
+        mask = build_rule_mask_numpy(
+            df,
+            [
+                {
+                    "parameter": "cargo_class",
+                    "operator": "include",
+                    "values": ["1", "2"],
+                }
+            ],
+        )
+        self.assertTrue(mask[0])
+        self.assertTrue(mask[1])
+        self.assertFalse(mask[2])
+
+    def test_tariff_rule_options_api_cargo_class(self) -> None:
+        self.client = Client()
+        self.client.force_login(self.user)
+        url = reverse("scenarios:tariff_rule_options", args=[self.scenario.id])
+        response = self.client.get(url, {"parameter": "cargo_class"})
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["success"])
+        self.assertEqual(
+            payload["items"],
+            [
+                {"value": 1, "text": "1"},
+                {"value": 2, "text": "2"},
+            ],
+        )
 
 
 class ShipmentCategoryTariffConditionsTests(TariffLoadServiceTestMixin, TestCase):

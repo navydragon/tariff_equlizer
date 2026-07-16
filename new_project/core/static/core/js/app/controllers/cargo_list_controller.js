@@ -143,7 +143,7 @@
 
             if (!data.success) {
               tbody.innerHTML =
-                '<tr><td colspan="4"><div class="alert alert-danger mb-0">' +
+                '<tr><td colspan="5"><div class="alert alert-danger mb-0">' +
                 this.escapeHtml(
                   (data.errors || []).join(", ") || "Ошибка загрузки",
                 ) +
@@ -174,7 +174,7 @@
             const tbody = this.hasTableBodyTarget ? this.tableBodyTarget : null;
             if (!tbody) return;
             tbody.innerHTML =
-              '<tr><td colspan="4"><div class="alert alert-danger mb-0">Ошибка загрузки грузов</div></td></tr>';
+              '<tr><td colspan="5"><div class="alert alert-danger mb-0">Ошибка загрузки грузов</div></td></tr>';
           });
       }
 
@@ -182,12 +182,17 @@
         const groupName = item.cargo_group_name
           ? this.escapeHtml(item.cargo_group_name)
           : '<span class="text-muted">—</span>';
+        const cargoClass =
+          item.cargo_class != null && item.cargo_class !== ""
+            ? this.escapeHtml(String(item.cargo_class))
+            : '<span class="text-muted">—</span>';
 
         return `
       <tr data-code="${item.code}">
         <td>${item.code}</td>
         <td>${this.escapeHtml(item.name)}</td>
         <td>${groupName}</td>
+        <td>${cargoClass}</td>
         <td class="text-end">
           <div class="btn-group" role="group" aria-label="Действия">
             <button
@@ -322,6 +327,8 @@
             document.getElementById("cargoEditName").value = item.name || "";
             const groupSelect = document.getElementById("cargoEditGroup");
             groupSelect.value = item.cargo_group_code || "";
+            document.getElementById("cargoEditClass").value =
+              item.cargo_class != null ? item.cargo_class : "";
 
             const modalEl = document.getElementById("cargoEditModal");
             const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
@@ -448,6 +455,7 @@
           );
           const name = document.getElementById("cargoCreateName").value;
           const groupValue = document.getElementById("cargoCreateGroup").value;
+          const classRaw = document.getElementById("cargoCreateClass").value;
 
           if (!code || code <= 0 || !name.trim()) {
             errorsContainer.innerHTML =
@@ -455,10 +463,21 @@
             return;
           }
 
+          let cargoClass = null;
+          if (classRaw !== "") {
+            cargoClass = parseInt(classRaw, 10);
+            if (!cargoClass || cargoClass < 1) {
+              errorsContainer.innerHTML =
+                '<div class="alert alert-danger">Класс должен быть целым числом ≥ 1</div>';
+              return;
+            }
+          }
+
           const payload = {
             code: code,
             name: name,
             cargo_group_code: groupValue || null,
+            cargo_class: cargoClass,
           };
 
           const url = this.createUrlValue || "";
@@ -514,6 +533,7 @@
           const code = document.getElementById("cargoEditCode").value;
           const name = document.getElementById("cargoEditName").value;
           const groupValue = document.getElementById("cargoEditGroup").value;
+          const classRaw = document.getElementById("cargoEditClass").value;
 
           if (!name.trim()) {
             errorsContainer.innerHTML =
@@ -521,9 +541,20 @@
             return;
           }
 
+          let cargoClass = "";
+          if (classRaw !== "") {
+            cargoClass = parseInt(classRaw, 10);
+            if (!cargoClass || cargoClass < 1) {
+              errorsContainer.innerHTML =
+                '<div class="alert alert-danger">Класс должен быть целым числом ≥ 1</div>';
+              return;
+            }
+          }
+
           const payload = {
             name: name,
             cargo_group_code: groupValue || null,
+            cargo_class: cargoClass,
           };
 
           const template = this.updateUrlTemplateValue || "";

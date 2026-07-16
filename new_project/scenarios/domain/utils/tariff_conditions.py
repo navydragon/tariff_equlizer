@@ -9,12 +9,13 @@ from core.models import Route
 _CARGO_CODE_3_PARAMETERS = frozenset({"cargo_code_3", "cargo_code_izpod_3"})
 _BOOL_PARAMETERS = frozenset({"is_consumer_goods", "is_food_goods"})
 _INT_ID_PARAMETERS = frozenset(
-    {"shipper", "origin_station", "destination_station"},
+    {"shipper", "origin_station", "destination_station", "cargo_class"},
 )
 
 
 FIELD_MAP = {
     "cargo_group": "cargo__cargo_group__code",
+    "cargo_class": "cargo__cargo_class",
     "cargo_code": "cargo__code",
     "cargo_code_3": "cargo_code_3",
     "cargo_code_izpod_3": "cargo_code_izpod_3",

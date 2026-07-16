@@ -98,6 +98,7 @@ def _build_routes_sql(*, route_set_id: int | None = None, parameterized: bool = 
             c.cargo_group_id AS cargo_group_id,
             COALESCE(c.is_consumer_goods, false) AS is_consumer_goods,
             COALESCE(c.is_food_goods, false) AS is_food_goods,
+            c.cargo_class AS cargo_class,
             mr.cargo_id AS mr_cargo_id,
             mr_c.cargo_group_id AS mr_cargo_group_id,
             mr.message_type_id AS mr_message_type_id,

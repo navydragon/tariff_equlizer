@@ -628,6 +628,14 @@ def tariff_rule_options_api(request, scenario_id):
             .order_by("cargo__cargo_group__position", "cargo__cargo_group__code")
         )
         items = [{"value": r["cargo__cargo_group__code"], "text": r["cargo__cargo_group__name"]} for r in rows]
+    elif parameter == "cargo_class":
+        rows = (
+            qs.exclude(cargo__cargo_class__isnull=True)
+            .values_list("cargo__cargo_class", flat=True)
+            .distinct()
+            .order_by("cargo__cargo_class")
+        )
+        items = [{"value": value, "text": str(value)} for value in rows]
     elif parameter == "cargo_code":
         rows = qs.values("cargo__code", "cargo__name").distinct().order_by("cargo__code")
         items = [

@@ -226,6 +226,7 @@ def cargo_list_api(request):
                     "name": item.name,
                     "cargo_group_code": item.cargo_group_code,
                     "cargo_group_name": item.cargo_group_name,
+                    "cargo_class": item.cargo_class,
                 }
                 for item in result.items
             ],
@@ -257,9 +258,23 @@ def cargo_detail_api(request, code: int):
                 "name": cargo.name,
                 "cargo_group_code": cargo.cargo_group_code,
                 "cargo_group_name": cargo.cargo_group_name,
+                "cargo_class": cargo.cargo_class,
             },
         }
     )
+
+
+def _parse_optional_cargo_class(raw_value):
+    """Парсит cargo_class из JSON. Возвращает (value|None, clear: bool, error|None)."""
+    if raw_value in (None, "null"):
+        return None, False, None
+    if raw_value == "":
+        return None, True, None
+    try:
+        value = int(raw_value)
+    except (TypeError, ValueError):
+        return None, False, "Класс груза должен быть целым числом"
+    return value, False, None
 
 
 @login_required
@@ -267,7 +282,7 @@ def cargo_detail_api(request, code: int):
 def cargo_create_api(request):
     """
     Создание нового груза.
-    Ожидает JSON: {code, name, cargo_group_code?}
+    Ожидает JSON: {code, name, cargo_group_code?, cargo_class?}
     """
     try:
         data = json.loads(request.body)
@@ -297,10 +312,17 @@ def cargo_create_api(request):
                 status=400,
             )
 
+    cargo_class, _clear_class, class_error = _parse_optional_cargo_class(
+        data.get("cargo_class")
+    )
+    if class_error:
+        return JsonResponse({"success": False, "errors": [class_error]}, status=400)
+
     dto = CreateCargoDTO(
         code=code,
         name=name,
         cargo_group_code=cargo_group_code,
+        cargo_class=cargo_class,
     )
 
     service = CargoService()
@@ -317,6 +339,7 @@ def cargo_create_api(request):
                 "name": cargo.name,
                 "cargo_group_code": cargo.cargo_group_code,
                 "cargo_group_name": cargo.cargo_group_name,
+                "cargo_class": cargo.cargo_class,
             },
         },
         status=201,
@@ -328,7 +351,7 @@ def cargo_create_api(request):
 def cargo_update_api(request, code: int):
     """
     Обновление существующего груза.
-    Ожидает JSON: {name?, cargo_group_code?}
+    Ожидает JSON: {name?, cargo_group_code?, cargo_class?}
     """
     try:
         data = json.loads(request.body)
@@ -354,9 +377,20 @@ def cargo_update_api(request, code: int):
                 status=400,
             )
 
+    cargo_class = None
+    clear_cargo_class = False
+    if "cargo_class" in data:
+        cargo_class, clear_cargo_class, class_error = _parse_optional_cargo_class(
+            data.get("cargo_class")
+        )
+        if class_error:
+            return JsonResponse({"success": False, "errors": [class_error]}, status=400)
+
     dto = UpdateCargoDTO(
         name=name,
         cargo_group_code=cargo_group_code,
+        cargo_class=cargo_class,
+        clear_cargo_class=clear_cargo_class,
     )
 
     service = CargoService()
@@ -373,6 +407,7 @@ def cargo_update_api(request, code: int):
                 "name": cargo.name,
                 "cargo_group_code": cargo.cargo_group_code,
                 "cargo_group_name": cargo.cargo_group_name,
+                "cargo_class": cargo.cargo_class,
             },
         }
     )

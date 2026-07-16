@@ -19,11 +19,13 @@ _INT_PARAMETERS = frozenset(
         "shipper",
         "origin_station",
         "destination_station",
+        "cargo_class",
     },
 )
 
 PARAMETER_COLUMN_MAP = {
     "cargo_group": "cargo_group_code",
+    "cargo_class": "cargo_class",
     "cargo_code": "cargo_code",
     "cargo_code_3": "cargo_code_3",
     "cargo_code_izpod_3": "cargo_code_izpod_3",

@@ -73,6 +73,7 @@ MART_RULE_MASK_SIDECAR_COLUMNS = (
     "message_type_id",
     "is_consumer_goods",
     "is_food_goods",
+    "cargo_class",
 )
 
 MART_ELASTICITY_SIDECAR_COLUMNS = (
@@ -94,7 +95,7 @@ MART_ELASTICITY_SIDECAR_COLUMNS = (
 )
 
 _MASK_SIDECAR_INT_COLUMNS = frozenset(
-    {"shipper_id", "shipment_type_id", "message_type_id"},
+    {"shipper_id", "shipment_type_id", "message_type_id", "cargo_class"},
 )
 
 _MASK_SIDECAR_INT32_COLUMNS = frozenset(
@@ -106,7 +107,7 @@ _MASK_SIDECAR_BOOL_COLUMNS = frozenset(
 )
 
 # Версия sidecar на диске (отдельные .npy + mmap); bump при смене dtype/колонок.
-SIDECAR_SCHEMA_VERSION = 11
+SIDECAR_SCHEMA_VERSION = 12
 # Legacy npz (до v4).
 MASKS_NPZ_SCHEMA_VERSION = 3
 MASKS_NPZ_META_KEYS = frozenset({"__schema_version__"})

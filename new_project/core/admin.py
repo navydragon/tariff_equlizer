@@ -110,10 +110,17 @@ class CargoGroupAdmin(admin.ModelAdmin):
 
 @admin.register(Cargo)
 class CargoAdmin(admin.ModelAdmin):
-    list_display = ("code", "name", "cargo_group", "is_consumer_goods", "is_food_goods")
+    list_display = (
+        "code",
+        "name",
+        "cargo_group",
+        "cargo_class",
+        "is_consumer_goods",
+        "is_food_goods",
+    )
     ordering = ("code",)
     search_fields = ("code", "name")
-    list_filter = ("cargo_group", "is_consumer_goods", "is_food_goods")
+    list_filter = ("cargo_group", "cargo_class", "is_consumer_goods", "is_food_goods")
 
 
 @admin.register(CargoCategoryPosition)

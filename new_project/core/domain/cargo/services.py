@@ -111,6 +111,7 @@ class CargoService:
             "code": dto.code,
             "name": dto.name.strip(),
             "cargo_group": group,
+            "cargo_class": dto.cargo_class,
         }
 
         cargo = self.repository.create(data)
@@ -143,6 +144,11 @@ class CargoService:
                 if not group:
                     return None, ["Указана несуществующая группа груза"]
                 data["cargo_group"] = group
+
+        if dto.clear_cargo_class:
+            data["cargo_class"] = None
+        elif dto.cargo_class is not None:
+            data["cargo_class"] = dto.cargo_class
 
         updated = self.repository.update(code, data)
         if not updated:
