@@ -399,15 +399,123 @@ def aggregate_compact_year_values(
     holdings: list[str],
     values_by_year: np.ndarray,
 ) -> dict[tuple[str, ...], dict[int, Decimal]]:
+    mask = _build_mask(
+        compact,
+        cargo_filter=set(cargo_groups) if cargo_groups else None,
+        holding_filter=set(holdings) if holdings else None,
+    )
+    return aggregate_compact_year_values_masked(
+        compact,
+        mask=mask,
+        values_by_year=values_by_year,
+        group_by=group_by,
+        group_by_inner=group_by_inner,
+    )
+
+
+def build_compact_filter_mask(
+    compact: CompactRouteEffects,
+    *,
+    cargo_groups: list[str],
+    holdings: list[str],
+) -> np.ndarray:
+    return _build_mask(
+        compact,
+        cargo_filter=set(cargo_groups) if cargo_groups else None,
+        holding_filter=set(holdings) if holdings else None,
+    )
+
+
+def aggregate_compact_totals_masked(
+    compact: CompactRouteEffects,
+    *,
+    mask: np.ndarray,
+    values_by_year: np.ndarray,
+) -> dict[int, Decimal]:
+    if not mask.any():
+        return {year: Decimal("0") for year in compact.years}
+    sums = values_by_year[mask].sum(axis=0)
+    return {
+        year: Decimal(str(float(sums[index])))
+        for index, year in enumerate(compact.years)
+    }
+
+
+def _bincount_decimal_sums(
+    codes: np.ndarray,
+    values: np.ndarray,
+) -> dict[int, Decimal]:
+    if codes.size == 0:
+        return {}
+    weighted = values.astype(_COMPUTE_DTYPE, copy=False)
+    sums = np.bincount(
+        codes.astype(np.int64, copy=False),
+        weights=weighted,
+    )
+    return {
+        code: Decimal(str(float(total)))
+        for code, total in enumerate(sums)
+        if total != 0
+    }
+
+
+def _aggregate_year_buckets_masked(
+    compact: CompactRouteEffects,
+    *,
+    mask: np.ndarray,
+    values: np.ndarray,
+    group_by: str,
+    group_by_inner: str,
+) -> dict[tuple[str, ...], Decimal]:
+    if not mask.any() or values.size == 0:
+        return {}
+
+    outer_col = group_by if group_by in compact.dimensions else "cargo_group"
+    outer_codes = compact.dimensions[outer_col][mask]
+    buckets: dict[tuple[str, ...], Decimal] = {}
+
+    if group_by_inner == "none":
+        for code, total in _bincount_decimal_sums(outer_codes, values).items():
+            label = _label_for_code(compact, outer_col, code)
+            buckets[(label,)] = total
+        return buckets
+
+    inner_col = group_by_inner
+    inner_codes = compact.dimensions[inner_col][mask]
+    for code, total in _bincount_decimal_sums(outer_codes, values).items():
+        outer_label = _label_for_code(compact, outer_col, code)
+        buckets[(outer_label, "ИТОГО")] = total
+
+    max_inner = int(inner_codes.max()) + 1 if inner_codes.size else 1
+    combined = (
+        outer_codes.astype(np.int64, copy=False) * max_inner
+        + inner_codes.astype(np.int64, copy=False)
+    )
+    for combined_code, total in _bincount_decimal_sums(combined, values).items():
+        outer_code = int(combined_code // max_inner)
+        inner_code = int(combined_code % max_inner)
+        outer_label = _label_for_code(compact, outer_col, outer_code)
+        inner_label = _label_for_code(compact, inner_col, inner_code)
+        buckets[(outer_label, inner_label)] = total
+    return buckets
+
+
+def aggregate_compact_year_values_masked(
+    compact: CompactRouteEffects,
+    *,
+    mask: np.ndarray,
+    values_by_year: np.ndarray,
+    group_by: str,
+    group_by_inner: str,
+) -> dict[tuple[str, ...], dict[int, Decimal]]:
     year_values: dict[tuple[str, ...], dict[int, Decimal]] = {}
     for year_index, year in enumerate(compact.years):
-        buckets = aggregate_compact_value(
+        buckets = _aggregate_year_buckets_masked(
             compact,
-            values=values_by_year[:, year_index],
+            mask=mask,
+            values=values_by_year[mask, year_index],
             group_by=group_by,
             group_by_inner=group_by_inner,
-            cargo_groups=cargo_groups,
-            holdings=holdings,
         )
         for key, value in buckets.items():
             year_values.setdefault(key, {})[year] = value

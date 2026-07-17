@@ -394,6 +394,8 @@ def get_compact_status(*, cache_key: str) -> dict[str, object]:
             "early_group_ready": False,
             "fallout_ready": False,
             "data_version": None,
+            "progress_pct": None,
+            "message": None,
         }
 
     data_version = payload.data_version
@@ -415,6 +417,16 @@ def get_compact_status(*, cache_key: str) -> dict[str, object]:
             data_version=data_version,
         )
 
+    progress_pct: float | None = None
+    message: str | None = None
+    if payload.compact_pending:
+        from calculations.domain.services.scenario_warm_status import get_warm_status
+
+        warm_status = get_warm_status(scenario_id=payload.scenario_id)
+        if warm_status is not None:
+            progress_pct = warm_status.get("progress_pct")
+            message = warm_status.get("message")
+
     if payload.compact_pending and data_version:
         if is_scenario_compact_on_disk(
             scenario_id=payload.scenario_id,
@@ -425,6 +437,8 @@ def get_compact_status(*, cache_key: str) -> dict[str, object]:
                 "early_group_ready": True,
                 "fallout_ready": fallout_ready,
                 "data_version": data_version,
+                "progress_pct": 100.0,
+                "message": "Готово",
             }
 
     compact_ready = not payload.compact_pending
@@ -433,4 +447,6 @@ def get_compact_status(*, cache_key: str) -> dict[str, object]:
         "early_group_ready": early_group_ready or compact_ready,
         "fallout_ready": fallout_ready,
         "data_version": data_version,
+        "progress_pct": 100.0 if compact_ready else progress_pct,
+        "message": "Готово" if compact_ready else message,
     }

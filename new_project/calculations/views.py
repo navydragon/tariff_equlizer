@@ -423,6 +423,8 @@ def scenario_warm_status_api(request):
                 "phase": None,
                 "kpi_ready": False,
                 "compact_ready": False,
+                "progress_pct": None,
+                "message": None,
             }
         )
     return JsonResponse({"success": True, **status})
@@ -816,7 +818,7 @@ def scenario_effects_cube_api(request):
         return error_response
 
     service = ScenarioEffectsCubeService()
-    response_dto, calc_errors = service.aggregate(
+    response_dto, calc_errors, meta = service.aggregate(
         scenario=scenario,
         user_id=request.user.id,
         request=dto,
@@ -824,7 +826,12 @@ def scenario_effects_cube_api(request):
     if calc_errors:
         return JsonResponse({"success": False, "errors": calc_errors}, status=400)
 
-    return JsonResponse({"success": True, **response_dto.to_api_dict()})
+    payload = response_dto.to_api_dict()
+    if meta.get("elapsed_ms") is not None:
+        payload["elapsed_ms"] = meta["elapsed_ms"]
+    if meta.get("timings"):
+        payload["timings"] = meta["timings"]
+    return JsonResponse({"success": True, **payload})
 
 
 @login_required
@@ -843,7 +850,7 @@ def scenario_effects_cube_export_api(request):
         return error_response
 
     service = ScenarioEffectsCubeService()
-    response_dto, calc_errors = service.aggregate(
+    response_dto, calc_errors, _meta = service.aggregate(
         scenario=scenario,
         user_id=request.user.id,
         request=dto,

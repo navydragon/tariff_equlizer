@@ -20,6 +20,15 @@ WarmPhase = Literal["queued", "mask", "kpi", "compact", "done", "error"]
 
 WARM_STATUS_PREFIX = "scenario_warm"
 
+_PHASE_PROGRESS: dict[WarmPhase, tuple[int, str]] = {
+    "queued": (5, "В очереди на расчёт"),
+    "mask": (15, "Подготовка масок правил"),
+    "kpi": (35, "Расчёт KPI"),
+    "compact": (55, "Сборка детализации"),
+    "done": (100, "Готово"),
+    "error": (0, "Ошибка расчёта"),
+}
+
 
 @dataclass
 class ScenarioWarmStatus:
@@ -33,6 +42,8 @@ class ScenarioWarmStatus:
     updated_at: float = 0.0
     error: str | None = None
     rebuild_message: str | None = None
+    progress_pct: float | None = None
+    message: str | None = None
 
 
 def warm_status_cache_key(*, scenario_id: int) -> str:
@@ -239,6 +250,19 @@ def get_warm_status(*, scenario_id: int) -> dict[str, Any] | None:
     return _status_to_api(status)
 
 
+def _resolve_progress(status: ScenarioWarmStatus) -> tuple[float | None, str | None]:
+    if status.progress_pct is not None:
+        pct = max(0.0, min(100.0, float(status.progress_pct)))
+        message = status.message
+        if message is None:
+            _, default_message = _PHASE_PROGRESS.get(status.phase, (pct, ""))
+            message = default_message or None
+        return pct, message
+
+    pct, default_message = _PHASE_PROGRESS.get(status.phase, (None, None))
+    return (float(pct) if pct is not None else None), status.message or default_message
+
+
 def _status_to_api(status: ScenarioWarmStatus) -> dict[str, Any]:
     kpi_ready, compact_ready = _disk_readiness(
         scenario_id=status.scenario_id,
@@ -262,6 +286,8 @@ def _status_to_api(status: ScenarioWarmStatus) -> dict[str, Any]:
     if status.started_at:
         elapsed_ms = max(0, int((time.time() - status.started_at) * 1000))
 
+    progress_pct, message = _resolve_progress(status)
+
     return {
         "phase": phase,
         "data_version": status.data_version,
@@ -274,4 +300,6 @@ def _status_to_api(status: ScenarioWarmStatus) -> dict[str, Any]:
         "error": status.error,
         "error_recoverable": error_recoverable,
         "rebuild_message": status.rebuild_message,
+        "progress_pct": progress_pct,
+        "message": message,
     }

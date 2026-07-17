@@ -103,3 +103,53 @@ class ScenarioWarmStatusApiTests(TestCase):
                 compact_ready=False,
             )
         )
+
+    def test_status_exposes_progress_fields(self) -> None:
+        status = ScenarioWarmStatus(
+            scenario_id=1,
+            phase="compact",
+            data_version="dv1",
+            progress_pct=72.5,
+            message="Сборка детализации…",
+        )
+        with patch(
+            (
+                "calculations.domain.services.scenario_warm_status."
+                "try_load_scenario_compute"
+            ),
+            return_value=object(),
+        ), patch(
+            (
+                "calculations.domain.services.scenario_warm_status."
+                "is_scenario_compact_on_disk"
+            ),
+            return_value=False,
+        ):
+            payload = _status_to_api(status)
+
+        self.assertEqual(payload["progress_pct"], 72.5)
+        self.assertEqual(payload["message"], "Сборка детализации…")
+
+    def test_status_phase_default_progress(self) -> None:
+        status = ScenarioWarmStatus(
+            scenario_id=1,
+            phase="kpi",
+            data_version="dv1",
+        )
+        with patch(
+            (
+                "calculations.domain.services.scenario_warm_status."
+                "try_load_scenario_compute"
+            ),
+            return_value=object(),
+        ), patch(
+            (
+                "calculations.domain.services.scenario_warm_status."
+                "is_scenario_compact_on_disk"
+            ),
+            return_value=False,
+        ):
+            payload = _status_to_api(status)
+
+        self.assertEqual(payload["progress_pct"], 35.0)
+        self.assertEqual(payload["message"], "Расчёт KPI")

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import time
 from collections import defaultdict
 from decimal import Decimal, ROUND_HALF_UP
+from typing import Any
 
 import numpy as np
 
@@ -13,8 +15,9 @@ from calculations.domain.dto.scenario_effects_cube import (
 )
 from calculations.domain.services.grouping import aggregate_by_groups, build_group_keys
 from calculations.domain.services.scenario_effects_compact import (
-    _build_mask,
-    aggregate_compact_year_values,
+    aggregate_compact_totals_masked,
+    aggregate_compact_year_values_masked,
+    build_compact_filter_mask,
 )
 from calculations.domain.services.scenario_effects_cache import (
     COMPACT_API_WAIT_TIMEOUT_SECONDS,
@@ -34,6 +37,9 @@ _EFFECT_BASE = "Базовая индексация"
 _EFFECT_RULES_TOTAL = "Отдельные тарифные решения"
 _EFFECT_VOLUME_FALLOUT = "Выпадение объёмов (млн т)"
 _EFFECT_MONEY_FALLOUT = "Выпадение доходов"
+
+# Cube HTML/JSON is not cached: each cube API call re-aggregates compact arrays.
+# L2 disk (scenario_compute) and L3 session cache_key hold KPI, compact, rule_by_year.
 
 
 def _format_mln_tons(value: Decimal) -> str:
@@ -66,14 +72,16 @@ def _aggregate_compact_totals(
     cargo_groups: list[str],
     holdings: list[str],
 ) -> dict[tuple[str, ...], dict[int, Decimal]]:
-    mask = _build_mask(
+    mask = build_compact_filter_mask(
         compact,
-        cargo_filter=set(cargo_groups) if cargo_groups else None,
-        holding_filter=set(holdings) if holdings else None,
+        cargo_groups=cargo_groups,
+        holdings=holdings,
     )
-    year_values: dict[int, Decimal] = {}
-    for year_index, year in enumerate(compact.years):
-        year_values[year] = Decimal(str(float(values_by_year[mask, year_index].sum())))
+    year_values = aggregate_compact_totals_masked(
+        compact,
+        mask=mask,
+        values_by_year=values_by_year,
+    )
     return {("ИТОГО",): year_values}
 
 
@@ -106,13 +114,18 @@ class ScenarioEffectsCubeService:
         scenario: Scenario,
         user_id: int,
         request: ScenarioEffectsCubeRequestDTO,
-    ) -> tuple[ScenarioEffectsCubeResponseDTO | None, list[str]]:
+    ) -> tuple[ScenarioEffectsCubeResponseDTO | None, list[str], dict[str, Any]]:
+        started = time.perf_counter()
+        timings: dict[str, int] = {}
+
+        t_payload = time.perf_counter()
         payload = get_payload_ready(
             request.cache_key,
             timeout_seconds=COMPACT_API_WAIT_TIMEOUT_SECONDS,
         )
+        timings["payload_ready_ms"] = int((time.perf_counter() - t_payload) * 1000)
         if payload is None:
-            return None, ["Кэш расчёта устарел или недоступен. Выполните пересчёт."]
+            return None, ["Кэш расчёта устарел или недоступен. Выполните пересчёт."], {}
 
         access_errors = validate_cache_access(
             payload=payload,
@@ -120,10 +133,10 @@ class ScenarioEffectsCubeService:
             scenario_id=scenario.id,
         )
         if access_errors:
-            return None, access_errors
+            return None, access_errors, {}
 
         if payload.compact is None:
-            return None, ["Расчёт ещё выполняется. Повторите запрос через несколько секунд."]
+            return None, ["Расчёт ещё выполняется. Повторите запрос через несколько секунд."], {}
 
         if (
             request.group_by == "tariff_decision"
@@ -132,16 +145,22 @@ class ScenarioEffectsCubeService:
             if payload.compact.rule_meta:
                 return None, [
                     "Расчёт ещё выполняется. Повторите запрос через несколько секунд.",
-                ]
+                ], {}
 
         if not _payload_has_effects_data(payload):
             return None, [
                 "Кэш расчёта устарел или недоступен. Выполните пересчёт.",
-            ]
+            ], {}
 
+        t_slices = time.perf_counter()
         effect_slices = self._build_effect_slices(payload, scenario=scenario)
-        group_buckets = self._aggregate_groups(payload, request, effect_slices)
+        timings["effect_slices_ms"] = int((time.perf_counter() - t_slices) * 1000)
 
+        t_groups = time.perf_counter()
+        group_buckets = self._aggregate_groups(payload, request, effect_slices)
+        timings["aggregate_groups_ms"] = int((time.perf_counter() - t_groups) * 1000)
+
+        t_rows = time.perf_counter()
         rows = self._build_rows(
             group_buckets=group_buckets,
             effect_slices=effect_slices,
@@ -149,6 +168,7 @@ class ScenarioEffectsCubeService:
             group_by=request.group_by,
             group_by_inner=request.group_by_inner,
         )
+        timings["build_rows_ms"] = int((time.perf_counter() - t_rows) * 1000)
 
         group_by_label = GROUP_BY_LABELS.get(request.group_by, request.group_by)
         group_by_inner_label = (
@@ -157,6 +177,8 @@ class ScenarioEffectsCubeService:
             else None
         )
 
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        meta = {"elapsed_ms": elapsed_ms, "timings": timings}
         return (
             ScenarioEffectsCubeResponseDTO(
                 years=payload.years,
@@ -167,6 +189,7 @@ class ScenarioEffectsCubeService:
                 rows=rows,
             ),
             [],
+            meta,
         )
 
     def _build_effect_slices(
@@ -209,48 +232,110 @@ class ScenarioEffectsCubeService:
         request: ScenarioEffectsCubeRequestDTO,
         effect_slices: list[tuple[str, str | None]],
     ) -> dict[str, dict[tuple[str, ...], dict[int, Decimal]]]:
+        if payload.compact is None:
+            return self._aggregate_groups_from_facts(payload, request, effect_slices)
+
+        compact = payload.compact
+        mask = build_compact_filter_mask(
+            compact,
+            cargo_groups=request.cargo_groups,
+            holdings=request.holdings,
+        )
+        rule_index_by_id = {
+            meta_id: index
+            for index, (meta_id, _name) in enumerate(compact.rule_meta)
+        }
+        value_matrices = {
+            effect_key: self._compact_values_matrix(
+                compact,
+                effect_key=effect_key,
+                rule_index_by_id=rule_index_by_id,
+            )
+            for effect_key, _label in effect_slices
+        }
+
+        if request.group_by == "tariff_decision":
+            return self._aggregate_groups_tariff_decision(
+                compact=compact,
+                mask=mask,
+                effect_slices=effect_slices,
+                value_matrices=value_matrices,
+            )
+
         result: dict[str, dict[tuple[str, ...], dict[int, Decimal]]] = {}
+        for effect_key, _label in effect_slices:
+            result[effect_key] = aggregate_compact_year_values_masked(
+                compact,
+                mask=mask,
+                values_by_year=value_matrices[effect_key],
+                group_by=request.group_by,
+                group_by_inner=request.group_by_inner,
+            )
+        return result
+
+    def _aggregate_groups_tariff_decision(
+        self,
+        *,
+        compact: CompactRouteEffects,
+        mask: np.ndarray,
+        effect_slices: list[tuple[str, str | None]],
+        value_matrices: dict[str, np.ndarray],
+    ) -> dict[str, dict[tuple[str, ...], dict[int, Decimal]]]:
+        totals_key = ("ИТОГО",)
+        result: dict[str, dict[tuple[str, ...], dict[int, Decimal]]] = {}
+        rule_sums_by_id: dict[int, np.ndarray] | None = None
+        if compact.rule_by_year is not None:
+            masked_rules = compact.rule_by_year[:, mask, :]
+            rule_sums_by_id = {
+                meta_id: masked_rules[index].sum(axis=0)
+                for index, (meta_id, _name) in enumerate(compact.rule_meta)
+            }
 
         for effect_key, _label in effect_slices:
-            if payload.compact is not None:
-                values_matrix = self._compact_values_matrix(
-                    payload.compact,
-                    effect_key=effect_key,
+            if effect_key.startswith("rule:") and rule_sums_by_id is not None:
+                rule_id = int(effect_key.split(":", 1)[1])
+                sums = rule_sums_by_id.get(rule_id)
+                if sums is None:
+                    result[effect_key] = {}
+                    continue
+                year_values = {
+                    year: Decimal(str(float(sums[index])))
+                    for index, year in enumerate(compact.years)
+                }
+                result[effect_key] = {totals_key: year_values}
+                continue
+
+            year_values = aggregate_compact_totals_masked(
+                compact,
+                mask=mask,
+                values_by_year=value_matrices[effect_key],
+            )
+            result[effect_key] = {totals_key: year_values}
+        return result
+
+    def _aggregate_groups_from_facts(
+        self,
+        payload: ScenarioEffectsCachePayload,
+        request: ScenarioEffectsCubeRequestDTO,
+        effect_slices: list[tuple[str, str | None]],
+    ) -> dict[str, dict[tuple[str, ...], dict[int, Decimal]]]:
+        result: dict[str, dict[tuple[str, ...], dict[int, Decimal]]] = {}
+        for effect_key, _label in effect_slices:
+            value_fn = self._facts_value_fn(payload.facts, effect_key=effect_key)
+            if request.group_by == "tariff_decision":
+                buckets = _aggregate_facts_totals(
+                    payload.facts,
+                    value_fn=value_fn,
+                    cargo_groups=request.cargo_groups,
+                    holdings=request.holdings,
                 )
-                if request.group_by == "tariff_decision":
-                    buckets = _aggregate_compact_totals(
-                        payload.compact,
-                        values_by_year=values_matrix,
-                        cargo_groups=request.cargo_groups,
-                        holdings=request.holdings,
-                    )
-                else:
-                    buckets = aggregate_compact_year_values(
-                        payload.compact,
-                        group_by=request.group_by,
-                        group_by_inner=request.group_by_inner,
-                        cargo_groups=request.cargo_groups,
-                        holdings=request.holdings,
-                        values_by_year=values_matrix,
-                    )
             else:
-                value_fn = self._facts_value_fn(payload.facts, effect_key=effect_key)
-                if request.group_by == "tariff_decision":
-                    buckets = _aggregate_facts_totals(
-                        payload.facts,
-                        value_fn=value_fn,
-                        cargo_groups=request.cargo_groups,
-                        holdings=request.holdings,
-                    )
-                else:
-                    buckets = self._aggregate_facts_by_year(
-                        payload.facts,
-                        request=request,
-                        value_fn=value_fn,
-                    )
-
+                buckets = self._aggregate_facts_by_year(
+                    payload.facts,
+                    request=request,
+                    value_fn=value_fn,
+                )
             result[effect_key] = buckets
-
         return result
 
     @staticmethod
@@ -258,6 +343,7 @@ class ScenarioEffectsCubeService:
         compact: CompactRouteEffects,
         *,
         effect_key: str,
+        rule_index_by_id: dict[int, int] | None = None,
     ) -> np.ndarray:
         if effect_key == "base":
             return compact.base_by_year
@@ -273,11 +359,19 @@ class ScenarioEffectsCubeService:
             return compact.money_fallout_by_year
 
         rule_id = int(effect_key.split(":", 1)[1])
-        rule_index = next(
-            index
-            for index, (meta_id, _name) in enumerate(compact.rule_meta)
-            if meta_id == rule_id
-        )
+        if rule_index_by_id is not None:
+            rule_index = rule_index_by_id.get(rule_id)
+        else:
+            rule_index = next(
+                (
+                    index
+                    for index, (meta_id, _name) in enumerate(compact.rule_meta)
+                    if meta_id == rule_id
+                ),
+                None,
+            )
+        if rule_index is None:
+            raise ValueError(f"rule_id {rule_id} missing in compact payload")
         if compact.rule_by_year is None:
             raise ValueError("rule_by_year missing in compact payload")
         return compact.rule_by_year[rule_index]

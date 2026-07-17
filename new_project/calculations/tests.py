@@ -2657,6 +2657,10 @@ class ScenarioEffectsCubeApiTests(TariffLoadServiceTestMixin, TestCase):
         self.assertIn("Отдельные тарифные решения", effect_labels)
         self.assertIn("Правило тест", effect_labels)
         self.assertEqual(payload["unit"], "млрд руб.")
+        self.assertIn("elapsed_ms", payload)
+        self.assertIsInstance(payload["elapsed_ms"], int)
+        self.assertIn("timings", payload)
+        self.assertIn("aggregate_groups_ms", payload["timings"])
 
     def test_cube_tariff_decision_requires_rule_breakdown(self) -> None:
         response = self.client.post(
@@ -2762,7 +2766,7 @@ class ScenarioEffectsCubeApiTests(TariffLoadServiceTestMixin, TestCase):
         assert compute_result is not None
         get_payload_ready(compute_result.cache_key)
 
-        cube_result, cube_errors = self.cube_service.aggregate(
+        cube_result, cube_errors, _meta = self.cube_service.aggregate(
             scenario=self.scenario,
             user_id=self.user.id,
             request=ScenarioEffectsCubeRequestDTO(

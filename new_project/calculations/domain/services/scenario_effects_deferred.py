@@ -179,6 +179,16 @@ def _run_deferred_full_compute(job: DeferredFullComputeJob) -> None:
         scenario_stub = _elasticity_scenario_stub(job)
 
         t_compute = time.perf_counter()
+        from calculations.domain.services.scenario_warm_status import update_warm_status
+
+        if job.include_rule_breakdown:
+            update_warm_status(
+                scenario_id=job.scenario_id,
+                data_version=job.data_version,
+                phase="compact",
+                progress_pct=50,
+                message="Расчёт детализации по правилам…",
+            )
         _global_totals, compute_timings, arrays = compute_arrays_full(
             sidecar,
             years=job.years,
@@ -200,6 +210,15 @@ def _run_deferred_full_compute(job: DeferredFullComputeJob) -> None:
         detail.update(compute_timings)
         if arrays is None:
             return
+
+        if job.include_rule_breakdown:
+            update_warm_status(
+                scenario_id=job.scenario_id,
+                data_version=job.data_version,
+                phase="compact",
+                progress_pct=75,
+                message="Сборка compact…",
+            )
 
         t_volume = time.perf_counter()
         volume_sidecar, volume_timings = load_mart_sidecar(
@@ -264,6 +283,15 @@ def _run_deferred_full_compute(job: DeferredFullComputeJob) -> None:
         if _job_data_version_stale(job):
             return
 
+        if job.include_rule_breakdown:
+            update_warm_status(
+                scenario_id=job.scenario_id,
+                data_version=job.data_version,
+                phase="compact",
+                progress_pct=90,
+                message="Сохранение детализации…",
+            )
+
         t_save = time.perf_counter()
         save_scenario_compute(
             scenario_id=job.scenario_id,
@@ -286,12 +314,12 @@ def _run_deferred_full_compute(job: DeferredFullComputeJob) -> None:
             data_version=job.data_version,
         )
         update_payload_compact(cache_key=job.cache_key, compact=compact)
-        from calculations.domain.services.scenario_warm_status import update_warm_status
-
         update_warm_status(
             scenario_id=job.scenario_id,
             data_version=job.data_version,
             phase="compact",
+            progress_pct=95,
+            message="Обновление кэша…",
         )
 
         # Эластичность (fallout) считаем отдельной фазой: compact готов сразу,
@@ -416,6 +444,8 @@ def _run_deferred_full_compute(job: DeferredFullComputeJob) -> None:
             scenario_id=job.scenario_id,
             data_version=job.data_version,
             phase="done",
+            progress_pct=100,
+            message="Готово",
             rebuild_message=rebuild_message,
         )
     except Exception:

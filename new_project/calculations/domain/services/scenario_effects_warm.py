@@ -98,6 +98,8 @@ def warm_scenario_after_rule_change(
                 mask_changed=True,
                 rule_id=rule_id,
                 phase="mask",
+                progress_pct=10,
+                message="Подготовка масок правил…",
             )
             t_mask = time.perf_counter()
             try:
@@ -111,6 +113,8 @@ def warm_scenario_after_rule_change(
             update_warm_status(
                 scenario_id=scenario_id,
                 phase="kpi",
+                progress_pct=25,
+                message="Расчёт KPI…",
                 matched_routes=(
                     prewarm_result.matched_routes if prewarm_result is not None else None
                 ),
@@ -122,6 +126,8 @@ def warm_scenario_after_rule_change(
                 mask_changed=False,
                 rule_id=rule_id,
                 phase="kpi",
+                progress_pct=20,
+                message="Расчёт KPI…",
             )
 
         t_parquet = time.perf_counter()
@@ -224,7 +230,12 @@ def warm_scenario_after_rule_change(
         )
         phases["kpi_save_ms"] = int((time.perf_counter() - t_save) * 1000)
 
-        update_warm_status(scenario_id=scenario_id, phase="compact")
+        update_warm_status(
+            scenario_id=scenario_id,
+            phase="compact",
+            progress_pct=45,
+            message="Сборка детализации…",
+        )
 
         deferred_job = ScenarioEffectsPandasService._build_deferred_job(
             scenario=scenario,

@@ -243,10 +243,15 @@ import { clearToasts, showToast } from "../lib/toast.js";
           console.error("[effects-cube] scenario warm failed", data.error);
           return;
         }
+        this._setTableLoading(
+          true,
+          this._progressMessage(data.message || "Подготовка данных…", data.progress_pct),
+          data.progress_pct,
+        );
         if (data.kpi_ready || data.phase === "done") {
           return;
         }
-        await this._sleep(300);
+        await this._sleep(400);
         return this._waitForWarmKpi(scenarioId, startedAt);
       } catch (error) {
         console.error("[effects-cube] warm status poll failed", error);
@@ -269,7 +274,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
 
     async _waitForCompactReady() {
       if (!this.compactStatusUrlValue || !this.state.cacheKey) {
-        await this._sleep(2000);
+        await this._sleep(400);
         return;
       }
 
@@ -280,11 +285,29 @@ import { clearToasts, showToast } from "../lib/toast.js";
         });
         if (data && data.success) {
           this.state.compactPending = !data.compact_ready;
+          if (!data.compact_ready) {
+            this._setTableLoading(
+              true,
+              this._progressMessage(
+                data.message || this._cubeLoadingMessage(),
+                data.progress_pct,
+              ),
+              data.progress_pct,
+            );
+          }
         }
       } catch (error) {
         console.error("[effects-cube] compact-status failed", error);
       }
-      await this._sleep(2000);
+      await this._sleep(400);
+    }
+
+    _progressMessage(message, progressPct) {
+      if (typeof progressPct === "number" && Number.isFinite(progressPct)) {
+        const pct = Math.max(0, Math.min(100, Math.round(progressPct)));
+        return `${message} ${pct}%`;
+      }
+      return message;
     }
 
     async _computeEffects() {
@@ -648,17 +671,36 @@ import { clearToasts, showToast } from "../lib/toast.js";
       `;
     }
 
-    _setTableLoading(isLoading, message = "Загрузка…") {
+    _setTableLoading(isLoading, message = "Загрузка…", progressPct = null) {
       if (!this.hasTableWrapTarget) return;
       this.tableWrapTarget.classList.toggle(
         "effects-cube-table-wrap--loading",
         isLoading,
       );
       if (isLoading) {
+        const hasProgress =
+          typeof progressPct === "number" && Number.isFinite(progressPct);
+        const pct = hasProgress
+          ? Math.max(0, Math.min(100, Math.round(progressPct)))
+          : null;
+        const progressBar = hasProgress
+          ? `
+          <div class="progress mt-3 mx-auto" style="max-width: 20rem; height: 0.5rem;">
+            <div
+              class="progress-bar progress-bar-striped progress-bar-animated"
+              role="progressbar"
+              style="width: ${pct}%"
+              aria-valuenow="${pct}"
+              aria-valuemin="0"
+              aria-valuemax="100"
+            ></div>
+          </div>`
+          : "";
         this.tableWrapTarget.innerHTML = `
           <div class="text-muted py-4 text-center effects-cube-table-loading">
             <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
             <div class="mt-2">${escapeHtml(message)}</div>
+            ${progressBar}
           </div>
         `;
       }
