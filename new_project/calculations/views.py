@@ -836,10 +836,101 @@ def scenario_effects_cube_api(request):
 
 @login_required
 @require_http_methods(["POST"])
+def scenario_effects_cube_start_api(request):
+    data, error_response = _parse_json_body(request)
+    if error_response:
+        return error_response
+
+    dto, scenario_id, error_response = _parse_cube_request(data)
+    if error_response:
+        return error_response
+
+    scenario, error_response = _get_user_scenario(request, scenario_id)
+    if error_response:
+        return error_response
+
+    from calculations.domain.services.scenario_effects_cube_job import (
+        start_cube_aggregate_job,
+    )
+
+    job_id, start_errors = start_cube_aggregate_job(
+        scenario=scenario,
+        user_id=request.user.id,
+        request=dto,
+    )
+    if start_errors:
+        return JsonResponse({"success": False, "errors": start_errors}, status=400)
+
+    return JsonResponse(
+        {
+            "success": True,
+            "job_id": job_id,
+            "progress_pct": 0,
+            "message": "Запуск агрегации куба…",
+            "done": False,
+        },
+    )
+
+
+@login_required
+@require_http_methods(["POST"])
+def scenario_effects_cube_status_api(request):
+    data, error_response = _parse_json_body(request)
+    if error_response:
+        return error_response
+
+    job_id = data.get("job_id") or ""
+    if not isinstance(job_id, str) or not job_id:
+        return JsonResponse(
+            {"success": False, "errors": ["Не указан job_id"]},
+            status=400,
+        )
+
+    from calculations.domain.services.scenario_effects_cube_job import (
+        get_cube_job_status,
+    )
+
+    status = get_cube_job_status(job_id=job_id, user_id=request.user.id)
+    if status is None:
+        return JsonResponse(
+            {"success": False, "errors": ["Задача агрегации не найдена"]},
+            status=404,
+        )
+
+    return JsonResponse({"success": True, **status})
+
+
+@login_required
+@require_http_methods(["POST"])
 def scenario_effects_cube_export_api(request):
     data, error_response = _parse_json_body(request)
     if error_response:
         return error_response
+
+    job_id = data.get("job_id") or ""
+    if isinstance(job_id, str) and job_id:
+        from calculations.domain.services.scenario_effects_cube_job import (
+            get_cube_job_status,
+        )
+
+        status = get_cube_job_status(job_id=job_id, user_id=request.user.id)
+        if status is None:
+            return JsonResponse(
+                {"success": False, "errors": ["Задача агрегации не найдена"]},
+                status=404,
+            )
+        if not status.get("done") or not status.get("result"):
+            return JsonResponse(
+                {
+                    "success": False,
+                    "errors": ["Агрегация куба ещё не завершена. Повторите позже."],
+                },
+                status=409,
+            )
+        response_dto = ScenarioEffectsCubeResponseDTO.from_api_dict(status["result"])
+        export_table = _cube_table_to_export(response_dto)
+        content = ExcelExportService().build_workbook_bytes(export_table)
+        return excel_response(filename="kub_effektov.xlsx", content=content)
 
     dto, scenario_id, error_response = _parse_cube_request(data)
     if error_response:

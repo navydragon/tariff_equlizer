@@ -86,6 +86,16 @@ urlpatterns = [
         name="scenario_effects_cube_api",
     ),
     path(
+        "api/scenario-effects/cube/start/",
+        views.scenario_effects_cube_start_api,
+        name="scenario_effects_cube_start_api",
+    ),
+    path(
+        "api/scenario-effects/cube/status/",
+        views.scenario_effects_cube_status_api,
+        name="scenario_effects_cube_status_api",
+    ),
+    path(
         "api/scenario-effects/cube/export/",
         views.scenario_effects_cube_export_api,
         name="scenario_effects_cube_export_api",

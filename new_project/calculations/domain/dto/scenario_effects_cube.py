@@ -78,3 +78,27 @@ class ScenarioEffectsCubeResponseDTO:
             "group_by_inner_label": self.group_by_inner_label,
             "table": {"rows": [row.to_api_dict() for row in self.rows]},
         }
+
+    @classmethod
+    def from_api_dict(cls, payload: dict[str, Any]) -> ScenarioEffectsCubeResponseDTO:
+        rows = [
+            CubeTableRowDTO(
+                group_label=row["group_label"],
+                group_inner_label=row.get("group_inner_label"),
+                effect_label=row["effect_label"],
+                years={
+                    int(year): value
+                    for year, value in row.get("years", {}).items()
+                },
+                total=row["total"],
+            )
+            for row in payload.get("table", {}).get("rows", [])
+        ]
+        return cls(
+            years=[int(year) for year in payload.get("years", [])],
+            total_column_label=payload.get("total_column_label", "Итого"),
+            unit=payload.get("unit", "млрд руб."),
+            group_by_label=payload.get("group_by_label", ""),
+            group_by_inner_label=payload.get("group_by_inner_label"),
+            rows=rows,
+        )

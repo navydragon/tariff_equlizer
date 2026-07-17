@@ -35,6 +35,8 @@ import { clearToasts, showToast } from "../lib/toast.js";
       warmStatusUrl: String,
       compactStatusUrl: String,
       cubeUrl: String,
+      cubeStartUrl: String,
+      cubeStatusUrl: String,
       exportUrl: String,
       activeScenarioId: String,
       debounceMs: { type: Number, default: 350 },
@@ -49,11 +51,17 @@ import { clearToasts, showToast } from "../lib/toast.js";
         cargoTomSelect: null,
         holdingTomSelect: null,
         cubeTimer: null,
+        loadProgressTimer: null,
+        loadProgressToken: 0,
+        loadProgressStartedAt: 0,
         suppressFilterEvents: false,
         computing: false,
         compactPending: false,
         groupByInnerLabel: null,
         groupByLabel: "Группа груза",
+        lastCubeJobId: null,
+        lastCubePayloadKey: null,
+        exporting: false,
       };
 
       this._onScenarioRecalculated = this._onScenarioRecalculated.bind(this);
@@ -86,6 +94,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
     disconnect() {
       document.removeEventListener("scenario-recalculated", this._onScenarioRecalculated);
       window.removeEventListener("message", this._onScenarioEditMessage);
+      this._stopCubeLoadProgress();
       this._destroyTomSelects();
     }
 
@@ -126,6 +135,9 @@ import { clearToasts, showToast } from "../lib/toast.js";
     }
 
     onExport() {
+      if (this.state.exporting) {
+        return;
+      }
       this._exportCube();
     }
 
@@ -529,17 +541,244 @@ import { clearToasts, showToast } from "../lib/toast.js";
       return "Загрузка таблицы…";
     }
 
-    async _aggregateCube({ showTableLoading = false, attempt = 0 } = {}) {
-      if (
-        !this.cubeUrlValue ||
-        !this.state.selectedScenarioId ||
-        !this.state.cacheKey
-      ) {
+    _cubeLoadExpectedMs() {
+      const groupBy = this.groupBySelectTarget?.value || "cargo_group";
+      if (groupBy === "tariff_decision") {
+        return this.state.compactPending ? 90000 : 45000;
+      }
+      return this.state.compactPending ? 60000 : 20000;
+    }
+
+    _estimatedLoadProgressPct() {
+      const startedAt = this.state.loadProgressStartedAt || Date.now();
+      const elapsed = Math.max(0, Date.now() - startedAt);
+      const expected = this._cubeLoadExpectedMs();
+      // Асимптота к 95%, пока сервер не ответит.
+      const pct = 95 * (1 - Math.exp(-elapsed / expected));
+      return Math.max(1, Math.min(95, Math.round(pct)));
+    }
+
+    _stopCubeLoadProgress() {
+      this.state.loadProgressToken = (this.state.loadProgressToken || 0) + 1;
+      if (this.state.loadProgressTimer) {
+        clearInterval(this.state.loadProgressTimer);
+        this.state.loadProgressTimer = null;
+      }
+    }
+
+    _showCubeLoadProgress(progressPct = null, message = null) {
+      const pct =
+        typeof progressPct === "number" && Number.isFinite(progressPct)
+          ? progressPct
+          : this._estimatedLoadProgressPct();
+      const baseMessage = message || this._cubeLoadingMessage();
+      this._setTableLoading(
+        true,
+        this._progressMessage(baseMessage, pct),
+        pct,
+      );
+    }
+
+    async _pollCubeLoadProgress(token) {
+      if (token !== this.state.loadProgressToken) {
         return;
       }
 
+      let serverPct = null;
+      let serverMessage = null;
+
+      try {
+        if (this.state.compactPending && this.compactStatusUrlValue && this.state.cacheKey) {
+          const { data } = await fetchJson(this.compactStatusUrlValue, {
+            method: "POST",
+            body: { cache_key: this.state.cacheKey },
+          });
+          if (data && data.success) {
+            this.state.compactPending = !data.compact_ready;
+            if (typeof data.progress_pct === "number") {
+              serverPct = data.progress_pct;
+            }
+            if (data.message) {
+              serverMessage = data.message;
+            }
+          }
+        } else if (this.hasWarmStatusUrlValue && this.state.selectedScenarioId) {
+          const url = `${this.warmStatusUrlValue}?scenario_id=${encodeURIComponent(
+            String(this.state.selectedScenarioId),
+          )}`;
+          const { data } = await fetchJson(url);
+          if (
+            data &&
+            data.success &&
+            data.phase &&
+            data.phase !== "done" &&
+            data.phase !== "error" &&
+            typeof data.progress_pct === "number"
+          ) {
+            serverPct = data.progress_pct;
+            serverMessage = data.message || null;
+          }
+        }
+      } catch (error) {
+        // Оценка по времени остаётся fallback.
+      }
+
+      if (token !== this.state.loadProgressToken) {
+        return;
+      }
+
+      // Серверный % (warm/compact) смешиваем с оценкой загрузки таблицы,
+      // чтобы «Тарифные решения» не зависали на одном значении после ready.
+      let pct = this._estimatedLoadProgressPct();
+      if (typeof serverPct === "number" && Number.isFinite(serverPct)) {
+        pct = Math.max(pct, Math.min(95, Math.round(serverPct)));
+      }
+      this._showCubeLoadProgress(pct, serverMessage || this._cubeLoadingMessage());
+    }
+
+    _startCubeLoadProgress() {
+      this._stopCubeLoadProgress();
+      this.state.loadProgressStartedAt = Date.now();
+      const token = this.state.loadProgressToken;
+      this._showCubeLoadProgress(1);
+      this.state.loadProgressTimer = setInterval(() => {
+        this._pollCubeLoadProgress(token);
+      }, 400);
+      this._pollCubeLoadProgress(token);
+    }
+
+    async _aggregateCube({ showTableLoading = false, attempt = 0 } = {}) {
+      if (!this.state.selectedScenarioId || !this.state.cacheKey) {
+        return;
+      }
+      if (this.cubeStartUrlValue && this.cubeStatusUrlValue) {
+        return this._aggregateCubeViaJob({ showTableLoading, attempt });
+      }
+      if (!this.cubeUrlValue) {
+        return;
+      }
+      return this._aggregateCubeSync({ showTableLoading, attempt });
+    }
+
+    async _aggregateCubeViaJob({ showTableLoading = false, attempt = 0 } = {}) {
       if (showTableLoading || attempt > 0) {
-        this._setTableLoading(true, this._cubeLoadingMessage());
+        this._setTableLoading(
+          true,
+          this._progressMessage(this._cubeLoadingMessage(), 0),
+          0,
+        );
+      }
+
+      const maxAttempts = this.state.compactPending ? 45 : 8;
+
+      try {
+        if (this.state.compactPending && attempt + 1 <= maxAttempts) {
+          await this._waitForCompactReady();
+          if (this.state.compactPending) {
+            return this._aggregateCubeViaJob({
+              showTableLoading,
+              attempt: attempt + 1,
+            });
+          }
+        }
+
+        const { response, data } = await fetchJson(this.cubeStartUrlValue, {
+          method: "POST",
+          body: this._cubePayload(),
+        });
+
+        if (!response.ok || !data || !data.success) {
+          const message =
+            (data && data.errors && data.errors.join("; ")) ||
+            "Не удалось запустить агрегацию куба";
+          if (
+            !this.state.computing &&
+            (message.includes("устарел") || message.includes("недоступен"))
+          ) {
+            this.state.cacheKey = null;
+            this._computeEffects();
+            return;
+          }
+          if (this._isCubePendingMessage(message) && attempt + 1 < maxAttempts) {
+            await this._sleep(400);
+            return this._aggregateCubeViaJob({
+              showTableLoading,
+              attempt: attempt + 1,
+            });
+          }
+          this._setTableMessage("Нет данных.");
+          this._showError(message);
+          return;
+        }
+
+        const tableData = await this._pollCubeJobUntilDone(data.job_id);
+        if (!tableData) {
+          return;
+        }
+
+        this._rememberCubeResult(data.job_id, tableData);
+        this.state.compactPending = false;
+        this.state.groupByLabel = tableData.group_by_label || this.state.groupByLabel;
+        this.state.groupByInnerLabel = tableData.group_by_inner_label;
+        this._renderCubeTable(tableData);
+      } catch (error) {
+        console.error("[effects-cube] aggregate job failed", error);
+        this._setTableMessage("Не удалось загрузить таблицу.");
+        this._showError("Не удалось загрузить куб эффектов.");
+      }
+    }
+
+    async _pollCubeJobUntilDone(jobId) {
+      const timeoutMs = 180000;
+      const startedAt = Date.now();
+
+      while (Date.now() - startedAt < timeoutMs) {
+        const { response, data } = await fetchJson(this.cubeStatusUrlValue, {
+          method: "POST",
+          body: { job_id: jobId },
+        });
+
+        if (!response.ok || !data || !data.success) {
+          const message =
+            (data && data.errors && data.errors.join("; ")) ||
+            "Не удалось получить статус агрегации";
+          this._setTableMessage("Нет данных.");
+          this._showError(message);
+          return null;
+        }
+
+        if (data.phase === "error") {
+          this._setTableMessage("Нет данных.");
+          this._showError(data.error || "Ошибка агрегации куба");
+          return null;
+        }
+
+        const pct =
+          typeof data.progress_pct === "number" ? data.progress_pct : null;
+        this._setTableLoading(
+          true,
+          this._progressMessage(
+            data.message || this._cubeLoadingMessage(),
+            pct,
+          ),
+          pct,
+        );
+
+        if (data.done && data.result) {
+          return data.result;
+        }
+
+        await this._sleep(400);
+      }
+
+      this._setTableMessage("Не удалось загрузить таблицу.");
+      this._showError("Превышено время ожидания агрегации куба.");
+      return null;
+    }
+
+    async _aggregateCubeSync({ showTableLoading = false, attempt = 0 } = {}) {
+      if (showTableLoading || attempt > 0) {
+        this._startCubeLoadProgress();
       }
 
       const maxAttempts = this.state.compactPending ? 45 : 8;
@@ -558,34 +797,38 @@ import { clearToasts, showToast } from "../lib/toast.js";
             !this.state.computing &&
             (message.includes("устарел") || message.includes("недоступен"))
           ) {
+            this._stopCubeLoadProgress();
             this.state.cacheKey = null;
             this._computeEffects();
             return;
           }
           if (this.state.compactPending && attempt + 1 < maxAttempts) {
             await this._waitForCompactReady();
-            return this._aggregateCube({
+            return this._aggregateCubeSync({
               showTableLoading,
               attempt: attempt + 1,
             });
           }
           if (this._isCubePendingMessage(message) && attempt + 1 < maxAttempts) {
-            await this._sleep(2000);
-            return this._aggregateCube({
+            await this._sleep(400);
+            return this._aggregateCubeSync({
               showTableLoading,
               attempt: attempt + 1,
             });
           }
+          this._stopCubeLoadProgress();
           this._setTableMessage("Нет данных.");
           this._showError(message);
           return;
         }
 
+        this._stopCubeLoadProgress();
         this.state.compactPending = false;
         this.state.groupByLabel = data.group_by_label || this.state.groupByLabel;
         this.state.groupByInnerLabel = data.group_by_inner_label;
         this._renderCubeTable(data);
       } catch (error) {
+        this._stopCubeLoadProgress();
         console.error("[effects-cube] aggregate failed", error);
         this._setTableMessage("Не удалось загрузить таблицу.");
         this._showError("Не удалось загрузить куб эффектов.");
@@ -601,6 +844,91 @@ import { clearToasts, showToast } from "../lib/toast.js";
         cargo_groups: this._selectedMultiValues(this.state.cargoTomSelect),
         holdings: this._selectedMultiValues(this.state.holdingTomSelect),
       };
+    }
+
+    _cubePayloadKey() {
+      return JSON.stringify(this._cubePayload());
+    }
+
+    _rememberCubeResult(jobId, tableData) {
+      this.state.lastCubeJobId = jobId;
+      this.state.lastCubePayloadKey = this._cubePayloadKey();
+      this.state.lastCubeResult = tableData;
+    }
+
+    _cubeResultMatchesCurrentFilters() {
+      return (
+        Boolean(this.state.lastCubeJobId) &&
+        this.state.lastCubePayloadKey === this._cubePayloadKey()
+      );
+    }
+
+    async _ensureCubeJobIdForExport() {
+      if (this._cubeResultMatchesCurrentFilters()) {
+        return this.state.lastCubeJobId;
+      }
+
+      if (!this.cubeStartUrlValue || !this.cubeStatusUrlValue) {
+        return null;
+      }
+
+      const { response, data } = await fetchJson(this.cubeStartUrlValue, {
+        method: "POST",
+        body: this._cubePayload(),
+      });
+      if (!response.ok || !data || !data.success) {
+        const message =
+          (data && data.errors && data.errors.join("; ")) ||
+          "Не удалось подготовить данные для экспорта";
+        this._showError(message);
+        return null;
+      }
+
+      const tableData = await this._pollCubeJobUntilDone(data.job_id);
+      if (!tableData) {
+        return null;
+      }
+      this._rememberCubeResult(data.job_id, tableData);
+      return data.job_id;
+    }
+
+    async _downloadCubeExport(body) {
+      const { response, blob } = await fetchBlob(this.exportUrlValue, {
+        method: "POST",
+        body,
+      });
+
+      if (!response.ok) {
+        const contentType = response.headers.get("Content-Type") || "";
+        if (contentType.includes("application/json")) {
+          const text = await blob.text();
+          try {
+            const payload = JSON.parse(text);
+            const message =
+              (payload.errors && payload.errors.join("; ")) ||
+              "Не удалось экспортировать таблицу.";
+            this._showError(message);
+            return;
+          } catch (_error) {
+            // fall through
+          }
+        }
+        this._showError("Не удалось экспортировать таблицу.");
+        return;
+      }
+
+      const disposition = response.headers.get("Content-Disposition") || "";
+      const match = disposition.match(/filename="([^"]+)"/);
+      const filename = match ? match[1] : "kub_effektov.xlsx";
+
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
     }
 
     _renderCubeTable(data) {
@@ -779,34 +1107,34 @@ import { clearToasts, showToast } from "../lib/toast.js";
     }
 
     async _exportCube() {
-      if (!this.exportUrlValue || !this.state.cacheKey) return;
+      if (!this.exportUrlValue) {
+        return;
+      }
+      if (!this.state.cacheKey) {
+        this._showError("Сначала дождитесь расчёта таблицы.");
+        return;
+      }
+
+      this.state.exporting = true;
+      this._showRebuildStatus("Формирование отчёта…", "info");
 
       try {
-        const { response, blob } = await fetchBlob(this.exportUrlValue, {
-          method: "POST",
-          body: this._cubePayload(),
-        });
-
-        if (!response.ok) {
-          this._showError("Не удалось экспортировать таблицу.");
+        if (this.cubeStartUrlValue && this.cubeStatusUrlValue) {
+          const jobId = await this._ensureCubeJobIdForExport();
+          if (!jobId) {
+            return;
+          }
+          await this._downloadCubeExport({ job_id: jobId });
           return;
         }
 
-        const disposition = response.headers.get("Content-Disposition") || "";
-        const match = disposition.match(/filename="([^"]+)"/);
-        const filename = match ? match[1] : "kub_effektov.xlsx";
-
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.href = url;
-        link.download = filename;
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-        URL.revokeObjectURL(url);
+        await this._downloadCubeExport(this._cubePayload());
       } catch (error) {
         console.error("[effects-cube] export failed", error);
         this._showError("Не удалось экспортировать таблицу.");
+      } finally {
+        this.state.exporting = false;
+        this._hideRebuildStatus();
       }
     }
 

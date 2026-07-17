@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from collections import defaultdict
 from decimal import Decimal, ROUND_HALF_UP
-from typing import Any
+from typing import Any, Callable
 
 import numpy as np
 
@@ -114,6 +114,7 @@ class ScenarioEffectsCubeService:
         scenario: Scenario,
         user_id: int,
         request: ScenarioEffectsCubeRequestDTO,
+        on_progress: Callable[[int, str], None] | None = None,
     ) -> tuple[ScenarioEffectsCubeResponseDTO | None, list[str], dict[str, Any]]:
         started = time.perf_counter()
         timings: dict[str, int] = {}
@@ -152,13 +153,27 @@ class ScenarioEffectsCubeService:
                 "Кэш расчёта устарел или недоступен. Выполните пересчёт.",
             ], {}
 
+        if on_progress:
+            on_progress(8, "Подготовка срезов эффектов…")
+
         t_slices = time.perf_counter()
         effect_slices = self._build_effect_slices(payload, scenario=scenario)
         timings["effect_slices_ms"] = int((time.perf_counter() - t_slices) * 1000)
 
+        if on_progress:
+            on_progress(12, "Агрегация по группам…")
+
         t_groups = time.perf_counter()
-        group_buckets = self._aggregate_groups(payload, request, effect_slices)
+        group_buckets = self._aggregate_groups(
+            payload,
+            request,
+            effect_slices,
+            on_progress=on_progress,
+        )
         timings["aggregate_groups_ms"] = int((time.perf_counter() - t_groups) * 1000)
+
+        if on_progress:
+            on_progress(92, "Формирование таблицы…")
 
         t_rows = time.perf_counter()
         rows = self._build_rows(
@@ -169,6 +184,9 @@ class ScenarioEffectsCubeService:
             group_by_inner=request.group_by_inner,
         )
         timings["build_rows_ms"] = int((time.perf_counter() - t_rows) * 1000)
+
+        if on_progress:
+            on_progress(99, "Завершение…")
 
         group_by_label = GROUP_BY_LABELS.get(request.group_by, request.group_by)
         group_by_inner_label = (
@@ -231,6 +249,8 @@ class ScenarioEffectsCubeService:
         payload: ScenarioEffectsCachePayload,
         request: ScenarioEffectsCubeRequestDTO,
         effect_slices: list[tuple[str, str | None]],
+        *,
+        on_progress: Callable[[int, str], None] | None = None,
     ) -> dict[str, dict[tuple[str, ...], dict[int, Decimal]]]:
         if payload.compact is None:
             return self._aggregate_groups_from_facts(payload, request, effect_slices)
@@ -260,10 +280,12 @@ class ScenarioEffectsCubeService:
                 mask=mask,
                 effect_slices=effect_slices,
                 value_matrices=value_matrices,
+                on_progress=on_progress,
             )
 
         result: dict[str, dict[tuple[str, ...], dict[int, Decimal]]] = {}
-        for effect_key, _label in effect_slices:
+        total = len(effect_slices)
+        for index, (effect_key, label) in enumerate(effect_slices):
             result[effect_key] = aggregate_compact_year_values_masked(
                 compact,
                 mask=mask,
@@ -271,6 +293,13 @@ class ScenarioEffectsCubeService:
                 group_by=request.group_by,
                 group_by_inner=request.group_by_inner,
             )
+            if on_progress and total:
+                pct = 12 + int(78 * (index + 1) / total)
+                slice_label = label or effect_key
+                on_progress(
+                    pct,
+                    f"Агрегация: {slice_label} ({index + 1}/{total})",
+                )
         return result
 
     def _aggregate_groups_tariff_decision(
@@ -280,37 +309,48 @@ class ScenarioEffectsCubeService:
         mask: np.ndarray,
         effect_slices: list[tuple[str, str | None]],
         value_matrices: dict[str, np.ndarray],
+        on_progress: Callable[[int, str], None] | None = None,
     ) -> dict[str, dict[tuple[str, ...], dict[int, Decimal]]]:
         totals_key = ("ИТОГО",)
         result: dict[str, dict[tuple[str, ...], dict[int, Decimal]]] = {}
         rule_sums_by_id: dict[int, np.ndarray] | None = None
         if compact.rule_by_year is not None:
+            if on_progress:
+                on_progress(20, "Суммирование по тарифным решениям…")
             masked_rules = compact.rule_by_year[:, mask, :]
             rule_sums_by_id = {
                 meta_id: masked_rules[index].sum(axis=0)
                 for index, (meta_id, _name) in enumerate(compact.rule_meta)
             }
 
-        for effect_key, _label in effect_slices:
+        total = len(effect_slices)
+        for slice_index, (effect_key, label) in enumerate(effect_slices):
             if effect_key.startswith("rule:") and rule_sums_by_id is not None:
                 rule_id = int(effect_key.split(":", 1)[1])
                 sums = rule_sums_by_id.get(rule_id)
                 if sums is None:
                     result[effect_key] = {}
-                    continue
-                year_values = {
-                    year: Decimal(str(float(sums[index])))
-                    for index, year in enumerate(compact.years)
-                }
+                else:
+                    year_values = {
+                        year: Decimal(str(float(sums[year_index])))
+                        for year_index, year in enumerate(compact.years)
+                    }
+                    result[effect_key] = {totals_key: year_values}
+            else:
+                year_values = aggregate_compact_totals_masked(
+                    compact,
+                    mask=mask,
+                    values_by_year=value_matrices[effect_key],
+                )
                 result[effect_key] = {totals_key: year_values}
-                continue
 
-            year_values = aggregate_compact_totals_masked(
-                compact,
-                mask=mask,
-                values_by_year=value_matrices[effect_key],
-            )
-            result[effect_key] = {totals_key: year_values}
+            if on_progress and total:
+                pct = 20 + int(70 * (slice_index + 1) / total)
+                slice_label = label or effect_key
+                on_progress(
+                    pct,
+                    f"Тарифные решения: {slice_label} ({slice_index + 1}/{total})",
+                )
         return result
 
     def _aggregate_groups_from_facts(
