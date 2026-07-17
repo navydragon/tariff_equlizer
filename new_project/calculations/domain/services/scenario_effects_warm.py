@@ -51,12 +51,17 @@ def _resolve_ready_parquet_path(*, route_set_id: int, require_turnover: bool) ->
     return parquet_path
 
 
-def warm_scenario_kpi_snapshot(*, scenario_id: int) -> None:
+def warm_scenario_kpi_snapshot(
+    *,
+    scenario_id: int,
+    include_rule_breakdown: bool = False,
+) -> None:
     """Прогревает KPI-снимок сценария (deploy / refresh_deploy_caches --warm-scenarios)."""
     warm_scenario_after_rule_change(
         scenario_id=scenario_id,
         change="create",
         mask_changed=False,
+        include_rule_breakdown=include_rule_breakdown,
     )
 
 
@@ -66,6 +71,7 @@ def warm_scenario_after_rule_change(
     change: Literal["create", "update", "delete"],
     rule_id: int | None = None,
     mask_changed: bool = False,
+    include_rule_breakdown: bool = False,
 ) -> None:
     try:
         scenario = Scenario.objects.select_related("route_set").get(pk=scenario_id)
@@ -232,7 +238,7 @@ def warm_scenario_after_rule_change(
             routes_without_volume=skipped_volume,
             parquet_path=parquet_path,
             mart_meta=mart_meta,
-            include_rule_breakdown=False,
+            include_rule_breakdown=include_rule_breakdown,
         )
         schedule_deferred_full_compute(deferred_job)
 

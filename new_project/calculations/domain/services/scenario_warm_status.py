@@ -140,6 +140,8 @@ def update_warm_status(*, scenario_id: int, **fields: object) -> ScenarioWarmSta
     for key, value in fields.items():
         if hasattr(status, key):
             setattr(status, key, value)
+    if fields.get("phase") == "done":
+        status.error = None
     status.updated_at = time.time()
     cache.set(
         warm_status_cache_key(scenario_id=scenario_id),
@@ -149,8 +151,81 @@ def update_warm_status(*, scenario_id: int, **fields: object) -> ScenarioWarmSta
     return status
 
 
+def _disk_readiness(
+    *,
+    scenario_id: int,
+    data_version: str | None,
+) -> tuple[bool, bool]:
+    if not data_version:
+        return False, False
+    kpi_ready = (
+        try_load_scenario_compute(
+            scenario_id=scenario_id,
+            data_version=data_version,
+        )
+        is not None
+    )
+    compact_ready = is_scenario_compact_on_disk(
+        scenario_id=scenario_id,
+        data_version=data_version,
+    )
+    return kpi_ready, compact_ready
+
+
+def is_recoverable_warm_error(
+    *,
+    phase: str | None,
+    error: str | None,
+    kpi_ready: bool,
+    compact_ready: bool,
+) -> bool:
+    return (
+        phase == "error"
+        and bool(error)
+        and (kpi_ready or compact_ready)
+    )
+
+
 def mark_warm_error(*, scenario_id: int, error: str) -> None:
+    status = _load_status(scenario_id=scenario_id)
+    data_version = (
+        status.data_version
+        if status is not None
+        else resolve_warm_data_version(scenario_id=scenario_id)
+    )
+    kpi_ready, compact_ready = _disk_readiness(
+        scenario_id=scenario_id,
+        data_version=data_version,
+    )
+    if compact_ready or kpi_ready:
+        update_warm_status(
+            scenario_id=scenario_id,
+            data_version=data_version,
+            phase="done" if compact_ready else "kpi",
+            error=error,
+        )
+        return
     update_warm_status(scenario_id=scenario_id, phase="error", error=error)
+
+
+def mark_breakdown_warm_error(*, scenario_id: int, error: str) -> None:
+    """Ошибка только upgrade rule_by_year; базовый compact остаётся валидным."""
+    status = _load_status(scenario_id=scenario_id)
+    data_version = (
+        status.data_version
+        if status is not None
+        else resolve_warm_data_version(scenario_id=scenario_id)
+    )
+    _, compact_ready = _disk_readiness(
+        scenario_id=scenario_id,
+        data_version=data_version,
+    )
+    update_warm_status(
+        scenario_id=scenario_id,
+        data_version=data_version,
+        phase="done" if compact_ready else "compact",
+        error=error,
+    )
 
 
 def clear_warm_status(*, scenario_id: int) -> None:
@@ -165,24 +240,23 @@ def get_warm_status(*, scenario_id: int) -> dict[str, Any] | None:
 
 
 def _status_to_api(status: ScenarioWarmStatus) -> dict[str, Any]:
-    kpi_ready = False
-    compact_ready = False
-    if status.data_version:
-        kpi_ready = (
-            try_load_scenario_compute(
-                scenario_id=status.scenario_id,
-                data_version=status.data_version,
-            )
-            is not None
-        )
-        compact_ready = is_scenario_compact_on_disk(
-            scenario_id=status.scenario_id,
-            data_version=status.data_version,
-        )
+    kpi_ready, compact_ready = _disk_readiness(
+        scenario_id=status.scenario_id,
+        data_version=status.data_version,
+    )
 
     phase: WarmPhase = status.phase
     if phase != "error" and kpi_ready and phase in {"kpi", "queued", "mask"}:
         phase = "compact" if not compact_ready else status.phase
+
+    error_recoverable = is_recoverable_warm_error(
+        phase=phase,
+        error=status.error,
+        kpi_ready=kpi_ready,
+        compact_ready=compact_ready,
+    )
+    if error_recoverable and compact_ready:
+        phase = "done"
 
     elapsed_ms = 0
     if status.started_at:
@@ -198,5 +272,6 @@ def _status_to_api(status: ScenarioWarmStatus) -> dict[str, Any]:
         "compact_ready": compact_ready,
         "elapsed_ms": elapsed_ms,
         "error": status.error,
+        "error_recoverable": error_recoverable,
         "rebuild_message": status.rebuild_message,
     }

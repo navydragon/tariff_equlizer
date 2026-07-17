@@ -19,6 +19,8 @@ from calculations.domain.services.tariff_load import ScenarioTariffContext, Tari
 from scenarios.models import Scenario
 from core.domain.route.turnover_coefficients import TURNOVER_COEF_YEARS
 
+_RULE_BREAKDOWN_DTYPE = np.float32
+
 
 def effective_rule_coefficient(coefficient: float, base_percent: float) -> float:
     return 1.0 + (coefficient - 1.0) * base_percent / 100.0
@@ -475,7 +477,7 @@ def compute_arrays_full(
     has_rules = bool(rule_meta)
     n_rules = len(rule_meta)
     rule_by_year_arr = (
-        np.zeros((n_rules, n_routes, n_years), dtype=_COMPUTE_DTYPE)
+        np.zeros((n_rules, n_routes, n_years), dtype=_RULE_BREAKDOWN_DTYPE)
         if n_rules and include_rule_by_year
         else None
     )

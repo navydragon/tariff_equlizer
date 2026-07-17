@@ -424,12 +424,27 @@ def _run_deferred_full_compute(job: DeferredFullComputeJob) -> None:
             job.scenario_id,
             job.cache_key,
         )
-        from calculations.domain.services.scenario_warm_status import mark_warm_error
-
-        mark_warm_error(
-            scenario_id=job.scenario_id,
-            error="Ошибка фоновой сборки детализации",
+        from calculations.domain.services.scenario_compute_store import (
+            is_scenario_compact_on_disk,
         )
+        from calculations.domain.services.scenario_warm_status import (
+            mark_breakdown_warm_error,
+            mark_warm_error,
+        )
+
+        if job.include_rule_breakdown and is_scenario_compact_on_disk(
+            scenario_id=job.scenario_id,
+            data_version=job.data_version,
+        ):
+            mark_breakdown_warm_error(
+                scenario_id=job.scenario_id,
+                error="Ошибка фоновой сборки детализации",
+            )
+        else:
+            mark_warm_error(
+                scenario_id=job.scenario_id,
+                error="Ошибка фоновой сборки детализации",
+            )
 
 
 def _deferred_lock_for(job: DeferredFullComputeJob) -> threading.Lock:

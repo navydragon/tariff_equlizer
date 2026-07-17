@@ -11,8 +11,12 @@ from calculations.domain.services.scenario_compute_store import (
     scenario_compute_dir,
     save_scenario_compute_kpi_only,
 )
-from calculations.domain.services.scenario_compute_warm import warm_scenario_compute
-from calculations.domain.services.scenario_effects_formatting import GlobalTotals
+from calculations.domain.services.scenario_compute_warm import (
+    warm_scenario_compute,
+)
+from calculations.domain.services.scenario_effects_formatting import (
+    GlobalTotals,
+)
 from calculations.domain.services.scenario_warm_status import (
     clear_warm_status,
     init_warm_status,
@@ -50,7 +54,9 @@ class ScenarioComputeWarmForceTests(TestCase):
 
         removed = purge_scenario_compute(scenario_id=scenario_id)
         self.assertTrue(removed)
-        self.assertFalse((scenario_compute_cache_root() / str(scenario_id)).exists())
+        self.assertFalse(
+            (scenario_compute_cache_root() / str(scenario_id)).exists()
+        )
 
     def test_clear_warm_status_removes_error_from_cache(self) -> None:
         scenario_id = 999002
@@ -65,10 +71,14 @@ class ScenarioComputeWarmForceTests(TestCase):
             scenario_id=scenario_id,
             error="Ошибка фоновой сборки детализации",
         )
-        self.assertIsNotNone(cache.get(warm_status_cache_key(scenario_id=scenario_id)))
+        self.assertIsNotNone(
+            cache.get(warm_status_cache_key(scenario_id=scenario_id))
+        )
 
         clear_warm_status(scenario_id=scenario_id)
-        self.assertIsNone(cache.get(warm_status_cache_key(scenario_id=scenario_id)))
+        self.assertIsNone(
+            cache.get(warm_status_cache_key(scenario_id=scenario_id))
+        )
 
     @patch(
         "calculations.domain.services.scenario_compute_warm.wait_scenario_detail_ready",
@@ -87,7 +97,10 @@ class ScenarioComputeWarmForceTests(TestCase):
         warm_snapshot_mock,
         wait_detail_mock,
     ) -> None:
-        user = User.objects.create_user(login="force_warm_user", password="pass")
+        user = User.objects.create_user(
+            login="force_warm_user",
+            password="pass",
+        )
         route_set = RouteSet.objects.create(name="Force warm RS", code="FW_RS")
         scenario = Scenario.objects.create(
             name="Force warm scenario",
@@ -122,7 +135,54 @@ class ScenarioComputeWarmForceTests(TestCase):
 
         self.assertEqual(failed, 0)
         self.assertFalse(cache_dir.exists())
-        warm_snapshot_mock.assert_called_once_with(scenario_id=scenario_id)
+        warm_snapshot_mock.assert_called_once_with(
+            scenario_id=scenario_id,
+            include_rule_breakdown=False,
+        )
         wait_detail_mock.assert_called_once()
         status = cache.get(warm_status_cache_key(scenario_id=scenario_id))
         self.assertIsNone(status)
+
+    @patch(
+        "calculations.domain.services.scenario_compute_warm.wait_scenario_detail_ready",
+        return_value=(True, True, 42),
+    )
+    @patch(
+        "calculations.domain.services.scenario_compute_warm.warm_scenario_kpi_snapshot",
+    )
+    @patch(
+        "calculations.domain.services.scenario_compute_warm.resolve_warm_data_version",
+        return_value="forced-version",
+    )
+    def test_force_rebuild_can_request_rule_breakdown(
+        self,
+        _resolve_version_mock,
+        warm_snapshot_mock,
+        _wait_detail_mock,
+    ) -> None:
+        user = User.objects.create_user(
+            login="force_breakdown_user",
+            password="pass",
+        )
+        route_set = RouteSet.objects.create(
+            name="Force breakdown RS",
+            code="FB_RS",
+        )
+        scenario = Scenario.objects.create(
+            name="Force breakdown scenario",
+            author=user,
+            route_set=route_set,
+        )
+
+        failed = warm_scenario_compute(
+            scenario_id=scenario.id,
+            force=True,
+            include_rule_breakdown=True,
+            write=lambda _message: None,
+        )
+
+        self.assertEqual(failed, 0)
+        warm_snapshot_mock.assert_called_once_with(
+            scenario_id=scenario.id,
+            include_rule_breakdown=True,
+        )

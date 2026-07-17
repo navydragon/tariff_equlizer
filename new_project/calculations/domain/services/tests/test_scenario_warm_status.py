@@ -4,6 +4,7 @@ from unittest.mock import patch
 from calculations.domain.services.scenario_warm_status import (
     ScenarioWarmStatus,
     _status_to_api,
+    is_recoverable_warm_error,
 )
 
 
@@ -16,10 +17,16 @@ class ScenarioWarmStatusApiTests(TestCase):
             rebuild_message=None,
         )
         with patch(
-            "calculations.domain.services.scenario_warm_status.try_load_scenario_compute",
+            (
+                "calculations.domain.services.scenario_warm_status."
+                "try_load_scenario_compute"
+            ),
             return_value=object(),
         ), patch(
-            "calculations.domain.services.scenario_warm_status.is_scenario_compact_on_disk",
+            (
+                "calculations.domain.services.scenario_warm_status."
+                "is_scenario_compact_on_disk"
+            ),
             return_value=True,
         ):
             payload = _status_to_api(status)
@@ -37,13 +44,62 @@ class ScenarioWarmStatusApiTests(TestCase):
             rebuild_message=message,
         )
         with patch(
-            "calculations.domain.services.scenario_warm_status.try_load_scenario_compute",
+            (
+                "calculations.domain.services.scenario_warm_status."
+                "try_load_scenario_compute"
+            ),
             return_value=object(),
         ), patch(
-            "calculations.domain.services.scenario_warm_status.is_scenario_compact_on_disk",
+            (
+                "calculations.domain.services.scenario_warm_status."
+                "is_scenario_compact_on_disk"
+            ),
             return_value=True,
         ):
             payload = _status_to_api(status)
 
         self.assertEqual(payload["phase"], "done")
         self.assertEqual(payload["rebuild_message"], message)
+
+    def test_error_with_ready_compact_becomes_recoverable(self) -> None:
+        status = ScenarioWarmStatus(
+            scenario_id=1,
+            phase="error",
+            data_version="dv1",
+            error="Ошибка фоновой сборки детализации",
+        )
+        with patch(
+            (
+                "calculations.domain.services.scenario_warm_status."
+                "try_load_scenario_compute"
+            ),
+            return_value=object(),
+        ), patch(
+            (
+                "calculations.domain.services.scenario_warm_status."
+                "is_scenario_compact_on_disk"
+            ),
+            return_value=True,
+        ):
+            payload = _status_to_api(status)
+
+        self.assertEqual(payload["phase"], "done")
+        self.assertTrue(payload["error_recoverable"])
+
+    def test_recoverable_error_helper_requires_ready_data(self) -> None:
+        self.assertTrue(
+            is_recoverable_warm_error(
+                phase="error",
+                error="boom",
+                kpi_ready=True,
+                compact_ready=False,
+            )
+        )
+        self.assertFalse(
+            is_recoverable_warm_error(
+                phase="error",
+                error="boom",
+                kpi_ready=False,
+                compact_ready=False,
+            )
+        )

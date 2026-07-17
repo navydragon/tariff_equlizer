@@ -1,4 +1,5 @@
 import json
+import logging
 
 from django.contrib.auth.decorators import login_required
 from django.http import JsonResponse
@@ -28,6 +29,8 @@ from core.domain.services.app_settings import AppSettingsService
 from core.export import ExcelExportService, ExportColumn, ExportTable, excel_response
 from core.models import Route
 from scenarios.models import Scenario
+
+logger = logging.getLogger(__name__)
 
 
 def _parse_json_body(request):
@@ -176,11 +179,30 @@ def scenario_effects_compute_pandas_api(request):
         )
 
     service = ScenarioEffectsPandasService()
-    response_dto, calc_errors, meta = service.compute_pandas(
-        scenario=scenario,
-        user_id=request.user.id,
-        include_rule_breakdown=dto.include_rule_breakdown,
-    )
+    try:
+        response_dto, calc_errors, meta = service.compute_pandas(
+            scenario=scenario,
+            user_id=request.user.id,
+            include_rule_breakdown=dto.include_rule_breakdown,
+        )
+    except Exception:
+        logger.exception(
+            "scenario_effects_compute_pandas_api failed "
+            "scenario_id=%s include_rule_breakdown=%s user_id=%s",
+            scenario.id,
+            dto.include_rule_breakdown,
+            request.user.id,
+        )
+        return JsonResponse(
+            {
+                "success": False,
+                "errors": [
+                    "Не удалось выполнить расчёт эффектов. "
+                    "Проверьте права на кеши и повторите попытку.",
+                ],
+            },
+            status=500,
+        )
     if calc_errors:
         if meta.get("code") == "mart_rebuilding":
             return JsonResponse(

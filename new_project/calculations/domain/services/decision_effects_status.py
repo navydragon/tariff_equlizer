@@ -4,6 +4,9 @@ from typing import Literal
 
 from scenarios.models import Scenario
 
+COMPACT_PENDING_MESSAGE = "Детализация в фоне…"
+
+
 def _build_cache_readiness_payload(*, scenario: Scenario) -> dict[str, object]:
     from calculations.domain.services.route_mart_warm_status import (
         get_route_mart_warm_status,
@@ -29,13 +32,24 @@ def _build_cache_readiness_payload(*, scenario: Scenario) -> dict[str, object]:
     elif scenario_phase == "kpi":
         message = "Обновление итогов сценария…"
     elif scenario_phase == "compact":
-        message = "Детализация в фоне…"
+        message = COMPACT_PENDING_MESSAGE
     elif mart_phase == "error":
         message = mart_status.get("error") or "Ошибка пересборки витрины"
     elif scenario_phase == "error":
-        message = scenario_status.get("error") or "Ошибка пересчёта сценария"
+        if scenario_status and scenario_status.get("error_recoverable"):
+            message = (
+                "Базовые данные готовы; разбивка по правилам может быть недоступна."
+            )
+        else:
+            message = scenario_status.get("error") or "Ошибка пересчёта сценария"
     else:
         message = "Данные обновляются…"
+
+    error_recoverable = bool(
+        scenario_status and scenario_status.get("error_recoverable"),
+    )
+    if error_recoverable and scenario_phase == "error":
+        scenario_phase = "done" if compact_ready else scenario_phase
 
     return {
         "route_set_id": scenario.route_set_id,
@@ -45,6 +59,7 @@ def _build_cache_readiness_payload(*, scenario: Scenario) -> dict[str, object]:
         "kpi_ready": kpi_ready,
         "compact_ready": compact_ready,
         "ready_for_compute": ready_for_compute,
+        "error_recoverable": error_recoverable,
         "message": message,
     }
 
@@ -124,7 +139,6 @@ def build_decision_effects_status(
     message = _stage_message(
         stage=stage,
         default_message=message,
-        mart_phase=mart_phase,
         scenario_phase=scenario_phase,
         error=error if isinstance(error, str) else None,
     )
@@ -159,7 +173,11 @@ def _resolve_stage(
     fallout_ready: bool,
     elasticity_enabled: bool,
 ) -> DecisionEffectsStage:
-    if mart_phase == "error" or scenario_phase == "error":
+    if mart_phase == "error":
+        return "error"
+    if scenario_phase == "error" and not (
+        kpi_ready or compact_ready or ready_for_compute
+    ):
         return "error"
 
     if not mart_ready and mart_phase in {"queued", "building"}:
@@ -188,7 +206,6 @@ def _stage_message(
     *,
     stage: DecisionEffectsStage,
     default_message: str,
-    mart_phase: object,
     scenario_phase: object,
     error: str | None,
 ) -> str:
@@ -202,10 +219,10 @@ def _stage_message(
         if scenario_phase == "kpi":
             return "Обновление итогов сценария…"
         if scenario_phase == "compact":
-            return "Детализация в фоне…"
+            return COMPACT_PENDING_MESSAGE
         return default_message
     if stage == "compact_pending":
-        return "Детализация в фоне…"
+        return COMPACT_PENDING_MESSAGE
     if stage == "fallout_pending":
         return "Расчёт эластичности…"
     if stage == "done":

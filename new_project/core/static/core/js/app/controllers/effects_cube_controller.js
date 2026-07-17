@@ -295,11 +295,38 @@ import { clearToasts, showToast } from "../lib/toast.js";
       const readiness = await this._waitForCacheReadiness(
         this.state.selectedScenarioId,
       );
+      if (readiness && readiness.mart_phase === "error") {
+        this.state.cacheKey = null;
+        this._setTableMessage("—");
+        this._showError(
+          readiness.message || "Ошибка пересборки витрины маршрутов",
+        );
+        return;
+      }
       if (
         readiness &&
-        (readiness.mart_phase === "error" || readiness.scenario_phase === "error")
+        readiness.scenario_phase === "error" &&
+        !readiness.error_recoverable &&
+        !readiness.ready_for_compute &&
+        !readiness.kpi_ready
       ) {
+        this.state.cacheKey = null;
+        this._setTableMessage("—");
+        this._showError(readiness.message || "Ошибка пересчёта сценария");
         return;
+      }
+      if (
+        readiness &&
+        readiness.scenario_phase === "error" &&
+        (readiness.error_recoverable ||
+          readiness.ready_for_compute ||
+          readiness.kpi_ready)
+      ) {
+        this._showRebuildStatus(
+          readiness.message ||
+            "Базовые данные готовы; разбивка по правилам может быть недоступна.",
+          "danger",
+        );
       }
       this._setTableLoading(true, "Расчёт данных…");
       this.state.computing = true;
@@ -322,10 +349,14 @@ import { clearToasts, showToast } from "../lib/toast.js";
             const waited = await this._waitForCacheReadiness(
               this.state.selectedScenarioId,
             );
+            if (!waited || waited.mart_phase === "error") {
+              return;
+            }
             if (
-              !waited ||
-              waited.mart_phase === "error" ||
-              waited.scenario_phase === "error"
+              waited.scenario_phase === "error" &&
+              !waited.error_recoverable &&
+              !waited.ready_for_compute &&
+              !waited.kpi_ready
             ) {
               return;
             }

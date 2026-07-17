@@ -15,6 +15,7 @@ from calculations.domain.services.scenario_effects_warm import warm_scenario_kpi
 from calculations.domain.services.scenario_warm_status import (
     clear_warm_status,
     get_warm_status,
+    is_recoverable_warm_error,
     resolve_warm_data_version,
 )
 from calculations.domain.services.tariff_load import TariffLoadService
@@ -52,8 +53,29 @@ def wait_scenario_detail_ready(
     while time.perf_counter() - started < timeout_s:
         warm_status = get_warm_status(scenario_id=scenario_id)
         if warm_status and warm_status.get("phase") == "error":
-            elapsed_ms = int((time.perf_counter() - started) * 1000)
-            return False, False, elapsed_ms
+            if is_recoverable_warm_error(
+                phase=warm_status.get("phase"),
+                error=warm_status.get("error"),
+                kpi_ready=bool(warm_status.get("kpi_ready")),
+                compact_ready=bool(warm_status.get("compact_ready")),
+            ):
+                compact_ready = is_scenario_compact_on_disk(
+                    scenario_id=scenario_id,
+                    data_version=data_version,
+                )
+                fallout_ready = (
+                    is_scenario_fallout_on_disk(
+                        scenario_id=scenario_id,
+                        data_version=data_version,
+                    )
+                    if wait_fallout
+                    else True
+                )
+                if compact_ready and fallout_ready:
+                    return True, fallout_ready, int((time.perf_counter() - started) * 1000)
+            else:
+                elapsed_ms = int((time.perf_counter() - started) * 1000)
+                return False, False, elapsed_ms
 
         compact_ready = is_scenario_compact_on_disk(
             scenario_id=scenario_id,
@@ -93,6 +115,7 @@ def warm_scenario_compute(
     scenario_id: int | None = None,
     compact_timeout_s: float = 180.0,
     force: bool = False,
+    include_rule_breakdown: bool = False,
     write: Callable[[str], None] | None = None,
 ) -> int:
     """Прогревает KPI и compact на диске. Возвращает число неуспешных сценариев."""
@@ -120,6 +143,7 @@ def warm_scenario_compute(
             if _force_rebuild_single_scenario(
                 scenario,
                 compact_timeout_s=compact_timeout_s,
+                include_rule_breakdown=include_rule_breakdown,
                 write=write,
             ):
                 failed += 1
@@ -133,6 +157,7 @@ def warm_scenario_compute(
             _warm_single_scenario_from_cache(
                 scenario,
                 compact_timeout_s=compact_timeout_s,
+                include_rule_breakdown=include_rule_breakdown,
                 write=write,
             ),
         )
@@ -144,6 +169,7 @@ def _force_rebuild_single_scenario(
     scenario: Scenario,
     *,
     compact_timeout_s: float,
+    include_rule_breakdown: bool,
     write: Callable[[str], None],
 ) -> bool:
     write(f"    [{scenario.id}] {scenario.name} — сброс кеша и warm-статуса")
@@ -151,7 +177,10 @@ def _force_rebuild_single_scenario(
     clear_warm_status(scenario_id=scenario.id)
 
     started = time.perf_counter()
-    warm_scenario_kpi_snapshot(scenario_id=scenario.id)
+    warm_scenario_kpi_snapshot(
+        scenario_id=scenario.id,
+        include_rule_breakdown=include_rule_breakdown,
+    )
     kpi_ms = int((time.perf_counter() - started) * 1000)
 
     data_version = resolve_warm_data_version(scenario_id=scenario.id)
@@ -178,6 +207,19 @@ def _force_rebuild_single_scenario(
 
     warm_status = get_warm_status(scenario_id=scenario.id)
     if warm_status and warm_status.get("phase") == "error":
+        if is_recoverable_warm_error(
+            phase=warm_status.get("phase"),
+            error=warm_status.get("error"),
+            kpi_ready=bool(warm_status.get("kpi_ready")),
+            compact_ready=bool(warm_status.get("compact_ready")),
+        ):
+            if compact_ready and (not wait_fallout or fallout_ready):
+                write(
+                    f"    [{scenario.id}] {scenario.name} — "
+                    f"kpi={kpi_ms} ms, compact_wait={detail_wait_ms} ms "
+                    f"(warning: {warm_status.get('error')})",
+                )
+                return False
         error = warm_status.get("error") or "Ошибка фоновой сборки детализации"
         write(f"    [{scenario.id}] {scenario.name} — {error}")
         return True
@@ -200,6 +242,7 @@ def _warm_single_scenario_from_cache(
     scenario: Scenario,
     *,
     compact_timeout_s: float,
+    include_rule_breakdown: bool,
     write: Callable[[str], None],
 ) -> bool:
     if not scenario.author_id:
@@ -218,6 +261,7 @@ def _warm_single_scenario_from_cache(
     _result, errors, meta = pandas_service.compute_pandas(
         scenario=scenario,
         user_id=scenario.author_id,
+        include_rule_breakdown=include_rule_breakdown,
     )
     kpi_ms = int((time.perf_counter() - started) * 1000)
     if errors:

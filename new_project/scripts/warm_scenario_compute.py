@@ -20,10 +20,12 @@ os.chdir(PROJECT_DIR)
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
 django.setup()
 
-from calculations.domain.services.scenario_compute_warm import warm_scenario_compute
-
 
 def main() -> None:
+    from calculations.domain.services.scenario_compute_warm import (
+        warm_scenario_compute,
+    )
+
     parser = argparse.ArgumentParser(
         description="Прогрев scenario_compute для сценариев (KPI + compact).",
     )
@@ -40,6 +42,11 @@ def main() -> None:
         action="store_true",
         help="Сбросить кеш и warm-статус, пересобрать KPI и compact с нуля.",
     )
+    parser.add_argument(
+        "--include-rule-breakdown",
+        action="store_true",
+        help="Собрать rule_by_year для куба эффектов.",
+    )
     args = parser.parse_args()
 
     if args.route_set_id is None and args.scenario_id is None:
@@ -50,9 +57,13 @@ def main() -> None:
         scenario_id=args.scenario_id,
         compact_timeout_s=float(args.compact_timeout),
         force=bool(args.force),
+        include_rule_breakdown=bool(args.include_rule_breakdown),
     )
     if failed:
-        print(f"ERROR: прогрев не завершён для {failed} сценариев.", file=sys.stderr)
+        print(
+            f"ERROR: прогрев не завершён для {failed} сценариев.",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
 
