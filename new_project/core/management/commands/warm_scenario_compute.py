@@ -8,6 +8,7 @@ from calculations.domain.services.scenario_compute_warm import warm_scenario_com
 class Command(BaseCommand):
     help = (
         "Прогревает scenario_compute (KPI + compact на диске) для сценариев. "
+        "С --force сбрасывает дисковый кеш и warm-статус и пересобирает сценарий с нуля. "
         "Запускайте после refresh_deploy_caches --warm-only, пока сервис остановлен."
     )
 
@@ -30,6 +31,14 @@ class Command(BaseCommand):
             default=180,
             help="Секунд ждать compact на диске (по умолчанию 180).",
         )
+        parser.add_argument(
+            "--force",
+            action="store_true",
+            help=(
+                "Сбросить scenario_compute и warm-статус, затем пересобрать KPI и compact. "
+                "Используйте при «Ошибка фоновой сборки детализации»."
+            ),
+        )
 
     def handle(self, *args, **options) -> None:
         route_set_id = options["route_set_id"]
@@ -41,6 +50,7 @@ class Command(BaseCommand):
             route_set_id=route_set_id,
             scenario_id=scenario_id,
             compact_timeout_s=float(options["compact_timeout"]),
+            force=bool(options["force"]),
             write=self.stdout.write,
         )
         if failed:

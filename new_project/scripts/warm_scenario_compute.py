@@ -35,6 +35,11 @@ def main() -> None:
         default=180,
         help="Секунд ждать compact на диске (по умолчанию 180).",
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Сбросить кеш и warm-статус, пересобрать KPI и compact с нуля.",
+    )
     args = parser.parse_args()
 
     if args.route_set_id is None and args.scenario_id is None:
@@ -44,6 +49,7 @@ def main() -> None:
         route_set_id=args.route_set_id,
         scenario_id=args.scenario_id,
         compact_timeout_s=float(args.compact_timeout),
+        force=bool(args.force),
     )
     if failed:
         print(f"ERROR: прогрев не завершён для {failed} сценариев.", file=sys.stderr)

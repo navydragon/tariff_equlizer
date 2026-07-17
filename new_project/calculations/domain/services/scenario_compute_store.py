@@ -477,6 +477,14 @@ def purge_stale_scenario_compute(
     return removed
 
 
+def purge_scenario_compute(*, scenario_id: int) -> bool:
+    scenario_dir = scenario_compute_cache_root() / str(scenario_id)
+    if not scenario_dir.is_dir():
+        return False
+    shutil.rmtree(scenario_dir, ignore_errors=True)
+    return True
+
+
 def save_scenario_compute(
     *,
     scenario_id: int,

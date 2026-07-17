@@ -153,6 +153,10 @@ def mark_warm_error(*, scenario_id: int, error: str) -> None:
     update_warm_status(scenario_id=scenario_id, phase="error", error=error)
 
 
+def clear_warm_status(*, scenario_id: int) -> None:
+    cache.delete(warm_status_cache_key(scenario_id=scenario_id))
+
+
 def get_warm_status(*, scenario_id: int) -> dict[str, Any] | None:
     status = _load_status(scenario_id=scenario_id)
     if status is None:
