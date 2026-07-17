@@ -34,7 +34,7 @@ export async function fetchJson(url, options = {}) {
 }
 
 export async function fetchBlob(url, options = {}) {
-  const { method = "GET", body, csrf = true, headers = {} } = options;
+  const { method = "GET", body, csrf = true, headers = {}, signal } = options;
 
   const finalHeaders = {
     Accept: "*/*",
