@@ -47,6 +47,8 @@ from core.domain.cargo.ordering import (
 from core.models import Route
 from scenarios.models import Scenario
 
+_CHART_MAX_GROUPS = 20
+
 
 @dataclass
 class _AggBucket:
@@ -584,7 +586,7 @@ class ScenarioEffectsService:
             ]
 
         candidates.sort(key=lambda item: item[1].total, reverse=True)
-        top = candidates[:10]
+        top = candidates[:_CHART_MAX_GROUPS]
 
         return EffectChartDTO(
             labels=[label for label, _ in top],

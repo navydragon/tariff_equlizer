@@ -5,6 +5,10 @@ import { persistActiveScenario } from "../lib/scenario_active.js";
 import { clearToasts, showToast } from "../lib/toast.js";
 
 (function () {
+  const EFFECTS_CHART_BAR_HEIGHT_PX = 36;
+  const EFFECTS_CHART_LEGEND_HEIGHT_PX = 48;
+  const EFFECTS_CHART_MIN_HEIGHT_PX = 280;
+
   const application = window.stimulusApp;
   if (!application || typeof Stimulus === "undefined") {
     console.error("Stimulus is not available for decision-effects.");
@@ -1477,6 +1481,12 @@ import { clearToasts, showToast } from "../lib/toast.js";
         window.Chart.register(ChartDataLabelsPlugin);
       }
 
+      const chartHeight = Math.max(
+        EFFECTS_CHART_MIN_HEIGHT_PX,
+        labels.length * EFFECTS_CHART_BAR_HEIGHT_PX + EFFECTS_CHART_LEGEND_HEIGHT_PX,
+      );
+      this.chartCanvasTarget.style.height = `${chartHeight}px`;
+
       const ctx = this.chartCanvasTarget.getContext("2d");
       this.state.chart = new window.Chart(ctx, {
         type: "bar",
@@ -1549,6 +1559,9 @@ import { clearToasts, showToast } from "../lib/toast.js";
           // ignore
         }
         this.state.chart = null;
+      }
+      if (this.hasChartCanvasTarget) {
+        this.chartCanvasTarget.style.height = "";
       }
     }
 

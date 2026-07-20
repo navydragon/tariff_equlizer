@@ -784,6 +784,45 @@ class ScenarioEffectsServiceTests(TariffLoadServiceTestMixin, TestCase):
         labels = [row.label.strip() for row in response.table_rows if row.label.strip() != "ИТОГО"]
         self.assertEqual(labels, ["Уголь каменный", "Нефтяные грузы"])
 
+    def test_chart_includes_groups_outside_top_ten_up_to_limit(self) -> None:
+        from calculations.domain.services.scenario_effects import _AggBucket
+
+        buckets: dict[tuple[str], _AggBucket] = {}
+        for index in range(11):
+            bucket = _AggBucket()
+            if index == 10:
+                bucket.base = Decimal("20000000000")
+                bucket.rules = Decimal("-27000000000")
+            else:
+                bucket.base = Decimal(str((11 - index) * 1_000_000_000))
+            buckets[(f"Группа {index + 1}",)] = bucket
+
+        chart = self.effects_service._build_chart(
+            buckets,
+            group_by_inner="none",
+        )
+
+        self.assertEqual(len(chart.labels), 11)
+        self.assertIn("Группа 11", chart.labels)
+
+    def test_chart_limits_to_top_twenty(self) -> None:
+        from calculations.domain.services.scenario_effects import _AggBucket
+
+        buckets: dict[tuple[str, str], _AggBucket] = {}
+        for index in range(25):
+            bucket = _AggBucket(base=Decimal(str((25 - index) * 1_000_000_000)))
+            buckets[(f"Холдинг {index + 1}", "ИТОГО")] = bucket
+
+        chart = self.effects_service._build_chart(
+            buckets,
+            group_by_inner="cargo_group",
+        )
+
+        self.assertEqual(len(chart.labels), 20)
+        self.assertEqual(chart.labels[0], "Холдинг 1")
+        self.assertEqual(chart.labels[-1], "Холдинг 20")
+        self.assertNotIn("Холдинг 21", chart.labels)
+
 
 class ScenarioEffectsApiTests(TariffLoadServiceTestMixin, TestCase):
     def setUp(self) -> None:

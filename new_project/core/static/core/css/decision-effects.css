@@ -283,7 +283,8 @@
 
 .decision-effects-chart-wrap {
   position: relative;
-  height: 420px;
+  max-height: 420px;
+  overflow-y: auto;
 }
 
 .decision-effects-chart-wrap--loading canvas {
