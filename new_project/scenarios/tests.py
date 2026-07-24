@@ -2749,3 +2749,126 @@ class IpemMetallurgyElasticityPointsTests(TestCase):
         self.assertEqual(metals[-1][1], Decimal("2.0000"))
         self.assertEqual(ore[-1][0], Decimal("0.2400"))
         self.assertEqual(ore[-1][1], Decimal("2.0000"))
+
+
+class IpemOilElasticitySeedTests(TestCase):
+    def test_seed_oil_rule_does_not_delete_other_rules(self) -> None:
+        from scenarios.domain.services.base_elasticity_seed import (
+            ELASTICITY_SET_NAME,
+            EXPORT_RULE_NAME,
+        )
+        from scenarios.domain.services.ipem_oil_elasticity_seed import (
+            OIL_RULE_NAME,
+            _default_workbook_path,
+            seed_ipem_oil_elasticity_for_scenario,
+        )
+        from core.models import CargoGroup, MessageType
+        from scenarios.models import ElasticityRule, ElasticityRulePoint, ElasticitySet, Scenario
+
+        user = User.objects.create_user(
+            login="ipem_oil_seed_user",
+            password="test_pass",
+        )
+        route_set = RouteSet.objects.create(
+            code="RS_IPEM_OIL_SEED",
+            name="Ipem oil seed RS",
+        )
+        scenario = Scenario.objects.create(
+            name="Ipem oil seed scenario",
+            description="",
+            start_year=2025,
+            end_year=2030,
+            route_set=route_set,
+            author=user,
+        )
+        elasticity_set = ElasticitySet.objects.create(
+            name=ELASTICITY_SET_NAME,
+            author=user,
+        )
+
+        coal_group = CargoGroup.objects.create(name="Уголь", code=1, position=1)
+        export_mt = MessageType.objects.create(code="MT_OIL_EXP", name="Экспорт")
+        ElasticityRule.objects.create(
+            elasticity_set=elasticity_set,
+            name=EXPORT_RULE_NAME,
+            position=0,
+            cargo_group=coal_group,
+            message_type=export_mt,
+        )
+        ElasticityRule.objects.create(
+            elasticity_set=elasticity_set,
+            name="IPEM: Удобрения",
+            position=30,
+            cargo_group=CargoGroup.objects.create(
+                code=8,
+                name="Удобрения",
+                position=8,
+            ),
+        )
+
+        xlsx_path = _default_workbook_path()
+        if not xlsx_path.exists():
+            self.skipTest("IPEM oil workbook is missing")
+
+        CargoGroup.objects.update_or_create(
+            code=3,
+            defaults={"name": "Нефтяные грузы", "position": 3},
+        )
+
+        result = seed_ipem_oil_elasticity_for_scenario(
+            scenario,
+            attach=True,
+            xlsx_path=xlsx_path,
+        )
+
+        self.assertGreaterEqual(result.points_upserted, 100)
+        self.assertTrue(
+            ElasticityRule.objects.filter(
+                elasticity_set=elasticity_set,
+                name=EXPORT_RULE_NAME,
+            ).exists(),
+        )
+        self.assertTrue(
+            ElasticityRule.objects.filter(
+                elasticity_set=elasticity_set,
+                name="IPEM: Удобрения",
+            ).exists(),
+        )
+        oil_rule = ElasticityRule.objects.get(
+            elasticity_set=elasticity_set,
+            name=OIL_RULE_NAME,
+        )
+        self.assertEqual(oil_rule.cargo_group.code, 3)
+        self.assertGreaterEqual(
+            ElasticityRulePoint.objects.filter(rule=oil_rule).count(),
+            100,
+        )
+
+
+class IpemOilElasticityPointsTests(TestCase):
+    def test_seed_loads_full_oil_curve(self) -> None:
+        from decimal import Decimal
+
+        from scenarios.domain.services.ipem_oil_elasticity_seed import (
+            _default_workbook_path,
+            _load_points_from_block,
+        )
+
+        workbook_path = _default_workbook_path()
+        if not workbook_path.exists():
+            self.skipTest("IPEM oil workbook is missing")
+
+        import openpyxl
+
+        worksheet = openpyxl.load_workbook(workbook_path, data_only=True)[
+            "Технический лист"
+        ]
+        points = _load_points_from_block(
+            worksheet,
+            marginality_col_0based=0,
+            coefficient_col_0based=1,
+        )
+
+        self.assertGreaterEqual(len(points), 100)
+        self.assertEqual(points[-1][0], Decimal("0.1700"))
+        self.assertEqual(points[-1][1], Decimal("2.0000"))

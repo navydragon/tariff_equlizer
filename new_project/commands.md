@@ -265,6 +265,28 @@ python manage.py import_ipem_fertilizers_routes \
 python manage.py refresh_deploy_caches
 ```
 
+### `import_ipem_oil_routes`
+
+Импорт **model-маршрутов** нефти из `Нефть_эластика.xlsx` (лист `Нефтяные`, cargo_group=3).  
+С `--scenario-id` — правило эластичности «IPEM: Нефть» (лист `Технический лист`).
+
+| Параметр | По умолчанию | Описание |
+|----------|--------------|----------|
+| `--file` | `../data/ipem/Нефть_эластика.xlsx` | XLSX IPEM |
+| `--route-set-code` | `RZD_2026` | Набор маршрутов |
+| `--scenario-id` | — | Сценарий: seed эластичности + привязка набора |
+| `--skip-elasticity` | — | Только маршруты |
+| `--dry-run` | — | Только проверка резолва |
+
+```bash
+python manage.py import_ipem_oil_routes \
+  --scenario-id 1 \
+  --route-set-code RZD_2026 \
+  --file ../data/ipem/Нефть_эластика.xlsx
+
+python manage.py refresh_deploy_caches
+```
+
 ### `export_ipem_rzd_economics_2025`
 
 Экспорт строк `total_ipem.csv`, совпадающих с маршрутами РЖД по **ЕСР отпр. + ЕСР назн. + груз** (fuzzy по имени груза), с полями экономики в CSV.
