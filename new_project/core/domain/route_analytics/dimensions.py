@@ -90,6 +90,9 @@ DIMENSIONS: dict[str, DimensionSpec] = {
 
 VALID_METRICS = frozenset({"count", "money", "volume", "turnover"})
 
+INNER_DIMENSION_NONE = "none"
+VALID_INNER_DIMENSIONS = frozenset(DIMENSIONS) | {INNER_DIMENSION_NONE}
+
 VALID_KPI_YEARS = frozenset({2026})
 
 KPI_FIELDS_BY_YEAR: dict[int, dict[str, str]] = {

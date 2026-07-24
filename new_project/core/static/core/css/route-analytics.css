@@ -16,6 +16,15 @@
   max-height: 420px;
 }
 
+.route-analytics-pie-wrap {
+  min-height: 360px;
+  position: relative;
+}
+
+.route-analytics-pie-wrap canvas {
+  max-height: 360px;
+}
+
 .route-analytics-table-loading {
   display: flex;
   align-items: center;
@@ -23,7 +32,19 @@
   min-height: 200px;
 }
 
-.route-analytics-table-wrap .table tbody tr:last-child {
+.route-analytics-table-wrap .table tbody tr:last-child,
+.route-analytics-table-wrap .table tbody tr.route-analytics-row-subtotal {
   font-weight: 600;
   background-color: rgba(6, 57, 113, 0.04);
+}
+
+.route-analytics-drill-nav {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.route-analytics-drill-breadcrumb {
+  font-size: 0.875rem;
 }

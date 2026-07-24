@@ -12,6 +12,7 @@
   data-controller="route-analytics"
   data-route-analytics-route-set-list-url-value="{% url 'route_set_list_api' %}"
   data-route-analytics-aggregate-url-value="{% url 'route_analytics_aggregate_api' %}"
+  data-route-analytics-export-url-value="{% url 'route_analytics_export_api' %}"
 >
   <div class="page-header d-print-none">
     <div class="row align-items-center">
@@ -27,7 +28,7 @@
   <div class="card mt-4">
     <div class="card-body">
       <div class="row g-3 align-items-end">
-        <div class="col-md-6 col-lg-4">
+        <div class="col-md-6 col-lg-3">
           <label class="form-label" for="routeAnalyticsRouteSetSelect">Набор маршрутов</label>
           <select
             id="routeAnalyticsRouteSetSelect"
@@ -38,7 +39,7 @@
             <option value="">Загрузка...</option>
           </select>
         </div>
-        <div class="col-md-6 col-lg-4">
+        <div class="col-md-6 col-lg-3">
           <label class="form-label" for="routeAnalyticsDimensionSelect">Параметр группировки</label>
           <select
             id="routeAnalyticsDimensionSelect"
@@ -61,6 +62,42 @@
             <option value="park_type">Тип парка</option>
             <option value="special_container_type">Вид спец. контейнера</option>
           </select>
+        </div>
+        <div class="col-md-6 col-lg-3">
+          <label class="form-label" for="routeAnalyticsDimensionInnerSelect">Группировка внутри</label>
+          <select
+            id="routeAnalyticsDimensionInnerSelect"
+            class="form-select form-select-sm"
+            data-route-analytics-target="dimensionInnerSelect"
+            data-action="change->route-analytics#onFilterChange"
+          >
+            <option value="none">Нет</option>
+            <option value="cargo_group">Группа груза</option>
+            <option value="cargo_code">Код груза</option>
+            <option value="direction">Направление</option>
+            <option value="origin_railroad">Дорога отправления</option>
+            <option value="destination_railroad">Дорога назначения</option>
+            <option value="wagon_kind">Род вагона</option>
+            <option value="shipment_type">Тип отправки</option>
+            <option value="message_type">Вид сообщения</option>
+            <option value="shipper_holding">Холдинг</option>
+            <option value="shipper">Грузоотправитель</option>
+            <option value="distance_belt">Пояс дальности</option>
+            <option value="shipment_category">Категория отпр.</option>
+            <option value="park_type">Тип парка</option>
+            <option value="special_container_type">Вид спец. контейнера</option>
+          </select>
+        </div>
+        <div class="col-md-6 col-lg-3">
+          <button
+            type="button"
+            class="btn btn-outline-primary btn-sm w-100"
+            data-route-analytics-target="exportButton"
+            data-action="click->route-analytics#onExport"
+            disabled
+          >
+            Экспорт в Excel
+          </button>
         </div>
       </div>
     </div>
@@ -148,21 +185,45 @@
           <div class="route-analytics-pane-placeholder text-muted py-4 text-center">
             Выберите набор маршрутов и параметр группировки.
           </div>
-          <div class="row g-3 route-analytics-pane-content d-none">
-            <div class="col-lg-6">
-              <div
-                class="route-analytics-table-wrap"
-                data-route-analytics-target="tableWrap"
-                data-metric="count"
-              ></div>
+          <div class="route-analytics-pane-content d-none">
+            <div
+              class="route-analytics-drill-nav d-none mb-3"
+              data-route-analytics-target="drillNav"
+              data-metric="count"
+            >
+              <button
+                type="button"
+                class="btn btn-sm btn-outline-secondary"
+                data-action="click->route-analytics#onDrillBack"
+                data-route-analytics-metric-param="count"
+              >
+                ← Назад
+              </button>
+              <span class="route-analytics-drill-breadcrumb text-muted" data-role="breadcrumb"></span>
             </div>
-            <div class="col-lg-6">
-              <div class="route-analytics-chart-wrap">
-                <canvas
-                  data-route-analytics-target="chartCanvas"
+            <div class="row g-3">
+              <div class="col-lg-6">
+                <div
+                  class="route-analytics-table-wrap"
+                  data-route-analytics-target="tableWrap"
                   data-metric="count"
-                  aria-label="Диаграмма: количество маршрутов"
-                ></canvas>
+                ></div>
+              </div>
+              <div class="col-lg-6">
+                <div class="route-analytics-chart-wrap">
+                  <canvas
+                    data-route-analytics-target="chartCanvas"
+                    data-metric="count"
+                    aria-label="Диаграмма: количество маршрутов"
+                  ></canvas>
+                </div>
+                <div class="route-analytics-pie-wrap mt-3">
+                  <canvas
+                    data-route-analytics-target="pieCanvas"
+                    data-metric="count"
+                    aria-label="Круговая диаграмма: доли количества"
+                  ></canvas>
+                </div>
               </div>
             </div>
           </div>
@@ -179,21 +240,45 @@
           <div class="route-analytics-pane-placeholder text-muted py-4 text-center">
             Выберите набор маршрутов и параметр группировки.
           </div>
-          <div class="row g-3 route-analytics-pane-content d-none">
-            <div class="col-lg-6">
-              <div
-                class="route-analytics-table-wrap"
-                data-route-analytics-target="tableWrap"
-                data-metric="money"
-              ></div>
+          <div class="route-analytics-pane-content d-none">
+            <div
+              class="route-analytics-drill-nav d-none mb-3"
+              data-route-analytics-target="drillNav"
+              data-metric="money"
+            >
+              <button
+                type="button"
+                class="btn btn-sm btn-outline-secondary"
+                data-action="click->route-analytics#onDrillBack"
+                data-route-analytics-metric-param="money"
+              >
+                ← Назад
+              </button>
+              <span class="route-analytics-drill-breadcrumb text-muted" data-role="breadcrumb"></span>
             </div>
-            <div class="col-lg-6">
-              <div class="route-analytics-chart-wrap">
-                <canvas
-                  data-route-analytics-target="chartCanvas"
+            <div class="row g-3">
+              <div class="col-lg-6">
+                <div
+                  class="route-analytics-table-wrap"
+                  data-route-analytics-target="tableWrap"
                   data-metric="money"
-                  aria-label="Диаграмма: сумма денег"
-                ></canvas>
+                ></div>
+              </div>
+              <div class="col-lg-6">
+                <div class="route-analytics-chart-wrap">
+                  <canvas
+                    data-route-analytics-target="chartCanvas"
+                    data-metric="money"
+                    aria-label="Диаграмма: сумма денег"
+                  ></canvas>
+                </div>
+                <div class="route-analytics-pie-wrap mt-3">
+                  <canvas
+                    data-route-analytics-target="pieCanvas"
+                    data-metric="money"
+                    aria-label="Круговая диаграмма: доли доходов"
+                  ></canvas>
+                </div>
               </div>
             </div>
           </div>
@@ -210,21 +295,45 @@
           <div class="route-analytics-pane-placeholder text-muted py-4 text-center">
             Выберите набор маршрутов и параметр группировки.
           </div>
-          <div class="row g-3 route-analytics-pane-content d-none">
-            <div class="col-lg-6">
-              <div
-                class="route-analytics-table-wrap"
-                data-route-analytics-target="tableWrap"
-                data-metric="volume"
-              ></div>
+          <div class="route-analytics-pane-content d-none">
+            <div
+              class="route-analytics-drill-nav d-none mb-3"
+              data-route-analytics-target="drillNav"
+              data-metric="volume"
+            >
+              <button
+                type="button"
+                class="btn btn-sm btn-outline-secondary"
+                data-action="click->route-analytics#onDrillBack"
+                data-route-analytics-metric-param="volume"
+              >
+                ← Назад
+              </button>
+              <span class="route-analytics-drill-breadcrumb text-muted" data-role="breadcrumb"></span>
             </div>
-            <div class="col-lg-6">
-              <div class="route-analytics-chart-wrap">
-                <canvas
-                  data-route-analytics-target="chartCanvas"
+            <div class="row g-3">
+              <div class="col-lg-6">
+                <div
+                  class="route-analytics-table-wrap"
+                  data-route-analytics-target="tableWrap"
                   data-metric="volume"
-                  aria-label="Диаграмма: погрузка"
-                ></canvas>
+                ></div>
+              </div>
+              <div class="col-lg-6">
+                <div class="route-analytics-chart-wrap">
+                  <canvas
+                    data-route-analytics-target="chartCanvas"
+                    data-metric="volume"
+                    aria-label="Диаграмма: погрузка"
+                  ></canvas>
+                </div>
+                <div class="route-analytics-pie-wrap mt-3">
+                  <canvas
+                    data-route-analytics-target="pieCanvas"
+                    data-metric="volume"
+                    aria-label="Круговая диаграмма: доли погрузки"
+                  ></canvas>
+                </div>
               </div>
             </div>
           </div>
@@ -241,21 +350,45 @@
           <div class="route-analytics-pane-placeholder text-muted py-4 text-center">
             Выберите набор маршрутов и параметр группировки.
           </div>
-          <div class="row g-3 route-analytics-pane-content d-none">
-            <div class="col-lg-6">
-              <div
-                class="route-analytics-table-wrap"
-                data-route-analytics-target="tableWrap"
-                data-metric="turnover"
-              ></div>
+          <div class="route-analytics-pane-content d-none">
+            <div
+              class="route-analytics-drill-nav d-none mb-3"
+              data-route-analytics-target="drillNav"
+              data-metric="turnover"
+            >
+              <button
+                type="button"
+                class="btn btn-sm btn-outline-secondary"
+                data-action="click->route-analytics#onDrillBack"
+                data-route-analytics-metric-param="turnover"
+              >
+                ← Назад
+              </button>
+              <span class="route-analytics-drill-breadcrumb text-muted" data-role="breadcrumb"></span>
             </div>
-            <div class="col-lg-6">
-              <div class="route-analytics-chart-wrap">
-                <canvas
-                  data-route-analytics-target="chartCanvas"
+            <div class="row g-3">
+              <div class="col-lg-6">
+                <div
+                  class="route-analytics-table-wrap"
+                  data-route-analytics-target="tableWrap"
                   data-metric="turnover"
-                  aria-label="Диаграмма: грузооборот"
-                ></canvas>
+                ></div>
+              </div>
+              <div class="col-lg-6">
+                <div class="route-analytics-chart-wrap">
+                  <canvas
+                    data-route-analytics-target="chartCanvas"
+                    data-metric="turnover"
+                    aria-label="Диаграмма: грузооборот"
+                  ></canvas>
+                </div>
+                <div class="route-analytics-pie-wrap mt-3">
+                  <canvas
+                    data-route-analytics-target="pieCanvas"
+                    data-metric="turnover"
+                    aria-label="Круговая диаграмма: доли грузооборота"
+                  ></canvas>
+                </div>
               </div>
             </div>
           </div>

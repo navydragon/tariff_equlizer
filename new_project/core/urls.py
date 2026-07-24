@@ -349,6 +349,11 @@ urlpatterns = [
         name="route_analytics_aggregate_api",
     ),
     path(
+        "analysis/api/route-analytics/export/",
+        views.route_analytics_export_api,
+        name="route_analytics_export_api",
+    ),
+    path(
         "analysis/api/route-analytics/totals/",
         views.route_analytics_totals_api,
         name="route_analytics_totals_api",

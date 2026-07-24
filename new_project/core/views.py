@@ -23,10 +23,12 @@ from core.domain.route_equalizer_preset.dto import (
     parse_variant_request,
 )
 from core.domain.route_equalizer_preset.services import RouteEqualizerPresetService
+from core.domain.route_analytics.dimensions import INNER_DIMENSION_NONE
 from core.domain.route_analytics.dimensions import RZD_2026_ROUTE_SET_CODE
 from core.domain.route_analytics.dimensions import VALID_KPI_YEARS
 from core.domain.route_analytics.dto import RouteAnalyticsRequestDTO
 from core.domain.route_analytics.services import RouteAnalyticsService
+from core.export import ExcelExportService, ExportColumn, ExportTable, excel_response
 from core.domain.services.app_settings import AppSettingsService
 from core.domain.railroad.dto import CreateRailRoadDTO, UpdateRailRoadDTO
 from core.domain.railroad.services import RailRoadService
@@ -2404,9 +2406,7 @@ def _parse_kpi_year_param(request) -> tuple[int | None, list[str]]:
     return year, []
 
 
-@login_required
-@require_http_methods(["GET"])
-def route_analytics_aggregate_api(request):
+def _parse_route_analytics_request(request) -> tuple[RouteAnalyticsRequestDTO | None, list[str]]:
     try:
         route_set_id = int(request.GET.get("route_set_id", "0"))
     except (TypeError, ValueError):
@@ -2414,18 +2414,79 @@ def route_analytics_aggregate_api(request):
 
     dimension = (request.GET.get("dimension") or "").strip()
     metric = (request.GET.get("metric") or "").strip()
+    dimension_inner = (request.GET.get("dimension_inner") or INNER_DIMENSION_NONE).strip()
+    parent_raw = request.GET.get("parent_filter")
+    parent_filter = (parent_raw or "").strip() or None
     kpi_year, kpi_errors = _parse_kpi_year_param(request)
     if kpi_errors:
-        return JsonResponse({"success": False, "errors": kpi_errors}, status=400)
+        return None, kpi_errors
 
     dto = RouteAnalyticsRequestDTO(
         route_set_id=route_set_id,
         dimension=dimension,
         metric=metric,
         kpi_year=kpi_year,
+        dimension_inner=dimension_inner or INNER_DIMENSION_NONE,
+        parent_filter=parent_filter,
     )
+    return dto, []
 
+
+def _route_analytics_flat_to_export(result) -> ExportTable:
+    columns = [
+        ExportColumn(key="label", header=result.dimension_label),
+        ExportColumn(key="value", header=f"Значение, {result.unit}"),
+        ExportColumn(key="share_pct", header="Доля, %"),
+    ]
+    rows = [
+        {
+            "label": row.label,
+            "value": row.value_display,
+            "share_pct": row.share_pct,
+        }
+        for row in result.rows
+    ]
+    return ExportTable(sheet_title="Аналитика маршрутов", columns=columns, rows=rows)
+
+
+def _route_analytics_nested_to_export(result) -> ExportTable:
+    columns = [
+        ExportColumn(key="outer_label", header=result.dimension_label),
+        ExportColumn(key="inner_label", header=result.dimension_inner_label),
+        ExportColumn(key="value", header=f"Значение, {result.unit}"),
+        ExportColumn(key="share_pct", header="Доля, %"),
+    ]
+    rows = [
+        {
+            "outer_label": row.outer_label,
+            "inner_label": row.inner_label,
+            "value": row.value_display,
+            "share_pct": row.share_pct,
+        }
+        for row in result.rows
+    ]
+    return ExportTable(sheet_title="Аналитика маршрутов", columns=columns, rows=rows)
+
+
+@login_required
+@require_http_methods(["GET"])
+def route_analytics_aggregate_api(request):
+    dto, parse_errors = _parse_route_analytics_request(request)
+    if parse_errors:
+        return JsonResponse({"success": False, "errors": parse_errors}, status=400)
+    assert dto is not None
+
+    mode = (request.GET.get("mode") or "").strip().lower()
     service = RouteAnalyticsService()
+
+    if mode == "nested":
+        result, errors = service.aggregate_nested(dto)
+        if errors:
+            status = 404 if "не найден" in errors[0] else 400
+            return JsonResponse({"success": False, "errors": errors}, status=status)
+        assert result is not None
+        return JsonResponse({"success": True, **result.to_api_dict()})
+
     result, errors = service.aggregate(dto)
     if errors:
         status = 404 if "не найден" in errors[0] else 400
@@ -2433,6 +2494,44 @@ def route_analytics_aggregate_api(request):
 
     assert result is not None
     return JsonResponse({"success": True, **result.to_api_dict()})
+
+
+@login_required
+@require_http_methods(["GET"])
+def route_analytics_export_api(request):
+    dto, parse_errors = _parse_route_analytics_request(request)
+    if parse_errors:
+        return JsonResponse({"success": False, "errors": parse_errors}, status=400)
+    assert dto is not None
+
+    # Export always uses the full table view (no drill-down filter).
+    export_dto = RouteAnalyticsRequestDTO(
+        route_set_id=dto.route_set_id,
+        dimension=dto.dimension,
+        metric=dto.metric,
+        kpi_year=dto.kpi_year,
+        dimension_inner=dto.dimension_inner,
+        parent_filter=None,
+    )
+
+    service = RouteAnalyticsService()
+    if export_dto.dimension_inner != INNER_DIMENSION_NONE:
+        result, errors = service.aggregate_nested(export_dto)
+        if errors:
+            status = 404 if "не найден" in errors[0] else 400
+            return JsonResponse({"success": False, "errors": errors}, status=status)
+        assert result is not None
+        export_table = _route_analytics_nested_to_export(result)
+    else:
+        result, errors = service.aggregate(export_dto)
+        if errors:
+            status = 404 if "не найден" in errors[0] else 400
+            return JsonResponse({"success": False, "errors": errors}, status=status)
+        assert result is not None
+        export_table = _route_analytics_flat_to_export(result)
+
+    content = ExcelExportService().build_workbook_bytes(export_table)
+    return excel_response(filename="analitika_marshrutov.xlsx", content=content)
 
 
 @login_required

@@ -1,6 +1,7 @@
 from decimal import Decimal
 
-from django.test import TestCase
+from django.test import Client, TestCase
+from django.urls import reverse
 
 from core.domain.route_analytics.dto import RouteAnalyticsRequestDTO
 from core.domain.route_analytics.services import RouteAnalyticsService
@@ -15,6 +16,7 @@ from core.models import (
     ShipmentType,
     Shipper,
     Station,
+    User,
     WagonKind,
 )
 
@@ -152,12 +154,16 @@ class RouteAnalyticsServiceTests(TestCase):
         dimension: str,
         metric: str,
         kpi_year: int = 2026,
+        dimension_inner: str = "none",
+        parent_filter: str | None = None,
     ) -> RouteAnalyticsRequestDTO:
         return RouteAnalyticsRequestDTO(
             route_set_id=self.route_set.id,
             dimension=dimension,
             metric=metric,
             kpi_year=kpi_year,
+            dimension_inner=dimension_inner,
+            parent_filter=parent_filter,
         )
 
     def test_count_by_cargo_group(self) -> None:
@@ -293,3 +299,189 @@ class RouteAnalyticsServiceTests(TestCase):
         self.assertEqual(errors, [])
         assert result is not None
         self.assertEqual(result.total, Decimal("3"))
+
+    def test_inner_equals_outer_rejected(self) -> None:
+        result, errors = self.service.aggregate(
+            self._request(
+                dimension="cargo_group",
+                metric="count",
+                dimension_inner="cargo_group",
+            ),
+        )
+        self.assertIsNone(result)
+        self.assertTrue(any("совпадать" in error for error in errors))
+
+    def test_drilldown_by_parent_filter(self) -> None:
+        result, errors = self.service.aggregate(
+            self._request(
+                dimension="cargo_group",
+                metric="count",
+                dimension_inner="shipper_holding",
+                parent_filter="Уголь",
+            ),
+        )
+        self.assertEqual(errors, [])
+        assert result is not None
+        data_rows = [row for row in result.rows if not row.is_total]
+        labels = {row.label: row.value for row in data_rows}
+        self.assertEqual(labels.get("Holding A"), Decimal("1"))
+        self.assertEqual(labels.get("Прочие"), Decimal("1"))
+        self.assertEqual(result.total, Decimal("2"))
+        self.assertFalse(result.drilldown_enabled)
+        self.assertEqual(result.parent_label, "Уголь")
+        self.assertEqual(result.dimension, "shipper_holding")
+
+    def test_aggregate_nested_with_subtotals(self) -> None:
+        result, errors = self.service.aggregate_nested(
+            self._request(
+                dimension="cargo_group",
+                metric="count",
+                dimension_inner="shipper_holding",
+            ),
+        )
+        self.assertEqual(errors, [])
+        assert result is not None
+
+        coal_detail = [
+            row
+            for row in result.rows
+            if row.outer_label == "Уголь" and not row.is_subtotal and not row.is_total
+        ]
+        self.assertEqual(len(coal_detail), 2)
+
+        coal_subtotal = next(
+            row
+            for row in result.rows
+            if row.outer_label == "Уголь" and row.is_subtotal
+        )
+        self.assertEqual(coal_subtotal.value, Decimal("2"))
+        self.assertEqual(coal_subtotal.inner_label, "ИТОГО")
+
+        oil_subtotal = next(
+            row
+            for row in result.rows
+            if row.outer_label == "Нефть" and row.is_subtotal
+        )
+        self.assertEqual(oil_subtotal.value, Decimal("1"))
+
+        grand = next(row for row in result.rows if row.is_total)
+        self.assertEqual(grand.value, Decimal("3"))
+        self.assertEqual(result.dimension_inner_label, "Холдинг")
+
+    def test_drilldown_enabled_when_inner_set(self) -> None:
+        result, errors = self.service.aggregate(
+            self._request(
+                dimension="cargo_group",
+                metric="count",
+                dimension_inner="shipper_holding",
+            ),
+        )
+        self.assertEqual(errors, [])
+        assert result is not None
+        self.assertTrue(result.drilldown_enabled)
+        self.assertIsNone(result.parent_filter)
+
+
+class RouteAnalyticsExportApiTests(TestCase):
+    def setUp(self) -> None:
+        self.client = Client()
+        self.user = User.objects.create_user(login="ra_export_user", password="pass")
+        self.client.force_login(self.user)
+        self.route_set = RouteSet.objects.create(name="Export RS", code="RS_EXPORT")
+        group, _ = CargoGroup.objects.get_or_create(
+            code=20,
+            defaults={"name": "Уголь", "position": 1},
+        )
+        cargo, _ = Cargo.objects.get_or_create(
+            code=4001,
+            defaults={"name": "Cargo Export", "cargo_group": group},
+        )
+        railroad, _ = RailRoad.objects.get_or_create(
+            code="99",
+            defaults={"name": "Road Export", "direction": "Запад"},
+        )
+        region, _ = Region.objects.get_or_create(
+            short_name="RE",
+            full_name="Region Export",
+            type="область",
+        )
+        origin, _ = Station.objects.get_or_create(
+            esr_code=400001,
+            defaults={
+                "short_name": "E1",
+                "full_name": "Station E1",
+                "region": region,
+                "railroad": railroad,
+            },
+        )
+        destination, _ = Station.objects.get_or_create(
+            esr_code=400002,
+            defaults={
+                "short_name": "E2",
+                "full_name": "Station E2",
+                "region": region,
+                "railroad": railroad,
+            },
+        )
+        wagon_kind, _ = WagonKind.objects.get_or_create(
+            code="WKX",
+            defaults={"name": "Wagon X"},
+        )
+        shipment_type, _ = ShipmentType.objects.get_or_create(
+            code="STX",
+            defaults={"name": "Shipment X"},
+        )
+        message_type, _ = MessageType.objects.get_or_create(
+            code="MTX",
+            defaults={"name": "Внутр. перевозки"},
+        )
+        shipper = Shipper.objects.create(name="Shipper Export", holding="Holding X")
+        Route.objects.create(
+            route_set=self.route_set,
+            route_code="EX-001",
+            cargo=cargo,
+            origin_station=origin,
+            destination_station=destination,
+            wagon_kind=wagon_kind,
+            shipment_type=shipment_type,
+            message_type=message_type,
+            shipper=shipper,
+            freight_charge_rub=Decimal("1000000.00"),
+            transport_volume_tons=Decimal("1000.00"),
+            freight_turnover_tkm=Decimal("5000000.00"),
+        )
+
+    def test_export_flat_xlsx(self) -> None:
+        url = reverse("route_analytics_export_api")
+        response = self.client.get(
+            url,
+            {
+                "route_set_id": self.route_set.id,
+                "dimension": "cargo_group",
+                "metric": "count",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            "spreadsheetml.sheet",
+            response["Content-Type"],
+        )
+        self.assertTrue(response.content[:2] == b"PK")
+
+    def test_export_nested_xlsx(self) -> None:
+        url = reverse("route_analytics_export_api")
+        response = self.client.get(
+            url,
+            {
+                "route_set_id": self.route_set.id,
+                "dimension": "cargo_group",
+                "dimension_inner": "shipper_holding",
+                "metric": "count",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            "spreadsheetml.sheet",
+            response["Content-Type"],
+        )
+        self.assertTrue(response.content[:2] == b"PK")
