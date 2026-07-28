@@ -25,6 +25,7 @@ urlpatterns = [
     path("scenarios/", include("scenarios.urls")),
     path("calculations/", include("calculations.urls")),
     path("support/", include("support.urls")),
+    path("assistant/", include("assistant.urls")),
 ]
 
 if settings.DEBUG:

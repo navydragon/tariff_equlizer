@@ -1,0 +1,43 @@
+.route-analysis-assistant__messages {
+  max-height: 280px;
+  overflow-y: auto;
+  border: 1px solid var(--tblr-border-color, #e6e7e9);
+  border-radius: 0.375rem;
+  padding: 0.75rem;
+  background: var(--tblr-bg-surface-secondary, #f8fafc);
+}
+
+.route-analysis-assistant__msg {
+  margin-bottom: 0.75rem;
+}
+
+.route-analysis-assistant__msg:last-child {
+  margin-bottom: 0;
+}
+
+.route-analysis-assistant__msg-role {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--tblr-secondary, #667382);
+  margin-bottom: 0.15rem;
+}
+
+.route-analysis-assistant__msg--user .route-analysis-assistant__msg-body {
+  background: #e8f1ff;
+  border-radius: 0.375rem;
+  padding: 0.5rem 0.65rem;
+}
+
+.route-analysis-assistant__msg--assistant .route-analysis-assistant__msg-body {
+  background: #fff;
+  border: 1px solid var(--tblr-border-color, #e6e7e9);
+  border-radius: 0.375rem;
+  padding: 0.5rem 0.65rem;
+  font-size: 0.875rem;
+  line-height: 1.45;
+}
+
+.route-analysis-assistant textarea {
+  min-height: 2.5rem;
+  resize: vertical;
+}

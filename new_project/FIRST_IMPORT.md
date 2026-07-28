@@ -143,6 +143,7 @@ IPEM импортируется двумя командами:
 - **уголь**: model-маршруты + угольные правила эластичности (лист `Уголь_коэфф`);
 - **металлургия**: model-маршруты + правила эластичности для руды/металлов (лист `Технический лист`);
 - **удобрения**: model-маршруты + правило эластичности «IPEM: Удобрения» (лист `Технический лист`);
+- **минстрой**: model-маршруты + правило эластичности «IPEM: Минстрой» (лист `Технический лист`);
 - **нефть**: model-маршруты + правило эластичности «IPEM: Нефть» (лист `Технический лист`).
 
 Operational-маршруты РЖД связываются через `model_route_id` по ключу: **станция + станция + груз + род вагона + тип отправки**.
@@ -167,6 +168,11 @@ python manage.py import_ipem_fertilizers_routes ^
   --route-set-code RZD_2026 ^
   --file ../data/ipem/Удобрения_эластика.xlsx
 
+python manage.py import_ipem_minstroy_routes ^
+  --scenario-id 1 ^
+  --route-set-code RZD_2026 ^
+  --file ../data/ipem/Минстрой_эластика.xlsx
+
 python manage.py import_ipem_oil_routes ^
   --scenario-id 1 ^
   --route-set-code RZD_2026 ^
@@ -184,6 +190,9 @@ python manage.py import_ipem_metallurgy_2026_routes --scenario-id 1 --dry-run ^
 
 python manage.py import_ipem_fertilizers_routes --scenario-id 1 --dry-run ^
   --file ../data/ipem/Удобрения_эластика.xlsx
+
+python manage.py import_ipem_minstroy_routes --scenario-id 1 --dry-run ^
+  --file ../data/ipem/Минстрой_эластика.xlsx
 
 python manage.py import_ipem_oil_routes --scenario-id 1 --dry-run ^
   --file ../data/ipem/Нефть_эластика.xlsx

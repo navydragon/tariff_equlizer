@@ -169,8 +169,13 @@ import { persistActiveScenario } from "../lib/scenario_active.js";
 
       this._onScenarioRecalculated = this._onScenarioRecalculated.bind(this);
       this._onScenarioEditMessage = this._onScenarioEditMessage.bind(this);
+      this._onApplyEqualizerOverrides = this._onApplyEqualizerOverrides.bind(this);
       document.addEventListener("scenario-recalculated", this._onScenarioRecalculated);
       window.addEventListener("message", this._onScenarioEditMessage);
+      document.addEventListener(
+        "route-analysis:apply-equalizer-overrides",
+        this._onApplyEqualizerOverrides,
+      );
 
       // Загружаем сценарии сразу при открытии страницы, чтобы верхний select
       // не был пустым и не зависел от открытия модалки.
@@ -186,6 +191,10 @@ import { persistActiveScenario } from "../lib/scenario_active.js";
       clearTimeout(this.state.cascadeFilterTimeout);
       this._destroyCascadeTomSelects();
       document.removeEventListener("scenario-recalculated", this._onScenarioRecalculated);
+      document.removeEventListener(
+        "route-analysis:apply-equalizer-overrides",
+        this._onApplyEqualizerOverrides,
+      );
       window.removeEventListener("message", this._onScenarioEditMessage);
       if (
         this.state.scenarioEditModalEl &&
@@ -495,6 +504,8 @@ import { persistActiveScenario } from "../lib/scenario_active.js";
 
       this.state.routeAnalysisCache.clear();
       this.state.equalizerOverrides = {};
+      // Сразу разблокируем ассистента (не ждём расчёт).
+      this._dispatchAssistantContext(null);
       await this._loadEqualizerBaseline();
       await this._loadEqualizerPreset();
       await this._renderDiagram();
@@ -2761,6 +2772,7 @@ import { persistActiveScenario } from "../lib/scenario_active.js";
       if (useCache && this.state.routeAnalysisCache.has(cacheKey)) {
         const cached = this.state.routeAnalysisCache.get(cacheKey);
         this.state.activeCalculateData = cached;
+        this._dispatchAssistantContext(cached);
         return { ok: true, data: cached };
       }
 
@@ -2789,7 +2801,84 @@ import { persistActiveScenario } from "../lib/scenario_active.js";
       if (!overrides && data.equalizer) {
         this.state.equalizerBaseline = data.equalizer;
       }
+      this._dispatchAssistantContext(data);
       return { ok: true, data };
+    }
+
+    _dispatchAssistantContext(snapshot) {
+      const scenarioId = this.state.selectedScenarioId;
+      const route = this.state.selectedRoute;
+      const routeId = route && route.id != null ? route.id : null;
+      if (!scenarioId || !routeId) return;
+      document.dispatchEvent(
+        new CustomEvent("route-analysis:context-updated", {
+          detail: {
+            scenarioId,
+            routeId,
+            route,
+            overrides: this.state.equalizerOverrides || {},
+            snapshot: snapshot || this.state.activeCalculateData,
+          },
+        }),
+      );
+    }
+
+    async _onApplyEqualizerOverrides(event) {
+      const detail = (event && event.detail) || {};
+      const rawOverrides = detail.overrides;
+      if (!rawOverrides || typeof rawOverrides !== "object") return;
+      if (!this.state.selectedRoute || !this.state.selectedScenarioId) return;
+
+      const next = {};
+      for (const [typeKey, yearMap] of Object.entries(rawOverrides)) {
+        if (!yearMap || typeof yearMap !== "object") continue;
+        const out = {};
+        for (const [yearKey, value] of Object.entries(yearMap)) {
+          const year = Number(yearKey);
+          const num = Number(String(value).replace(",", "."));
+          if (!Number.isFinite(year) || !Number.isFinite(num)) continue;
+          out[year] = num;
+        }
+        if (Object.keys(out).length > 0) {
+          next[typeKey] = out;
+        }
+      }
+      if (Object.keys(next).length === 0) return;
+
+      this.state.equalizerOverrides = next;
+      this._updateEqualizerVisibility(true);
+
+      const focusType = detail.focusType || Object.keys(next)[0];
+      if (this.hasEqualizerTypeSelectTarget && focusType) {
+        const hasOption = [...this.equalizerTypeSelectTarget.options].some(
+          (opt) => opt.value === focusType,
+        );
+        if (hasOption) {
+          this.equalizerTypeSelectTarget.value = focusType;
+        }
+      }
+
+      // Показать вкладку эквалайзера
+      const equalizerTab = document.querySelector(
+        'a[href="#route-analysis-tab-equalizer"]',
+      );
+      if (equalizerTab && typeof equalizerTab.click === "function") {
+        equalizerTab.click();
+      }
+
+      this._renderEqualizerPanel();
+
+      const overridesPayload = this._buildOverridesPayload();
+      const result = await this._loadRouteAnalysis({
+        scenarioId: this.state.selectedScenarioId,
+        routeId: this.state.selectedRoute.id,
+        overrides: overridesPayload,
+        useCache: false,
+      });
+      if (result.ok) {
+        await this._renderDiagram();
+        this._dispatchAssistantContext(result.data);
+      }
     }
 
     _rowValuesByKey(calculateData, rowKey) {

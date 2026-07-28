@@ -80,6 +80,7 @@ INSTALLED_APPS = [
     'scenarios',
     'calculations',
     'support.apps.SupportConfig',
+    'assistant.apps.AssistantConfig',
 ]
 
 AUTH_USER_MODEL = "core.User"
@@ -209,6 +210,22 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 LOGIN_URL = "/login/"
 LOGIN_REDIRECT_URL = "/home/"
 LOGOUT_REDIRECT_URL = "/"
+
+######################################################################
+# Assistant (UI chat + MCP tools)
+######################################################################
+
+ASSISTANT_LLM_ENABLED = _env_bool("ASSISTANT_LLM_ENABLED", default=False)
+ASSISTANT_LLM_API_KEY = os.environ.get("ASSISTANT_LLM_API_KEY", "")
+ASSISTANT_LLM_BASE_URL = os.environ.get(
+    "ASSISTANT_LLM_BASE_URL",
+    "https://api.openai.com/v1",
+)
+ASSISTANT_LLM_MODEL = os.environ.get("ASSISTANT_LLM_MODEL", "gpt-4o-mini")
+ASSISTANT_LLM_MAX_ROUNDS = int(os.environ.get("ASSISTANT_LLM_MAX_ROUNDS", "4"))
+ASSISTANT_CHAT_RATE_LIMIT_PER_MIN = int(
+    os.environ.get("ASSISTANT_CHAT_RATE_LIMIT_PER_MIN", "30"),
+)
 
 ######################################################################
 # Route mart (parquet cache on disk)

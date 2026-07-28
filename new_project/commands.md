@@ -265,6 +265,28 @@ python manage.py import_ipem_fertilizers_routes \
 python manage.py refresh_deploy_caches
 ```
 
+### `import_ipem_minstroy_routes`
+
+Импорт **model-маршрутов** Минстроя из `Минстрой_эластика.xlsx` (лист `Минстрой`, cargo_group=7).  
+С `--scenario-id` — правило эластичности «IPEM: Минстрой» (лист `Технический лист`).
+
+| Параметр | По умолчанию | Описание |
+|----------|--------------|----------|
+| `--file` | `../data/ipem/Минстрой_эластика.xlsx` | XLSX IPEM |
+| `--route-set-code` | `RZD_2026` | Набор маршрутов |
+| `--scenario-id` | — | Сценарий: seed эластичности + привязка набора |
+| `--skip-elasticity` | — | Только маршруты |
+| `--dry-run` | — | Только проверка резолва |
+
+```bash
+python manage.py import_ipem_minstroy_routes \
+  --scenario-id 1 \
+  --route-set-code RZD_2026 \
+  --file ../data/ipem/Минстрой_эластика.xlsx
+
+python manage.py refresh_deploy_caches
+```
+
 ### `import_ipem_oil_routes`
 
 Импорт **model-маршрутов** нефти из `Нефть_эластика.xlsx` (лист `Нефтяные`, cargo_group=3).  

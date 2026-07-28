@@ -1,0 +1,95 @@
+{% load static %}
+<div
+  class="card mt-3 route-analysis-assistant"
+  data-controller="route-analysis-assistant"
+  data-route-analysis-assistant-chat-url-value="{% url 'assistant:api_chat' %}"
+>
+  <div class="card-header py-2 d-flex align-items-center justify-content-between">
+    <div class="fw-bold">
+      <i class="ti ti-robot me-1"></i>
+      Ассистент
+    </div>
+    <span
+      class="badge bg-secondary-lt"
+      data-route-analysis-assistant-target="statusBadge"
+    >Выберите маршрут</span>
+  </div>
+  <div class="card-body py-3">
+    <div
+      class="route-analysis-assistant__presets d-flex flex-wrap gap-2 mb-3"
+      data-route-analysis-assistant-target="presets"
+    >
+      <button
+        type="button"
+        class="btn btn-sm btn-outline-primary"
+        data-preset="route_summary"
+        data-action="click->route-analysis-assistant#onPreset"
+        disabled
+      >Кратко о маршруте</button>
+      <button
+        type="button"
+        class="btn btn-sm btn-outline-primary"
+        data-preset="explain_kpi"
+        data-action="click->route-analysis-assistant#onPreset"
+        disabled
+      >KPI по годам</button>
+      <button
+        type="button"
+        class="btn btn-sm btn-outline-primary"
+        data-preset="explain_effects"
+        data-action="click->route-analysis-assistant#onPreset"
+        disabled
+      >Вклад решений и правил</button>
+      <button
+        type="button"
+        class="btn btn-sm btn-outline-primary"
+        data-preset="explain_margin"
+        data-action="click->route-analysis-assistant#onPreset"
+        disabled
+      >Драйверы маржинальности</button>
+      <button
+        type="button"
+        class="btn btn-sm btn-outline-primary"
+        data-preset="explain_equalizer"
+        data-action="click->route-analysis-assistant#onPreset"
+        disabled
+      >Текущий эквалайзер</button>
+    </div>
+
+    <div
+      class="route-analysis-assistant__messages mb-3"
+      data-route-analysis-assistant-target="messages"
+    >
+      <div class="text-muted small">
+        Задайте быстрый вопрос или введите свободный текст (если включён LLM).
+      </div>
+    </div>
+
+    <div
+      class="text-danger small mb-2"
+      style="display: none;"
+      data-route-analysis-assistant-target="errors"
+    ></div>
+
+    <form
+      class="d-flex gap-2 align-items-start"
+      data-action="submit->route-analysis-assistant#onSubmit"
+    >
+      <textarea
+        class="form-control form-control-sm"
+        rows="2"
+        placeholder="Спросите, например: почему падает маржа в 2027?"
+        data-route-analysis-assistant-target="input"
+        disabled
+      ></textarea>
+      <button
+        type="submit"
+        class="btn btn-primary btn-sm"
+        data-route-analysis-assistant-target="sendButton"
+        disabled
+      >
+        <i class="ti ti-send"></i>
+      </button>
+    </form>
+  </div>
+</div>

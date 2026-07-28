@@ -6,6 +6,7 @@
 {% block extra_css %}
   <link rel="stylesheet" href="{% static 'core/css/route-analysis-equalizer.css' %}" />
   <link rel="stylesheet" href="{% static 'core/css/route-analysis-charts.css' %}" />
+  <link rel="stylesheet" href="{% static 'assistant/css/assistant-chat.css' %}" />
   <style>
     .route-analysis-scenario-edit-modal-content {
       display: flex;
@@ -249,6 +250,9 @@
     </div>
   </div>
   </div>
+
+  {% include "assistant/partials/route_analysis_chat_panel.html" %}
+
   <div
     class="modal modal-blur fade"
     id="routeAnalysisRouteModal"
