@@ -287,6 +287,28 @@ python manage.py import_ipem_minstroy_routes \
 python manage.py refresh_deploy_caches
 ```
 
+### `import_ipem_forest_routes`
+
+Импорт **model-маршрутов** лесных грузов из `Лес_эластика.xlsx` (лист `Лесные`, cargo_group=6).  
+С `--scenario-id` — правило эластичности «IPEM: Лес» (лист `Технический лист`).
+
+| Параметр | По умолчанию | Описание |
+|----------|--------------|----------|
+| `--file` | `../data/ipem/Лес_эластика.xlsx` | XLSX IPEM |
+| `--route-set-code` | `RZD_2026` | Набор маршрутов |
+| `--scenario-id` | — | Сценарий: seed эластичности + привязка набора |
+| `--skip-elasticity` | — | Только маршруты |
+| `--dry-run` | — | Только проверка резолва |
+
+```bash
+python manage.py import_ipem_forest_routes \
+  --scenario-id 1 \
+  --route-set-code RZD_2026 \
+  --file ../data/ipem/Лес_эластика.xlsx
+
+python manage.py refresh_deploy_caches
+```
+
 ### `import_ipem_oil_routes`
 
 Импорт **model-маршрутов** нефти из `Нефть_эластика.xlsx` (лист `Нефтяные`, cargo_group=3).  

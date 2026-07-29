@@ -110,6 +110,13 @@ IPEM_MINSTROY_XLSX_NAME = "Минстрой_эластика.xlsx"
 IPEM_MINSTROY_HEADER_ROW = 2
 IPEM_MINSTROY_CARGO_GROUP_CODE = 7
 
+IPEM_FOREST_ROUTE_SHEETS: tuple[str, ...] = (
+    "Лесные",
+)
+IPEM_FOREST_XLSX_NAME = "Лес_эластика.xlsx"
+IPEM_FOREST_HEADER_ROW = 2
+IPEM_FOREST_CARGO_GROUP_CODE = 6
+
 IPEM_COAL_2026_OVERLAP_COLUMNS: tuple[str, ...] = (
     "ipem_row",
     "сцеп_цены",
@@ -721,6 +728,24 @@ def load_ipem_minstroy_xlsx(path: Path) -> list[dict[str, str]]:
                 continue
             rows.append(row)
 
+    return rows
+
+
+def load_ipem_forest_xlsx(path: Path) -> list[dict[str, str]]:
+    import pandas as pd
+
+    rows: list[dict[str, str]] = []
+    for sheet_name in IPEM_FOREST_ROUTE_SHEETS:
+        df = pd.read_excel(
+            path,
+            sheet_name=sheet_name,
+            header=IPEM_FOREST_HEADER_ROW,
+        )
+        for _, series in df.iterrows():
+            row = {str(col).strip(): _ipem_cell_str(series[col]) for col in df.columns}
+            if not any(row.values()):
+                continue
+            rows.append(row)
     return rows
 
 
@@ -1567,6 +1592,95 @@ def import_ipem_minstroy_model_routes(
     clear_ipem_model_routes_for_cargo_groups(
         route_set,
         (IPEM_MINSTROY_CARGO_GROUP_CODE,),
+    )
+
+    model_routes: list[Route] = [
+        build_model_route_from_resolved_row(route_set, r) for r in resolved_rows
+    ]
+    created = Route.objects.bulk_create(model_routes, batch_size=500)
+    result.created_model_routes = len(created)
+    result.linked_operational_routes = link_operational_routes_to_models(route_set, created)
+    sync_model_routes_cargo_izpod_from_operational(route_set, created)
+    if assign_elasticity_sources:
+        from scenarios.domain.services.operational_elasticity import (
+            assign_operational_elasticity_sources,
+        )
+
+        elasticity_stats = assign_operational_elasticity_sources(
+            route_set,
+            progress=progress,
+        )
+        result.elasticity_direct_model = elasticity_stats.direct_model
+        result.elasticity_holding_aggregate = elasticity_stats.holding_aggregate
+        result.elasticity_cargo_group_aggregate = elasticity_stats.cargo_group_aggregate
+        result.elasticity_skipped = elasticity_stats.skipped
+    return result
+
+
+def import_ipem_forest_model_routes(
+    xlsx_path: Path,
+    route_set: RouteSet,
+    *,
+    dry_run: bool = False,
+    assign_elasticity_sources: bool = True,
+    progress: Callable[[str], None] | None = None,
+) -> IpemCoal2026ImportResult:
+    """
+    Импорт model-маршрутов из `Лес_эластика.xlsx` (лист «Лесные»).
+
+    Использует тот же формат колонок, что и угольные/металлургические листы.
+    """
+    result = IpemCoal2026ImportResult()
+    ipem_rows = load_ipem_forest_xlsx(xlsx_path)
+    result.total_rows = len(ipem_rows)
+
+    wagons = list(WagonKind.objects.all())
+    shipment_by_name = {normalize_name(s.name): s for s in ShipmentType.objects.all()}
+    message_by_name = {normalize_name(m.name): m for m in MessageType.objects.all()}
+
+    resolved_rows: list[IpemCoal2026ResolvedRow] = []
+    seen_link_keys: dict[tuple[Any, ...], str] = {}
+
+    for ipem_row_idx, row in enumerate(ipem_rows, start=1):
+        resolved, reasons = resolve_ipem_coal_2026_row(
+            row,
+            ipem_row=ipem_row_idx,
+            wagons=wagons,
+            shipment_by_name=shipment_by_name,
+            message_by_name=message_by_name,
+            route_set=route_set,
+        )
+        if resolved is None:
+            result.skipped_rows += 1
+            result.skip_reasons.append(
+                f"Строка {ipem_row_idx}: {'; '.join(reasons)}"
+            )
+            continue
+
+        resolved.route_code = f"IPEM-LES-2026-{ipem_row_idx:03d}"
+
+        link_key = (
+            resolved.origin.pk,
+            resolved.destination.pk,
+            resolved.cargo.pk,
+            resolved.wagon_kind.pk,
+            resolved.shipment_type.pk,
+        )
+        if link_key in seen_link_keys:
+            result.duplicate_link_key_warnings.append(
+                f"Ключ связи {link_key}: повтор в IPEM (строка {ipem_row_idx}, "
+                f"ранее строка {seen_link_keys[link_key]}); при линковке победит последняя"
+            )
+        seen_link_keys[link_key] = str(ipem_row_idx)
+        resolved_rows.append(resolved)
+
+    if dry_run:
+        result.created_model_routes = len(resolved_rows)
+        return result
+
+    clear_ipem_model_routes_for_cargo_groups(
+        route_set,
+        (IPEM_FOREST_CARGO_GROUP_CODE,),
     )
 
     model_routes: list[Route] = [
