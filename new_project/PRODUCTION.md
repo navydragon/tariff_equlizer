@@ -79,6 +79,7 @@ python manage.py import_ipem_coal_2026_routes --scenario-id 1 --route-set-code R
 python manage.py import_ipem_metallurgy_2026_routes --scenario-id 1 --route-set-code RZD_2026
 python manage.py import_ipem_fertilizers_routes --scenario-id 1 --route-set-code RZD_2026
 python manage.py import_ipem_forest_routes --scenario-id 1 --route-set-code RZD_2026
+python manage.py import_ipem_other_routes --scenario-id 1 --route-set-code RZD_2026
 python manage.py import_ipem_minstroy_routes --scenario-id 1 --route-set-code RZD_2026
 
 python manage.py refresh_deploy_caches --warm-scenarios --wait-scenarios

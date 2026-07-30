@@ -1,4 +1,4 @@
-"""Seed ElasticitySet 2026 (metallurgy only) from IPEM 'Технический лист'."""
+"""Seed ElasticitySet 2026 (other cargoes) from IPEM 'Технический лист'."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -20,10 +20,13 @@ from scenarios.models import (
 User = get_user_model()
 
 TECH_SHEET_NAME = "Технический лист"
+OTHER_RULE_NAME = "IPEM: Прочие"
+OTHER_CARGO_GROUP_CODE = 10
+OTHER_RULE_POSITION = 22
 
 
 @dataclass(frozen=True)
-class IpemElasticitySeedResult:
+class IpemOtherElasticitySeedResult:
     elasticity_set_id: int
     rules_upserted: int
     points_upserted: int
@@ -35,7 +38,7 @@ def _repo_root() -> Path:
 
 
 def _default_workbook_path() -> Path:
-    return _repo_root() / "data" / "ipem" / "Металлургия_эластика.xlsx"
+    return _repo_root() / "data" / "ipem" / "Прочие_эластика.xlsx"
 
 
 def _cell_has_value(value) -> bool:
@@ -49,7 +52,7 @@ def _load_points_from_block(
     coefficient_col_0based: int,
 ) -> list[tuple[Decimal, Decimal]]:
     by_marginality: dict[Decimal, Decimal] = {}
-    for row in range(3, worksheet.max_row + 1):
+    for row in range(2, worksheet.max_row + 1):
         marginality = worksheet.cell(row, marginality_col_0based + 1).value
         coefficient = worksheet.cell(row, coefficient_col_0based + 1).value
         if not _cell_has_value(marginality) or not _cell_has_value(coefficient):
@@ -57,7 +60,9 @@ def _load_points_from_block(
         if isinstance(coefficient, str) and coefficient.startswith("="):
             continue
         key = Decimal(str(marginality)).quantize(Decimal("0.0001"))
-        by_marginality[key] = Decimal(str(coefficient)).quantize(Decimal("0.0001"))
+        by_marginality[key] = Decimal(str(coefficient)).quantize(
+            Decimal("0.0001"),
+        )
     return sorted(by_marginality.items(), key=lambda item: item[0])
 
 
@@ -93,24 +98,16 @@ def _replace_rule_points(
 
 
 @transaction.atomic
-def seed_ipem_elasticity_for_scenario(
+def seed_ipem_other_elasticity_for_scenario(
     scenario: Scenario,
     *,
     author: User | None = None,
     attach: bool = True,
     xlsx_path: Path | None = None,
-) -> IpemElasticitySeedResult:
+) -> IpemOtherElasticitySeedResult:
     """
-    Создаёт/обновляет набор эластичности «2026» по листу «Технический лист».
-
-    Правила (металлургия):
-    - Руда: cargo_group=4.
-    - Металлы: cargo_group=5.
-    - Кокс (cargo_group=2) не сидится: мэтчится с угольными правилами
-      («Уголь экспорт» / «Уголь внутренние») через алиас в elasticity_matching.
-
-    Важно: угольные правила НЕ создаются и НЕ удаляются — ими управляет
-    отдельная команда `import_ipem_coal_2026_routes`.
+    Создаёт/обновляет правило эластичности «IPEM: Прочие» по листу
+    «Технический лист» (одна кривая на cargo_group=10).
     """
     owner = author or scenario.author
     if owner is None:
@@ -120,12 +117,12 @@ def seed_ipem_elasticity_for_scenario(
         import openpyxl
     except ImportError as exc:
         raise RuntimeError(
-            "openpyxl is required to seed IPEM elasticity",
+            "openpyxl is required to seed IPEM other elasticity",
         ) from exc
 
     workbook_path = xlsx_path or _default_workbook_path()
     if not workbook_path.exists():
-        return IpemElasticitySeedResult(
+        return IpemOtherElasticitySeedResult(
             elasticity_set_id=0,
             rules_upserted=0,
             points_upserted=0,
@@ -135,76 +132,38 @@ def seed_ipem_elasticity_for_scenario(
     workbook = openpyxl.load_workbook(workbook_path, data_only=True)
     worksheet = workbook[TECH_SHEET_NAME]
 
-    # Blocks on the tech sheet (0-based indices).
-    points_metals = _load_points_from_block(
+    points = _load_points_from_block(
         worksheet,
-        marginality_col_0based=8,
-        coefficient_col_0based=9,
-    )
-    points_ore = _load_points_from_block(
-        worksheet,
-        marginality_col_0based=12,
-        coefficient_col_0based=13,
+        marginality_col_0based=0,
+        coefficient_col_0based=1,
     )
 
     elasticity_set = _resolve_elasticity_set(owner)
 
-    # Delete only rules we manage (by name), keep user-defined rules intact.
-    # «IPEM: Металлы (2)» удаляем навсегда: кокс идёт через угольную эластичность.
-    managed_rule_names = {
-        "IPEM: Руда",
-        "IPEM: Металлы (2)",
-        "IPEM: Металлы (5)",
-    }
     ElasticityRule.objects.filter(
         elasticity_set=elasticity_set,
-        name__in=managed_rule_names,
+        name=OTHER_RULE_NAME,
     ).delete()
 
-    rules_upserted = 0
-    points_upserted = 0
-
-    ore_group = _resolve_cargo_group_by_code(4)
-    metals_group = _resolve_cargo_group_by_code(5)
-    def _create_rule(
-        *,
-        name: str,
-        position: int,
-        cargo_group: CargoGroup | None,
-        points,
-    ):
-        nonlocal rules_upserted, points_upserted
-        rule = ElasticityRule.objects.create(
-            elasticity_set=elasticity_set,
-            name=name,
-            position=position,
-            cargo_group=cargo_group,
-        )
-        rules_upserted += 1
-        points_upserted += _replace_rule_points(rule, points)
-
-    # Positions are stable for reproducibility.
-    _create_rule(
-        name="IPEM: Руда",
-        position=10,
-        cargo_group=ore_group,
-        points=points_ore,
+    other_group = _resolve_cargo_group_by_code(OTHER_CARGO_GROUP_CODE)
+    rule = ElasticityRule.objects.create(
+        elasticity_set=elasticity_set,
+        name=OTHER_RULE_NAME,
+        position=OTHER_RULE_POSITION,
+        cargo_group=other_group,
     )
-    _create_rule(
-        name="IPEM: Металлы (5)",
-        position=21,
-        cargo_group=metals_group,
-        points=points_metals,
-    )
+    points_upserted = _replace_rule_points(rule, points)
+
     attached = False
     if attach and not scenario.elasticity_set_id:
         scenario.elasticity_set = elasticity_set
         scenario.save(update_fields=["elasticity_set"])
         attached = True
 
-    return IpemElasticitySeedResult(
+    return IpemOtherElasticitySeedResult(
         elasticity_set_id=elasticity_set.id,
-        rules_upserted=rules_upserted,
+        rules_upserted=1,
         points_upserted=points_upserted,
         attached_to_scenario=attached,
     )
+
