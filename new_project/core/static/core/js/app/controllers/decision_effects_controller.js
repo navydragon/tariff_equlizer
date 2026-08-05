@@ -89,6 +89,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
         boundScenarioEditModalHiddenHandler: null,
         showFalloutAdjustedRevenues: false,
         showFalloutAdjustedVolumes: false,
+        effectsTableExpanded: false,
         lastRebuildToastVersion: null,
       };
 
@@ -289,6 +290,19 @@ import { clearToasts, showToast } from "../lib/toast.js";
           this.volumesFalloutToggleTarget.checked,
       );
       await this._handleAbsoluteFalloutToggle("volumes");
+    }
+
+    onEffectsTableExpandToggle(event) {
+      this.state.effectsTableExpanded = Boolean(event?.target?.checked);
+      this._syncEffectsTableExpand();
+    }
+
+    _syncEffectsTableExpand() {
+      if (!this.hasTableWrapTarget) return;
+      this.tableWrapTarget.classList.toggle(
+        "decision-effects-table-wrap--expanded",
+        Boolean(this.state.effectsTableExpanded),
+      );
     }
 
     async _handleAbsoluteFalloutToggle(kind) {
@@ -1420,12 +1434,26 @@ import { clearToasts, showToast } from "../lib/toast.js";
         })
         .join("");
 
+      const expandChecked = this.state.effectsTableExpanded ? "checked" : "";
       this.tableWrapTarget.innerHTML = `
         <div class="table-responsive">
           <table class="table table-sm table-vcenter">
             <thead>
               <tr>
-                <th></th>
+                <th class="decision-effects-table-expand-th">
+                  <label
+                    class="form-check form-switch mb-0 decision-effects-table-expand-switch"
+                    title="Показать всю таблицу без прокрутки"
+                  >
+                    <input
+                      type="checkbox"
+                      class="form-check-input"
+                      data-action="change->decision-effects#onEffectsTableExpandToggle"
+                      aria-label="Показать всю таблицу без прокрутки"
+                      ${expandChecked}
+                    />
+                  </label>
+                </th>
                 <th class="text-center">
                   <span class="decision-effects-th">Базовые<br />решения</span>
                 </th>
@@ -1442,6 +1470,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
           </table>
         </div>
       `;
+      this._syncEffectsTableExpand();
     }
 
     _renderChart(chartData) {
