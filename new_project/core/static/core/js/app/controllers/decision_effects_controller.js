@@ -1504,21 +1504,48 @@ import { clearToasts, showToast } from "../lib/toast.js";
       const rulesValues = rows.map((row) => row.rules);
       const totalValues = rows.map((row) => row.total);
 
-      const ChartDataLabelsPlugin =
-        window.ChartDataLabels || window.ChartDataLabelsPlugin || null;
-      if (ChartDataLabelsPlugin && window.Chart) {
-        window.Chart.register(ChartDataLabelsPlugin);
-      }
-
       const chartHeight = Math.max(
         EFFECTS_CHART_MIN_HEIGHT_PX,
         labels.length * EFFECTS_CHART_BAR_HEIGHT_PX + EFFECTS_CHART_LEGEND_HEIGHT_PX,
       );
       this.chartCanvasTarget.style.height = `${chartHeight}px`;
 
+      const minTotal = Math.min(0, ...totalValues);
+      const maxTotal = Math.max(0, ...totalValues, ...baseValues);
+      const valueRange = Math.max(maxTotal - minTotal, 1);
+      const labelPaddingRatio = 0.1;
+      const xMin =
+        minTotal < 0 ? minTotal - valueRange * labelPaddingRatio : undefined;
+      const xMax = maxTotal + valueRange * labelPaddingRatio;
+
+      const totalLabelPlugin = {
+        id: "decisionEffectsTotalLabels",
+        afterDatasetsDraw(chart) {
+          const { ctx } = chart;
+          const xScale = chart.scales.x;
+          const yScale = chart.scales.y;
+          ctx.save();
+          ctx.font = "600 11px sans-serif";
+          ctx.fillStyle = "#111827";
+          totalValues.forEach((total, index) => {
+            if (!Number.isFinite(total)) {
+              return;
+            }
+            const y = yScale.getPixelForValue(index);
+            const x = xScale.getPixelForValue(total);
+            const offset = total < 0 ? -6 : 6;
+            ctx.textAlign = total < 0 ? "right" : "left";
+            ctx.textBaseline = "middle";
+            ctx.fillText(total.toFixed(1), x + offset, y);
+          });
+          ctx.restore();
+        },
+      };
+
       const ctx = this.chartCanvasTarget.getContext("2d");
       this.state.chart = new window.Chart(ctx, {
         type: "bar",
+        plugins: [totalLabelPlugin],
         data: {
           labels,
           datasets: [
@@ -1527,7 +1554,6 @@ import { clearToasts, showToast } from "../lib/toast.js";
               data: baseValues,
               backgroundColor: "#003256",
               stack: "effects",
-              datalabels: { display: false },
             },
             {
               label: "Отдельные решения",
@@ -1542,11 +1568,16 @@ import { clearToasts, showToast } from "../lib/toast.js";
           responsive: true,
           maintainAspectRatio: false,
           layout: {
-            padding: { right: 56 },
+            padding: {
+              right: 56,
+              left: minTotal < 0 ? 40 : 0,
+            },
           },
           scales: {
             x: {
               stacked: true,
+              min: xMin,
+              max: xMax,
               ticks: { display: false },
               grid: { display: false },
             },
@@ -1560,20 +1591,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
               position: "bottom",
             },
             datalabels: {
-              display(context) {
-                return context.datasetIndex === context.chart.data.datasets.length - 1;
-              },
-              formatter(_value, context) {
-                const total = totalValues[context.dataIndex];
-                if (!Number.isFinite(total)) return "";
-                return total.toFixed(1);
-              },
-              anchor: "end",
-              align: "end",
-              offset: 6,
-              color: "#111827",
-              font: { size: 11, weight: "600" },
-              clip: false,
+              display: false,
             },
           },
         },
