@@ -1502,7 +1502,6 @@ import { clearToasts, showToast } from "../lib/toast.js";
       const labels = rows.map((row) => row.label);
       const baseValues = rows.map((row) => row.base);
       const rulesValues = rows.map((row) => row.rules);
-      const totalValues = rows.map((row) => row.total);
 
       const chartHeight = Math.max(
         EFFECTS_CHART_MIN_HEIGHT_PX,
@@ -1519,6 +1518,8 @@ import { clearToasts, showToast } from "../lib/toast.js";
           (row.base < 0 ? row.base : 0) + (row.rules < 0 ? row.rules : 0);
         return {
           total: row.total,
+          base: row.base,
+          rules: row.rules,
           min: negativeExtent,
           max: positiveExtent,
         };
@@ -1532,31 +1533,83 @@ import { clearToasts, showToast } from "../lib/toast.js";
         minTotal < 0 ? minTotal - valueRange * labelPaddingRatio : undefined;
       const xMax = maxTotal + valueRange * labelPaddingRatio;
       const needsLeftPadding = minTotal < 0;
+      const segmentFont = "600 11px sans-serif";
+      const minSegmentLabelWidthPx = 28;
+
+      const formatTotalLabel = (total) => {
+        if (!Number.isFinite(total) || total === 0) {
+          return { text: "0.0", color: "#6b7280" };
+        }
+        if (total > 0) {
+          return { text: `+${total.toFixed(1)}`, color: "#059669" };
+        }
+        return { text: total.toFixed(1), color: "#dc2626" };
+      };
+
+      const drawCenteredSegmentLabel = (ctx, element, value, color) => {
+        if (!element || !Number.isFinite(value) || value === 0) {
+          return;
+        }
+        const { x, y, base } = element.getProps(["x", "y", "base"], true);
+        const left = Math.min(x, base);
+        const right = Math.max(x, base);
+        const width = right - left;
+        if (width < minSegmentLabelWidthPx) {
+          return;
+        }
+        const text = value.toFixed(1);
+        if (ctx.measureText(text).width + 4 > width) {
+          return;
+        }
+        ctx.fillStyle = color;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(text, (left + right) / 2, y);
+      };
 
       const totalLabelPlugin = {
         id: "decisionEffectsTotalLabels",
         afterDatasetsDraw(chart) {
           const { ctx } = chart;
           const xScale = chart.scales.x;
-          const yScale = chart.scales.y;
+          const baseMeta = chart.getDatasetMeta(0);
+          const rulesMeta = chart.getDatasetMeta(1);
           ctx.save();
-          ctx.font = "600 11px sans-serif";
-          ctx.fillStyle = "#111827";
+          ctx.font = segmentFont;
+
           stackExtents.forEach((extent, index) => {
-            const { total, min, max } = extent;
+            const { total, base, rules, max } = extent;
             if (!Number.isFinite(total)) {
               return;
             }
-            const y = yScale.getPixelForValue(index);
-            const isNegative = total < 0;
-            // Подпись у внешнего края визуального стека, не у числового итога.
-            const anchorValue = isNegative ? min : max;
-            const x = xScale.getPixelForValue(anchorValue);
-            const offset = isNegative ? -6 : 6;
-            ctx.textAlign = isNegative ? "right" : "left";
+
+            const showSegments = base !== 0 && rules !== 0;
+            if (showSegments) {
+              drawCenteredSegmentLabel(
+                ctx,
+                baseMeta?.data?.[index],
+                base,
+                "#ffffff",
+              );
+              drawCenteredSegmentLabel(
+                ctx,
+                rulesMeta?.data?.[index],
+                rules,
+                "#111827",
+              );
+            }
+
+            const totalLabel = formatTotalLabel(total);
+            const y =
+              baseMeta?.data?.[index]?.getProps(["y"], true)?.y ??
+              chart.scales.y.getPixelForValue(index);
+            const x = xScale.getPixelForValue(Math.max(max, 0));
+            ctx.fillStyle = totalLabel.color;
+            ctx.textAlign = "left";
             ctx.textBaseline = "middle";
-            ctx.fillText(total.toFixed(1), x + offset, y);
+            ctx.fillText(totalLabel.text, x + 6, y);
           });
+
           ctx.restore();
         },
       };
@@ -1588,7 +1641,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
           maintainAspectRatio: false,
           layout: {
             padding: {
-              right: 56,
+              right: 64,
               left: needsLeftPadding ? 48 : 0,
             },
           },
