@@ -1511,22 +1511,27 @@ import { clearToasts, showToast } from "../lib/toast.js";
       this.chartCanvasTarget.style.height = `${chartHeight}px`;
 
       const stackExtents = rows.map((row) => {
-        const first = row.base;
-        const total = row.total;
+        // Chart.js рисует + и − сегменты стека независимо от нуля:
+        // положительные — вправо, отрицательные — влево.
+        const positiveExtent =
+          (row.base > 0 ? row.base : 0) + (row.rules > 0 ? row.rules : 0);
+        const negativeExtent =
+          (row.base < 0 ? row.base : 0) + (row.rules < 0 ? row.rules : 0);
         return {
-          total,
-          min: Math.min(0, first, total),
-          max: Math.max(0, first, total),
+          total: row.total,
+          min: negativeExtent,
+          max: positiveExtent,
         };
       });
 
-      const minTotal = Math.min(...stackExtents.map((item) => item.min));
-      const maxTotal = Math.max(...stackExtents.map((item) => item.max));
+      const minTotal = Math.min(0, ...stackExtents.map((item) => item.min));
+      const maxTotal = Math.max(0, ...stackExtents.map((item) => item.max));
       const valueRange = Math.max(maxTotal - minTotal, 1);
-      const labelPaddingRatio = 0.1;
+      const labelPaddingRatio = 0.12;
       const xMin =
         minTotal < 0 ? minTotal - valueRange * labelPaddingRatio : undefined;
       const xMax = maxTotal + valueRange * labelPaddingRatio;
+      const needsLeftPadding = minTotal < 0;
 
       const totalLabelPlugin = {
         id: "decisionEffectsTotalLabels",
@@ -1544,6 +1549,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
             }
             const y = yScale.getPixelForValue(index);
             const isNegative = total < 0;
+            // Подпись у внешнего края визуального стека, не у числового итога.
             const anchorValue = isNegative ? min : max;
             const x = xScale.getPixelForValue(anchorValue);
             const offset = isNegative ? -6 : 6;
@@ -1583,7 +1589,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
           layout: {
             padding: {
               right: 56,
-              left: minTotal < 0 ? 40 : 0,
+              left: needsLeftPadding ? 48 : 0,
             },
           },
           scales: {
