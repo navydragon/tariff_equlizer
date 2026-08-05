@@ -238,14 +238,13 @@
 }
 
 .decision-effects-table-expand-th {
-  width: 2.5rem;
   vertical-align: middle !important;
 }
 
 .decision-effects-table-expand-switch {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   min-height: 1.25rem;
 }
 
