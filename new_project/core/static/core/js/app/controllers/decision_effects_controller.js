@@ -1510,8 +1510,18 @@ import { clearToasts, showToast } from "../lib/toast.js";
       );
       this.chartCanvasTarget.style.height = `${chartHeight}px`;
 
-      const minTotal = Math.min(0, ...totalValues);
-      const maxTotal = Math.max(0, ...totalValues, ...baseValues);
+      const stackExtents = rows.map((row) => {
+        const first = row.base;
+        const total = row.total;
+        return {
+          total,
+          min: Math.min(0, first, total),
+          max: Math.max(0, first, total),
+        };
+      });
+
+      const minTotal = Math.min(...stackExtents.map((item) => item.min));
+      const maxTotal = Math.max(...stackExtents.map((item) => item.max));
       const valueRange = Math.max(maxTotal - minTotal, 1);
       const labelPaddingRatio = 0.1;
       const xMin =
@@ -1527,14 +1537,17 @@ import { clearToasts, showToast } from "../lib/toast.js";
           ctx.save();
           ctx.font = "600 11px sans-serif";
           ctx.fillStyle = "#111827";
-          totalValues.forEach((total, index) => {
+          stackExtents.forEach((extent, index) => {
+            const { total, min, max } = extent;
             if (!Number.isFinite(total)) {
               return;
             }
             const y = yScale.getPixelForValue(index);
-            const x = xScale.getPixelForValue(total);
-            const offset = total < 0 ? -6 : 6;
-            ctx.textAlign = total < 0 ? "right" : "left";
+            const isNegative = total < 0;
+            const anchorValue = isNegative ? min : max;
+            const x = xScale.getPixelForValue(anchorValue);
+            const offset = isNegative ? -6 : 6;
+            ctx.textAlign = isNegative ? "right" : "left";
             ctx.textBaseline = "middle";
             ctx.fillText(total.toFixed(1), x + offset, y);
           });
