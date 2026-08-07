@@ -154,6 +154,14 @@ Operational-маршруты РЖД связываются через `model_rou
 
 Model-маршруты **не участвуют** в расчётах «Эффект решений» и «Куб эффектов»; в «Экономике грузов» в поиске показываются только они.
 
+Одной командой (дефолтные пути к XLSX; нефть — `--include-oil`):
+
+```bash
+python manage.py import_ipem_all_routes --scenario-id 1 --route-set-code RZD_2026
+```
+
+Или по секторам:
+
 ```bash
 python manage.py import_ipem_coal_2026_routes ^
   --scenario-id 1 ^
@@ -335,7 +343,7 @@ GENERATE_RANDOM_ROUTES=1 ADMIN_PASSWORD="ваш_пароль" bash new_project/t
 | 3 | `import_railroads` → `import_regions` → `import_stations` → `import_cargo_groups` → `import_cargos` → `import_shippers` → `init_route_refs` |
 | 4 | `create_base_scenario` → `load_base_btd` |
 | 5 | `import_rzd_routes --clear` |
-| 6 | `import_ipem_coal_2026_routes --file ../data/ipem/Уголь_эластика_2026.xlsx --route-set-code RZD_2026 --scenario-id 1` → `refresh_deploy_caches` |
+| 6 | `import_ipem_all_routes --scenario-id 1 --route-set-code RZD_2026` → `refresh_deploy_caches` |
 | 7 | В UI: сценарий → набор маршрутов **RZD_2026** |
 | 8 | `runserver` |
 

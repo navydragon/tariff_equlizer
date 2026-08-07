@@ -199,6 +199,32 @@ python manage.py import_rzd_routes --clear
 python manage.py import_total_ipem --file total_ipem.csv --route-set-code DEFAULT_ROUTE_SET
 ```
 
+### `import_ipem_all_routes`
+
+По очереди вызывает импорт IPEM-секторов (дефолтные XLSX каждой команды):
+
+1. `import_ipem_coal_2026_routes`
+2. `import_ipem_metallurgy_2026_routes`
+3. `import_ipem_fertilizers_routes`
+4. `import_ipem_forest_routes`
+5. `import_ipem_other_routes`
+6. `import_ipem_minstroy_routes`
+
+| Параметр | По умолчанию | Описание |
+|----------|--------------|----------|
+| `--route-set-code` | `RZD_2026` | Набор маршрутов |
+| `--scenario-id` | — | Пробрасывается в каждую команду |
+| `--skip-elasticity` | — | Только маршруты |
+| `--dry-run` | — | Только проверка резолва |
+| `--include-oil` | — | Добавить `import_ipem_oil_routes` |
+| `--only` | — | Запустить только указанные имена команд |
+
+```bash
+python manage.py import_ipem_all_routes --scenario-id 1 --route-set-code RZD_2026
+python manage.py import_ipem_all_routes --scenario-id 1 --include-oil
+python manage.py import_ipem_all_routes --dry-run --only import_ipem_forest_routes
+```
+
 ### `import_ipem_coal_2026_routes`
 
 Импорт **model-маршрутов** из `Уголь_эластика_2026.xlsx` в `RouteSet` (по умолчанию `RZD_2026`) и связка operational-маршрутов РЖД через `model_route_id`.  
