@@ -13,6 +13,7 @@ from core.models import RouteSet
 from .dimensions import (
     INNER_DIMENSION_NONE,
     KPI_FIELDS_BY_YEAR,
+    LOADING_BASE_YEAR,
     VALID_KPI_YEARS,
     DimensionSpec,
     get_dimension,
@@ -64,7 +65,7 @@ def _format_turnover(value: Decimal) -> tuple[str, str]:
     return f"{format(_quantize(bln, 2), 'f')}", "млрд т·км"
 
 
-def _metric_formatters(kpi_year: int = 2026) -> dict[str, tuple]:
+def _metric_formatters(kpi_year: int = LOADING_BASE_YEAR) -> dict[str, tuple]:
     fields = KPI_FIELDS_BY_YEAR[kpi_year]
     return {
         "count": (_format_count, Count("id")),
@@ -310,7 +311,7 @@ class RouteAnalyticsService:
         self,
         route_set_id: int,
         *,
-        kpi_year: int = 2026,
+        kpi_year: int = LOADING_BASE_YEAR,
     ) -> tuple[RouteSetTotalsDTO | None, list[str]]:
         if not isinstance(route_set_id, int) or route_set_id <= 0:
             return None, ["Некорректный route_set_id"]

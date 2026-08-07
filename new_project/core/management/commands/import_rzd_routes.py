@@ -19,9 +19,13 @@ from core.domain.cargo.formatting import (
     resolve_route_cargo_fields,
 )
 from core.domain.route.turnover_coefficients import (
+    LOADING_BASE_YEAR,
+    TURNOVER_COEF_YEARS,
     coefs_from_row,
     coefs_to_route_kwargs,
+    sqlite_charge_column_for_year,
     sqlite_loading_column_for_year,
+    sqlite_turnover_column_for_year,
 )
 from core.management.reference_clear import clear_routes_for_route_set
 from core.management.rzd_paths import RZD_TABLE, get_rzd_db_path
@@ -54,9 +58,9 @@ COL_OKPO = "ОКПО_компании_отпр"
 COL_INN = "ИНН_компании"
 COL_SHIPPER_NAME = "Наименование_компании"
 COL_HOLDING = "Холдинг"
-COL_VOLUME_TONS = "2026 Погрузка,т"
-COL_TURNOVER_TKM = "2026 Грузоб,ткм"
-COL_CHARGE_RUB = "2026 Доходы,руб"
+COL_VOLUME_TONS = sqlite_loading_column_for_year(LOADING_BASE_YEAR)
+COL_TURNOVER_TKM = sqlite_turnover_column_for_year(LOADING_BASE_YEAR)
+COL_CHARGE_RUB = sqlite_charge_column_for_year(LOADING_BASE_YEAR)
 
 DEFAULT_ROUTE_SET_CODE = "RZD_2026"
 DEFAULT_ROUTE_SET_NAME = "РЖД 2026"
@@ -84,12 +88,10 @@ _BASE_SELECT_COLS = [
     COL_CHARGE_RUB,
 ]
 
-_TURNOVER_COEF_OPTIONAL_COLS = (
-    sqlite_loading_column_for_year(2025),
-    sqlite_loading_column_for_year(2027),
-    sqlite_loading_column_for_year(2028),
-    sqlite_loading_column_for_year(2029),
-    sqlite_loading_column_for_year(2030),
+_TURNOVER_COEF_OPTIONAL_COLS = tuple(
+    sqlite_loading_column_for_year(year)
+    for year in TURNOVER_COEF_YEARS
+    if year != LOADING_BASE_YEAR
 )
 
 

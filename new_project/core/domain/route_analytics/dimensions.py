@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from core.domain.route.turnover_coefficients import LOADING_BASE_YEAR
+
 
 @dataclass(frozen=True)
 class DimensionSpec:
@@ -93,10 +95,10 @@ VALID_METRICS = frozenset({"count", "money", "volume", "turnover"})
 INNER_DIMENSION_NONE = "none"
 VALID_INNER_DIMENSIONS = frozenset(DIMENSIONS) | {INNER_DIMENSION_NONE}
 
-VALID_KPI_YEARS = frozenset({2026})
+VALID_KPI_YEARS = frozenset({LOADING_BASE_YEAR})
 
 KPI_FIELDS_BY_YEAR: dict[int, dict[str, str]] = {
-    2026: {
+    LOADING_BASE_YEAR: {
         "money": "freight_charge_rub",
         "volume": "transport_volume_tons",
         "turnover": "freight_turnover_tkm",

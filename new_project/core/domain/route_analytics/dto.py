@@ -6,6 +6,7 @@ from typing import Any
 
 from .dimensions import (
     INNER_DIMENSION_NONE,
+    LOADING_BASE_YEAR,
     VALID_INNER_DIMENSIONS,
     VALID_KPI_YEARS,
     VALID_METRICS,
@@ -18,7 +19,7 @@ class RouteAnalyticsRequestDTO:
     route_set_id: int
     dimension: str
     metric: str
-    kpi_year: int = 2026
+    kpi_year: int = LOADING_BASE_YEAR
     dimension_inner: str = INNER_DIMENSION_NONE
     parent_filter: str | None = None
 

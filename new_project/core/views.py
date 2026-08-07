@@ -23,9 +23,12 @@ from core.domain.route_equalizer_preset.dto import (
     parse_variant_request,
 )
 from core.domain.route_equalizer_preset.services import RouteEqualizerPresetService
-from core.domain.route_analytics.dimensions import INNER_DIMENSION_NONE
-from core.domain.route_analytics.dimensions import RZD_2026_ROUTE_SET_CODE
-from core.domain.route_analytics.dimensions import VALID_KPI_YEARS
+from core.domain.route_analytics.dimensions import (
+    INNER_DIMENSION_NONE,
+    LOADING_BASE_YEAR,
+    RZD_2026_ROUTE_SET_CODE,
+    VALID_KPI_YEARS,
+)
 from core.domain.route_analytics.dto import RouteAnalyticsRequestDTO
 from core.domain.route_analytics.services import RouteAnalyticsService
 from core.export import ExcelExportService, ExportColumn, ExportTable, excel_response
@@ -2396,7 +2399,7 @@ def route_equalizer_preset_api(request):
 def _parse_kpi_year_param(request) -> tuple[int | None, list[str]]:
     raw = request.GET.get("kpi_year")
     if raw is None or not str(raw).strip():
-        return 2026, []
+        return LOADING_BASE_YEAR, []
     try:
         year = int(str(raw).strip())
     except (TypeError, ValueError):

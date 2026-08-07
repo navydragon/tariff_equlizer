@@ -3,6 +3,7 @@ from decimal import Decimal
 from django.test import Client, TestCase
 from django.urls import reverse
 
+from core.domain.route_analytics.dimensions import LOADING_BASE_YEAR
 from core.domain.route_analytics.dto import RouteAnalyticsRequestDTO
 from core.domain.route_analytics.services import RouteAnalyticsService
 from core.models import (
@@ -153,7 +154,7 @@ class RouteAnalyticsServiceTests(TestCase):
         *,
         dimension: str,
         metric: str,
-        kpi_year: int = 2026,
+        kpi_year: int = LOADING_BASE_YEAR,
         dimension_inner: str = "none",
         parent_filter: str | None = None,
     ) -> RouteAnalyticsRequestDTO:
@@ -247,7 +248,7 @@ class RouteAnalyticsServiceTests(TestCase):
         self.assertIn("Набор маршрутов не найден", errors)
 
     def test_invalid_kpi_year(self) -> None:
-        result, errors = self.service.aggregate_totals(self.route_set.id, kpi_year=2025)
+        result, errors = self.service.aggregate_totals(self.route_set.id, kpi_year=2099)
         self.assertIsNone(result)
         self.assertIn("Некорректный kpi_year", errors)
 
@@ -256,7 +257,7 @@ class RouteAnalyticsServiceTests(TestCase):
                 route_set_id=self.route_set.id,
                 dimension="cargo_group",
                 metric="money",
-                kpi_year=2025,
+                kpi_year=2099,
             )
         )
         self.assertIsNone(result)
