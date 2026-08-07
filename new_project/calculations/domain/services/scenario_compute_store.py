@@ -17,6 +17,7 @@ from django.conf import settings
 from calculations.domain.services.scenario_effects_cache import (
     CompactRouteEffects,
     EarlyGroupSnapshot,
+    compute_elasticity_set_content_fingerprint,
 )
 from calculations.domain.services.scenario_effects_compact import _DIMENSION_COLUMNS
 from calculations.domain.services.scenario_effects_formatting import GlobalTotals
@@ -286,9 +287,13 @@ def compute_fallout_fingerprint(
     charge_by_year: np.ndarray,
     turnover_coef: np.ndarray,
 ) -> str:
+    elasticity_set_id = getattr(scenario, "elasticity_set_id", None)
+    elasticity_content_fp = compute_elasticity_set_content_fingerprint(
+        elasticity_set_id,
+    )
     hasher = hashlib.sha256()
     hasher.update(
-        f"elasticity_set:{getattr(scenario, 'elasticity_set_id', None)}".encode(),
+        f"elasticity_set:{elasticity_set_id}:{elasticity_content_fp}".encode(),
     )
     hasher.update(
         f"retention:{getattr(scenario, 'retention_coefficient_mode', '')}".encode(),

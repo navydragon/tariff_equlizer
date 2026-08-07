@@ -134,6 +134,42 @@ class ScenarioComputeSnapshot:
     filter_options: dict[str, list[str]]
 
 
+def compute_elasticity_set_content_fingerprint(
+    elasticity_set_id: int | None,
+) -> str:
+    """
+    Короткий fingerprint содержимого набора эластичности (правила + точки).
+
+    Нужен, чтобы смена точек/фильтров при том же elasticity_set_id
+    инвалидировала data_version и fallout-кэш.
+    """
+    if elasticity_set_id is None:
+        return "none"
+
+    from scenarios.models import ElasticityRule
+
+    rules = (
+        ElasticityRule.objects.filter(elasticity_set_id=elasticity_set_id)
+        .prefetch_related("points")
+        .order_by("position", "id")
+    )
+    parts: list[str] = [f"set:{elasticity_set_id}"]
+    for rule in rules:
+        parts.append(
+            "rule:"
+            f"{rule.id}:{rule.name}:{rule.position}:"
+            f"{rule.cargo_group_id}:{rule.cargo_id}:{rule.message_type_id}",
+        )
+        for point in sorted(
+            rule.points.all(),
+            key=lambda item: (item.marginality, item.id),
+        ):
+            parts.append(
+                f"point:{point.marginality}:{point.coefficient}",
+            )
+    return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()[:16]
+
+
 def compute_scenario_data_version(
     *,
     scenario: Scenario,
@@ -142,9 +178,13 @@ def compute_scenario_data_version(
 ) -> str:
     """
     Версия входных данных для инвалидации стабильного кэша:
-    набор маршрутов + коэффициенты + тарифные правила.
+    набор маршрутов + коэффициенты + тарифные правила + эластичность.
     """
     route_set = scenario.route_set
+    elasticity_set_id = getattr(scenario, "elasticity_set_id", None)
+    elasticity_content_fp = compute_elasticity_set_content_fingerprint(
+        elasticity_set_id,
+    )
     parts: list[str] = [
         str(scenario.id),
         str(scenario.start_year),
@@ -154,7 +194,7 @@ def compute_scenario_data_version(
         f"consider_turnover_changes:{bool(getattr(scenario, 'consider_turnover_changes', False))}",
         f"consider_demand_elasticity:{bool(getattr(scenario, 'consider_demand_elasticity', False))}",
         f"ignore_own_axles_cargo:{bool(getattr(scenario, 'ignore_own_axles_cargo', False))}",
-        f"elasticity_set:{getattr(scenario, 'elasticity_set_id', None)}",
+        f"elasticity_set:{elasticity_set_id}:{elasticity_content_fp}",
         f"retention_mode:{getattr(scenario, 'retention_coefficient_mode', '')}",
     ]
     for year in sorted(base_coef_by_year):

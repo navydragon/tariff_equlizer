@@ -4894,6 +4894,123 @@ class DemandElasticityEffectsTests(TariffLoadServiceTestMixin, TestCase):
         )
         self.assertNotEqual(version_off, version_on)
 
+    def test_compute_scenario_data_version_depends_on_elasticity_rules(self) -> None:
+        from calculations.domain.services.scenario_effects_cache import (
+            compute_scenario_data_version,
+        )
+        from scenarios.models import ElasticityRule, ElasticityRulePoint, ElasticitySet
+
+        elasticity_set = ElasticitySet.objects.create(
+            name="Version set",
+            author=self.user,
+        )
+        self.scenario.elasticity_set = elasticity_set
+        self.scenario.consider_demand_elasticity = True
+        self.scenario.save(update_fields=["elasticity_set", "consider_demand_elasticity"])
+
+        base_coef = {2025: Decimal("1"), 2026: Decimal("1")}
+        version_empty = compute_scenario_data_version(
+            scenario=self.scenario,
+            base_coef_by_year=base_coef,
+            rules=[],
+        )
+
+        rule = ElasticityRule.objects.create(
+            elasticity_set=elasticity_set,
+            name="Rule A",
+            position=0,
+        )
+        ElasticityRulePoint.objects.create(
+            rule=rule,
+            marginality=Decimal("0"),
+            coefficient=Decimal("1"),
+        )
+        version_with_rule = compute_scenario_data_version(
+            scenario=self.scenario,
+            base_coef_by_year=base_coef,
+            rules=[],
+        )
+        self.assertNotEqual(version_empty, version_with_rule)
+
+        ElasticityRulePoint.objects.create(
+            rule=rule,
+            marginality=Decimal("0.5"),
+            coefficient=Decimal("0.8"),
+        )
+        version_with_extra_point = compute_scenario_data_version(
+            scenario=self.scenario,
+            base_coef_by_year=base_coef,
+            rules=[],
+        )
+        self.assertNotEqual(version_with_rule, version_with_extra_point)
+
+        other_set = ElasticitySet.objects.create(
+            name="Other version set",
+            author=self.user,
+        )
+        self.scenario.elasticity_set = other_set
+        self.scenario.save(update_fields=["elasticity_set"])
+        version_other_set = compute_scenario_data_version(
+            scenario=self.scenario,
+            base_coef_by_year=base_coef,
+            rules=[],
+        )
+        self.assertNotEqual(version_with_extra_point, version_other_set)
+
+    def test_fallout_fingerprint_depends_on_elasticity_points(self) -> None:
+        from calculations.domain.services.scenario_compute_store import (
+            compute_fallout_fingerprint,
+        )
+        from scenarios.models import ElasticityRule, ElasticityRulePoint, ElasticitySet
+
+        import numpy as np
+
+        elasticity_set = ElasticitySet.objects.create(
+            name="Fallout fp set",
+            author=self.user,
+        )
+        self.scenario.elasticity_set = elasticity_set
+        self.scenario.save(update_fields=["elasticity_set"])
+
+        initial = np.array([100.0], dtype=np.float32)
+        charge = np.array([[100.0, 110.0]], dtype=np.float32)
+        turnover = np.array([[1.0, 1.0]], dtype=np.float32)
+
+        fp_empty = compute_fallout_fingerprint(
+            scenario=self.scenario,
+            initial_charge=initial,
+            charge_by_year=charge,
+            turnover_coef=turnover,
+        )
+        rule = ElasticityRule.objects.create(
+            elasticity_set=elasticity_set,
+            name="Rule",
+            position=0,
+        )
+        ElasticityRulePoint.objects.create(
+            rule=rule,
+            marginality=Decimal("0"),
+            coefficient=Decimal("1"),
+        )
+        fp_with_point = compute_fallout_fingerprint(
+            scenario=self.scenario,
+            initial_charge=initial,
+            charge_by_year=charge,
+            turnover_coef=turnover,
+        )
+        self.assertNotEqual(fp_empty, fp_with_point)
+
+        ElasticityRulePoint.objects.filter(rule=rule).update(
+            coefficient=Decimal("0.5"),
+        )
+        fp_updated_point = compute_fallout_fingerprint(
+            scenario=self.scenario,
+            initial_charge=initial,
+            charge_by_year=charge,
+            turnover_coef=turnover,
+        )
+        self.assertNotEqual(fp_with_point, fp_updated_point)
+
     def test_aggregate_exposes_fallout_rows_when_flag_enabled(self) -> None:
         self.scenario.consider_demand_elasticity = True
         self.scenario.save(update_fields=["consider_demand_elasticity"])
