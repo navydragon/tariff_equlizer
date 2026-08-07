@@ -81,6 +81,15 @@ python manage.py import_ipem_all_routes --scenario-id 1 --route-set-code RZD_202
 Эквивалент по очереди: уголь → металлургия → удобрения → лес → прочие → минстрой → нефть.  
 Проверка без записи: `--dry-run`.
 
+**Повторный импорт** (правила эластичности уже правили в UI — не перезаписывать):
+
+```bash
+python manage.py import_ipem_all_routes \
+  --scenario-id 1 --route-set-code RZD_2026 --skip-elasticity
+```
+
+Первичный импорт (пустой набор эластичности) — **без** `--skip-elasticity`.
+
 ```bash
 python manage.py refresh_deploy_caches --warm-scenarios --wait-scenarios
 python manage.py refresh_deploy_caches --warm-only --warm-scenarios --wait-scenarios

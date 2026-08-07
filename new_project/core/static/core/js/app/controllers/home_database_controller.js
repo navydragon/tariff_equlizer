@@ -17,7 +17,7 @@ import {
 
   const METRICS = ROUTE_ANALYTICS_METRICS.filter((metric) => metric !== "count");
   const DIMENSION = "cargo_group";
-  const KPI_YEAR = "2025";
+  const KPI_YEAR = "2026";
 
   class HomeDatabaseController extends Stimulus.Controller {
     static targets = ["kpiRow", "tabPanel", "tableWrap", "chartCanvas"];

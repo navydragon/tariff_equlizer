@@ -19,14 +19,14 @@ T = RZD_TABLE
 target = Decimal("3061.7")
 
 queries = {
-    "2025 Грузоб,ткм all": f'SELECT SUM(CAST([2025 Грузоб,ткм] AS REAL)) FROM [{T}]',
+    "2026 Грузоб,ткм all": f'SELECT SUM(CAST([2026 Грузоб,ткм] AS REAL)) FROM [{T}]',
     "Грузооборот (т_км) all": f'SELECT SUM(CAST([Грузооборот (т_км)] AS REAL)) FROM [{T}]',
-    "2025 Грузоб,ткм груженые": f"""SELECT SUM(CAST([2025 Грузоб,ткм] AS REAL)) FROM [{T}]
+    "2026 Грузоб,ткм груженые": f"""SELECT SUM(CAST([2026 Грузоб,ткм] AS REAL)) FROM [{T}]
         WHERE [Тип парка] LIKE '%груж%'""",
     "Грузооборот груженые": f"""SELECT SUM(CAST([Грузооборот (т_км)] AS REAL)) FROM [{T}]
         WHERE [Тип парка] LIKE '%груж%'""",
-    "2025 Грузоб,ткм not empty": f"""SELECT SUM(CAST([2025 Грузоб,ткм] AS REAL)) FROM [{T}]
-        WHERE [2025 Грузоб,ткм] IS NOT NULL AND [2025 Грузоб,ткм] != 0""",
+    "2026 Грузоб,ткм not empty": f"""SELECT SUM(CAST([2026 Грузоб,ткм] AS REAL)) FROM [{T}]
+        WHERE [2026 Грузоб,ткм] IS NOT NULL AND [2026 Грузоб,ткм] != 0""",
 }
 
 for label, sql in queries.items():

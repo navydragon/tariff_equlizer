@@ -1,7 +1,7 @@
 """Коэффициенты изменения погрузки по годам.
 
 Коэффициент года Y рассчитывается как отношение
-`Y Погрузка,т / 2025 Погрузка,т`
+`Y Погрузка,т / 2026 Погрузка,т`
 в строке ИХ_ГП (РЖД). Значения квантуются до 3 знаков после запятой.
 """
 
@@ -11,7 +11,7 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any, Iterable
 
 TURNOVER_COEF_YEARS: tuple[int, ...] = tuple(range(2025, 2031))
-LOADING_BASE_YEAR: int = 2025
+LOADING_BASE_YEAR: int = 2026
 
 _COEF_QUANT = Decimal("0.001")
 _COEF_MIN = Decimal("-99.999")

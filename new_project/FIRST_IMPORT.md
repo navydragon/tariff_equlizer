@@ -114,7 +114,7 @@ python manage.py load_base_btd
 
 ## 5. Маршруты РЖД
 
-Импорт из SQLite в набор `RZD_2026`. Базовые KPI маршрута — колонки **2025** (`2025 Погрузка,т`, `2025 Грузоб,ткм`, `2025 Доходы,руб`). Занимает **долго** (миллионы строк, десятки минут и больше — зависит от диска и CPU).
+Импорт из SQLite в набор `RZD_2026`. Базовые KPI маршрута — колонки **2026** (`2026 Погрузка,т`, `2026 Грузоб,ткм`, `2026 Доходы,руб`). Занимает **долго** (миллионы строк, десятки минут и больше — зависит от диска и CPU).
 
 Проверка на 1000 строк без записи:
 
@@ -158,6 +158,13 @@ Model-маршруты **не участвуют** в расчётах «Эфф�
 
 ```bash
 python manage.py import_ipem_all_routes --scenario-id 1 --route-set-code RZD_2026
+```
+
+Повторный импорт model-маршрутов **без** пересоздания правил эластичности (если кривые уже правили в UI):
+
+```bash
+python manage.py import_ipem_all_routes \
+  --scenario-id 1 --route-set-code RZD_2026 --skip-elasticity
 ```
 
 Или по секторам:
@@ -343,7 +350,7 @@ GENERATE_RANDOM_ROUTES=1 ADMIN_PASSWORD="ваш_пароль" bash new_project/t
 | 3 | `import_railroads` → `import_regions` → `import_stations` → `import_cargo_groups` → `import_cargos` → `import_shippers` → `init_route_refs` |
 | 4 | `create_base_scenario` → `load_base_btd` |
 | 5 | `import_rzd_routes --clear` |
-| 6 | `import_ipem_all_routes --scenario-id 1 --route-set-code RZD_2026` → `refresh_deploy_caches` |
+| 6 | `import_ipem_all_routes --scenario-id 1 --route-set-code RZD_2026` → `refresh_deploy_caches` (повторно с правками UI: добавить `--skip-elasticity`) |
 | 7 | В UI: сценарий → набор маршрутов **RZD_2026** |
 | 8 | `runserver` |
 
