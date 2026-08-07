@@ -232,6 +232,27 @@
   overflow: auto;
 }
 
+.decision-effects-table-wrap--expanded {
+  max-height: none;
+  overflow: visible;
+}
+
+.decision-effects-table-expand-th {
+  vertical-align: middle !important;
+}
+
+.decision-effects-table-expand-switch {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  min-height: 1.25rem;
+}
+
+.decision-effects-table-expand-switch .form-check-input {
+  margin-top: 0;
+  cursor: pointer;
+}
+
 .decision-effects-table-wrap .table-responsive {
   overflow-x: hidden;
 }

@@ -89,6 +89,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
         boundScenarioEditModalHiddenHandler: null,
         showFalloutAdjustedRevenues: false,
         showFalloutAdjustedVolumes: false,
+        effectsTableExpanded: false,
         lastRebuildToastVersion: null,
       };
 
@@ -289,6 +290,19 @@ import { clearToasts, showToast } from "../lib/toast.js";
           this.volumesFalloutToggleTarget.checked,
       );
       await this._handleAbsoluteFalloutToggle("volumes");
+    }
+
+    onEffectsTableExpandToggle(event) {
+      this.state.effectsTableExpanded = Boolean(event?.target?.checked);
+      this._syncEffectsTableExpand();
+    }
+
+    _syncEffectsTableExpand() {
+      if (!this.hasTableWrapTarget) return;
+      this.tableWrapTarget.classList.toggle(
+        "decision-effects-table-wrap--expanded",
+        Boolean(this.state.effectsTableExpanded),
+      );
     }
 
     async _handleAbsoluteFalloutToggle(kind) {
@@ -1420,12 +1434,26 @@ import { clearToasts, showToast } from "../lib/toast.js";
         })
         .join("");
 
+      const expandChecked = this.state.effectsTableExpanded ? "checked" : "";
       this.tableWrapTarget.innerHTML = `
         <div class="table-responsive">
           <table class="table table-sm table-vcenter">
             <thead>
               <tr>
-                <th></th>
+                <th class="decision-effects-table-expand-th">
+                  <label
+                    class="form-check form-switch mb-0 decision-effects-table-expand-switch"
+                    title="Показать всю таблицу без прокрутки"
+                  >
+                    <input
+                      type="checkbox"
+                      class="form-check-input"
+                      data-action="change->decision-effects#onEffectsTableExpandToggle"
+                      aria-label="Показать всю таблицу без прокрутки"
+                      ${expandChecked}
+                    />
+                  </label>
+                </th>
                 <th class="text-center">
                   <span class="decision-effects-th">Базовые<br />решения</span>
                 </th>
@@ -1442,6 +1470,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
           </table>
         </div>
       `;
+      this._syncEffectsTableExpand();
     }
 
     _renderChart(chartData) {
@@ -1473,13 +1502,6 @@ import { clearToasts, showToast } from "../lib/toast.js";
       const labels = rows.map((row) => row.label);
       const baseValues = rows.map((row) => row.base);
       const rulesValues = rows.map((row) => row.rules);
-      const totalValues = rows.map((row) => row.total);
-
-      const ChartDataLabelsPlugin =
-        window.ChartDataLabels || window.ChartDataLabelsPlugin || null;
-      if (ChartDataLabelsPlugin && window.Chart) {
-        window.Chart.register(ChartDataLabelsPlugin);
-      }
 
       const chartHeight = Math.max(
         EFFECTS_CHART_MIN_HEIGHT_PX,
@@ -1487,9 +1509,115 @@ import { clearToasts, showToast } from "../lib/toast.js";
       );
       this.chartCanvasTarget.style.height = `${chartHeight}px`;
 
+      const stackExtents = rows.map((row) => {
+        // Chart.js рисует + и − сегменты стека независимо от нуля:
+        // положительные — вправо, отрицательные — влево.
+        const positiveExtent =
+          (row.base > 0 ? row.base : 0) + (row.rules > 0 ? row.rules : 0);
+        const negativeExtent =
+          (row.base < 0 ? row.base : 0) + (row.rules < 0 ? row.rules : 0);
+        return {
+          total: row.total,
+          base: row.base,
+          rules: row.rules,
+          min: negativeExtent,
+          max: positiveExtent,
+        };
+      });
+
+      const minTotal = Math.min(0, ...stackExtents.map((item) => item.min));
+      const maxTotal = Math.max(0, ...stackExtents.map((item) => item.max));
+      const valueRange = Math.max(maxTotal - minTotal, 1);
+      const labelPaddingRatio = 0.12;
+      const xMin =
+        minTotal < 0 ? minTotal - valueRange * labelPaddingRatio : undefined;
+      const xMax = maxTotal + valueRange * labelPaddingRatio;
+      const needsLeftPadding = minTotal < 0;
+      const segmentFont = "600 11px sans-serif";
+      const minSegmentLabelWidthPx = 28;
+
+      const formatTotalLabel = (total) => {
+        if (!Number.isFinite(total) || total === 0) {
+          return { text: "0.0", color: "#6b7280" };
+        }
+        if (total > 0) {
+          return { text: `+${total.toFixed(1)}`, color: "#059669" };
+        }
+        return { text: total.toFixed(1), color: "#dc2626" };
+      };
+
+      const drawCenteredSegmentLabel = (ctx, element, value, color) => {
+        if (!element || !Number.isFinite(value) || value === 0) {
+          return;
+        }
+        const { x, y, base } = element.getProps(["x", "y", "base"], true);
+        const left = Math.min(x, base);
+        const right = Math.max(x, base);
+        const width = right - left;
+        if (width < minSegmentLabelWidthPx) {
+          return;
+        }
+        const text = value.toFixed(1);
+        if (ctx.measureText(text).width + 4 > width) {
+          return;
+        }
+        ctx.fillStyle = color;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(text, (left + right) / 2, y);
+      };
+
+      const totalLabelPlugin = {
+        id: "decisionEffectsTotalLabels",
+        afterDatasetsDraw(chart) {
+          const { ctx } = chart;
+          const xScale = chart.scales.x;
+          const baseMeta = chart.getDatasetMeta(0);
+          const rulesMeta = chart.getDatasetMeta(1);
+          ctx.save();
+          ctx.font = segmentFont;
+
+          stackExtents.forEach((extent, index) => {
+            const { total, base, rules, max } = extent;
+            if (!Number.isFinite(total)) {
+              return;
+            }
+
+            const showSegments = base !== 0 && rules !== 0;
+            if (showSegments) {
+              drawCenteredSegmentLabel(
+                ctx,
+                baseMeta?.data?.[index],
+                base,
+                "#ffffff",
+              );
+              drawCenteredSegmentLabel(
+                ctx,
+                rulesMeta?.data?.[index],
+                rules,
+                "#111827",
+              );
+            }
+
+            const totalLabel = formatTotalLabel(total);
+            const y =
+              baseMeta?.data?.[index]?.getProps(["y"], true)?.y ??
+              chart.scales.y.getPixelForValue(index);
+            const x = xScale.getPixelForValue(Math.max(max, 0));
+            ctx.fillStyle = totalLabel.color;
+            ctx.textAlign = "left";
+            ctx.textBaseline = "middle";
+            ctx.fillText(totalLabel.text, x + 6, y);
+          });
+
+          ctx.restore();
+        },
+      };
+
       const ctx = this.chartCanvasTarget.getContext("2d");
       this.state.chart = new window.Chart(ctx, {
         type: "bar",
+        plugins: [totalLabelPlugin],
         data: {
           labels,
           datasets: [
@@ -1498,7 +1626,6 @@ import { clearToasts, showToast } from "../lib/toast.js";
               data: baseValues,
               backgroundColor: "#003256",
               stack: "effects",
-              datalabels: { display: false },
             },
             {
               label: "Отдельные решения",
@@ -1513,11 +1640,16 @@ import { clearToasts, showToast } from "../lib/toast.js";
           responsive: true,
           maintainAspectRatio: false,
           layout: {
-            padding: { right: 56 },
+            padding: {
+              right: 64,
+              left: needsLeftPadding ? 48 : 0,
+            },
           },
           scales: {
             x: {
               stacked: true,
+              min: xMin,
+              max: xMax,
               ticks: { display: false },
               grid: { display: false },
             },
@@ -1531,20 +1663,7 @@ import { clearToasts, showToast } from "../lib/toast.js";
               position: "bottom",
             },
             datalabels: {
-              display(context) {
-                return context.datasetIndex === context.chart.data.datasets.length - 1;
-              },
-              formatter(_value, context) {
-                const total = totalValues[context.dataIndex];
-                if (!Number.isFinite(total)) return "";
-                return total.toFixed(1);
-              },
-              anchor: "end",
-              align: "end",
-              offset: 6,
-              color: "#111827",
-              font: { size: 11, weight: "600" },
-              clip: false,
+              display: false,
             },
           },
         },
