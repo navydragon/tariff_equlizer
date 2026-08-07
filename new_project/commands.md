@@ -209,6 +209,7 @@ python manage.py import_total_ipem --file total_ipem.csv --route-set-code DEFAUL
 4. `import_ipem_forest_routes`
 5. `import_ipem_other_routes`
 6. `import_ipem_minstroy_routes`
+7. `import_ipem_oil_routes`
 
 | Параметр | По умолчанию | Описание |
 |----------|--------------|----------|
@@ -216,12 +217,10 @@ python manage.py import_total_ipem --file total_ipem.csv --route-set-code DEFAUL
 | `--scenario-id` | — | Пробрасывается в каждую команду |
 | `--skip-elasticity` | — | Только маршруты |
 | `--dry-run` | — | Только проверка резолва |
-| `--include-oil` | — | Добавить `import_ipem_oil_routes` |
 | `--only` | — | Запустить только указанные имена команд |
 
 ```bash
 python manage.py import_ipem_all_routes --scenario-id 1 --route-set-code RZD_2026
-python manage.py import_ipem_all_routes --scenario-id 1 --include-oil
 python manage.py import_ipem_all_routes --dry-run --only import_ipem_forest_routes
 ```
 

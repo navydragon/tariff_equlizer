@@ -78,8 +78,8 @@ python manage.py create_admin --login admin --email admin@example.com --password
 python manage.py import_ipem_all_routes --scenario-id 1 --route-set-code RZD_2026
 ```
 
-Эквивалент по очереди: уголь → металлургия → удобрения → лес → прочие → минстрой.  
-Нефть опционально: добавьте `--include-oil`. Проверка без записи: `--dry-run`.
+Эквивалент по очереди: уголь → металлургия → удобрения → лес → прочие → минстрой → нефть.  
+Проверка без записи: `--dry-run`.
 
 ```bash
 python manage.py refresh_deploy_caches --warm-scenarios --wait-scenarios
