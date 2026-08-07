@@ -1,7 +1,7 @@
 from decimal import Decimal, InvalidOperation
 from typing import Optional
 
-from django.db import transaction
+from django.db import IntegrityError, transaction
 
 from core.domain.services.app_settings import AppSettingsService
 from core.models import User
@@ -55,12 +55,42 @@ class ElasticityService:
 
     @transaction.atomic
     def create_set(
-        self, name: str, user: User,
+        self,
+        name: str,
+        user: User,
+        source_set_id: Optional[int] = None,
     ) -> tuple[Optional[ElasticitySetDTO], list[str]]:
         if not name or not name.strip():
             return None, ["Название набора обязательно"]
 
-        created = self.set_repository.create({"name": name.strip(), "author": user})
+        cleaned_name = name.strip()
+        if source_set_id is not None:
+            source = self.set_repository.get_by_id(source_set_id)
+            if not source:
+                return None, ["Набор эластичности не найден"]
+            errors = self._require_set_read(source, user)
+            if errors:
+                return None, errors
+        else:
+            source = None
+
+        try:
+            with transaction.atomic():
+                if source is None:
+                    created = self.set_repository.create(
+                        {"name": cleaned_name, "author": user},
+                    )
+                else:
+                    created = self.set_repository.clone_with_rules(
+                        source,
+                        cleaned_name,
+                        user,
+                    )
+        except IntegrityError:
+            return None, [
+                "Набор эластичности с таким названием уже существует",
+            ]
+
         return ElasticitySetDTO.from_model(created), []
 
     @transaction.atomic

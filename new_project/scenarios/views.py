@@ -1390,8 +1390,24 @@ def elasticity_set_create_api(request):
         )
 
     name = data.get("name") or ""
+    source_set_id = data.get("source_set_id")
+    if source_set_id is not None and source_set_id != "":
+        try:
+            source_set_id = int(source_set_id)
+        except (TypeError, ValueError):
+            return JsonResponse(
+                {"success": False, "errors": ["Некорректный source_set_id"]},
+                status=400,
+            )
+    else:
+        source_set_id = None
+
     service = ElasticityService()
-    created, errors = service.create_set(str(name), request.user)
+    created, errors = service.create_set(
+        str(name),
+        request.user,
+        source_set_id=source_set_id,
+    )
     if errors:
         return JsonResponse({"success": False, "errors": errors}, status=400)
 

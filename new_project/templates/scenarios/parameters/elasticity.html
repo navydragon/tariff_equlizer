@@ -87,6 +87,41 @@
           <label for="elasticitySetNameInput" class="form-label">Название *</label>
           <input type="text" class="form-control" id="elasticitySetNameInput" placeholder="Например: 2026" />
         </div>
+        <div class="mb-3">
+          <label class="form-label">Способ создания</label>
+          <div class="form-selectgroup form-selectgroup-boxes d-flex flex-column">
+            <label class="form-selectgroup-item flex-fill">
+              <input type="radio" name="elasticitySetCreateMode" value="empty" class="form-selectgroup-input" checked />
+              <span class="form-selectgroup-label d-flex align-items-center p-3">
+                <span class="me-3">
+                  <span class="form-selectgroup-check"></span>
+                </span>
+                <span>
+                  <strong>Пустой набор</strong>
+                  <span class="d-block text-secondary">Создать набор без правил</span>
+                </span>
+              </span>
+            </label>
+            <label class="form-selectgroup-item flex-fill">
+              <input type="radio" name="elasticitySetCreateMode" value="clone" class="form-selectgroup-input" />
+              <span class="form-selectgroup-label d-flex align-items-center p-3">
+                <span class="me-3">
+                  <span class="form-selectgroup-check"></span>
+                </span>
+                <span>
+                  <strong>Клонировать существующий</strong>
+                  <span class="d-block text-secondary">Скопировать набор вместе со всеми правилами</span>
+                </span>
+              </span>
+            </label>
+          </div>
+        </div>
+        <div class="mb-3" id="elasticitySetCloneSourceWrap" style="display: none;">
+          <label for="elasticitySetCloneSourceSelect" class="form-label">Набор-источник *</label>
+          <select id="elasticitySetCloneSourceSelect" class="form-select">
+            <option value="">— выберите набор —</option>
+          </select>
+        </div>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
@@ -208,6 +243,11 @@
   const setNameInput = document.getElementById('elasticitySetNameInput');
   const setCreateErrors = document.getElementById('elasticitySetCreateErrors');
   const setCreateSaveBtn = document.getElementById('elasticitySetCreateSaveBtn');
+  const setCloneSourceWrap = document.getElementById('elasticitySetCloneSourceWrap');
+  const setCloneSourceSelect = document.getElementById('elasticitySetCloneSourceSelect');
+  const setCreateModeRadios = document.querySelectorAll('input[name="elasticitySetCreateMode"]');
+
+  let availableSets = [];
 
   const ruleModalEl = document.getElementById('elasticityRuleModal');
   const ruleModal = ruleModalEl && typeof bootstrap !== 'undefined'
@@ -317,13 +357,42 @@
       showErrorMessages(data.errors || 'Ошибка загрузки наборов', errorsContainer);
       return;
     }
+    availableSets = data.items || [];
     selectEl.innerHTML = '<option value="">— выберите набор —</option>';
-    data.items.forEach(item => {
+    availableSets.forEach(item => {
       const option = document.createElement('option');
       option.value = String(item.id);
       option.textContent = item.name;
       selectEl.appendChild(option);
     });
+  }
+
+  function getCreateMode() {
+    const checked = document.querySelector('input[name="elasticitySetCreateMode"]:checked');
+    return checked ? checked.value : 'empty';
+  }
+
+  function syncCreateModeUI() {
+    const isClone = getCreateMode() === 'clone';
+    if (setCloneSourceWrap) {
+      setCloneSourceWrap.style.display = isClone ? '' : 'none';
+    }
+  }
+
+  function populateCloneSourceSelect() {
+    if (!setCloneSourceSelect) return;
+    setCloneSourceSelect.innerHTML = '<option value="">— выберите набор —</option>';
+    availableSets.forEach(item => {
+      const option = document.createElement('option');
+      option.value = String(item.id);
+      option.textContent = item.name;
+      setCloneSourceSelect.appendChild(option);
+    });
+    if (currentSetId) {
+      setCloneSourceSelect.value = String(currentSetId);
+    } else if (availableSets.length === 1) {
+      setCloneSourceSelect.value = String(availableSets[0].id);
+    }
   }
 
   async function loadOverview() {
@@ -514,18 +583,35 @@
   createSetBtn.addEventListener('click', () => {
     clearErrors(setCreateErrors);
     setNameInput.value = '';
+    const emptyRadio = document.querySelector('input[name="elasticitySetCreateMode"][value="empty"]');
+    if (emptyRadio) emptyRadio.checked = true;
+    populateCloneSourceSelect();
+    syncCreateModeUI();
     setCreateModal?.show();
+  });
+
+  setCreateModeRadios.forEach(radio => {
+    radio.addEventListener('change', syncCreateModeUI);
   });
 
   setCreateSaveBtn.addEventListener('click', async () => {
     clearErrors(setCreateErrors);
+    const payload = { name: setNameInput.value };
+    if (getCreateMode() === 'clone') {
+      const sourceId = setCloneSourceSelect ? setCloneSourceSelect.value : '';
+      if (!sourceId) {
+        showErrorMessages('Выберите набор-источник для клонирования', setCreateErrors);
+        return;
+      }
+      payload.source_set_id = parseInt(sourceId, 10);
+    }
     const response = await fetch(urls.createSet, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'X-CSRFToken': getCookie('csrftoken'),
       },
-      body: JSON.stringify({ name: setNameInput.value }),
+      body: JSON.stringify(payload),
     });
     const data = await response.json();
     if (!data.success) {
@@ -533,7 +619,9 @@
       return;
     }
     setCreateModal?.hide();
-    showToast('success', 'Набор эластичности создан');
+    showToast('success', getCreateMode() === 'clone'
+      ? 'Набор эластичности склонирован'
+      : 'Набор эластичности создан');
     await loadSets();
     currentSetId = data.item.id;
     selectEl.value = String(currentSetId);

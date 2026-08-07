@@ -37,6 +37,41 @@ class ElasticitySetRepository:
             id=elasticity_set.id,
         )
 
+    def clone_with_rules(
+        self,
+        source: ElasticitySet,
+        name: str,
+        author,
+    ) -> ElasticitySet:
+        """Создаёт новый набор и копирует все правила с точками."""
+        cloned = ElasticitySet.objects.create(name=name, author=author)
+        source_rules = (
+            ElasticityRule.objects.filter(elasticity_set=source)
+            .prefetch_related("points")
+            .order_by("position", "id")
+        )
+        for rule in source_rules:
+            new_rule = ElasticityRule.objects.create(
+                elasticity_set=cloned,
+                name=rule.name,
+                position=rule.position,
+                cargo_group_id=rule.cargo_group_id,
+                cargo_id=rule.cargo_id,
+                message_type_id=rule.message_type_id,
+            )
+            points = [
+                ElasticityRulePoint(
+                    rule=new_rule,
+                    marginality=point.marginality,
+                    coefficient=point.coefficient,
+                )
+                for point in rule.points.all()
+            ]
+            if points:
+                ElasticityRulePoint.objects.bulk_create(points)
+
+        return ElasticitySet.objects.select_related("author").get(id=cloned.id)
+
     def delete(self, elasticity_set_id: int) -> bool:
         deleted, _ = ElasticitySet.objects.filter(id=elasticity_set_id).delete()
         return deleted > 0

@@ -1325,6 +1325,121 @@ class ElasticityServiceTests(TestCase):
         self.assertEqual(len(updated.points), 1)
         self.assertEqual(updated.points[0].coefficient, "1.2000")
 
+    def test_create_set_without_source_is_empty(self):
+        elasticity_set, errors = self.service.create_set("Пустой", self.user)
+        self.assertFalse(errors)
+        rules, errors = self.service.list_rules(elasticity_set.id, self.user)
+        self.assertFalse(errors)
+        self.assertEqual(rules, [])
+
+    def test_clone_set_copies_rules_filters_and_points(self):
+        from core.models import Cargo, CargoGroup, MessageType
+
+        group, _ = CargoGroup.objects.update_or_create(
+            code=99,
+            defaults={"name": "Тестовая группа", "position": 99},
+        )
+        cargo, _ = Cargo.objects.get_or_create(
+            code="CLONE01",
+            defaults={"name": "Груз клона", "cargo_group": group},
+        )
+        message_type, _ = MessageType.objects.get_or_create(
+            code="CLN",
+            defaults={"name": "Клон-сообщение"},
+        )
+
+        source, _ = self.service.create_set("Источник", self.user)
+        source_rule, _ = self.service.create_rule(
+            CreateElasticityRuleDTO(
+                elasticity_set_id=source.id,
+                name="Уголь экспорт",
+                position=2,
+                cargo_group_id=group.code,
+                cargo_id=cargo.code,
+                message_type_id=message_type.id,
+                points=[
+                    {"marginality": "-0.02", "coefficient": "1"},
+                    {"marginality": "0.13", "coefficient": "0.87"},
+                ],
+            ),
+            self.user,
+        )
+        self.service.create_rule(
+            CreateElasticityRuleDTO(
+                elasticity_set_id=source.id,
+                name="Fallback",
+                position=0,
+                points=[{"marginality": "0", "coefficient": "1"}],
+            ),
+            self.user,
+        )
+
+        cloned, errors = self.service.create_set(
+            "Клон",
+            self.user,
+            source_set_id=source.id,
+        )
+        self.assertFalse(errors)
+        self.assertIsNotNone(cloned)
+        self.assertNotEqual(cloned.id, source.id)
+        self.assertEqual(cloned.author_id, self.user.id)
+
+        cloned_rules, errors = self.service.list_rules(cloned.id, self.user)
+        self.assertFalse(errors)
+        self.assertEqual(len(cloned_rules), 2)
+        self.assertEqual(
+            [rule.name for rule in cloned_rules],
+            ["Fallback", "Уголь экспорт"],
+        )
+        self.assertTrue(
+            all(rule.id != source_rule.id for rule in cloned_rules),
+        )
+
+        specific = next(rule for rule in cloned_rules if rule.name == "Уголь экспорт")
+        self.assertEqual(specific.position, 2)
+        self.assertEqual(specific.cargo_group_id, group.code)
+        self.assertEqual(specific.cargo_id, cargo.code)
+        self.assertEqual(specific.message_type_id, message_type.id)
+        self.assertEqual(specific.points_count, 2)
+
+        detail, errors = self.service.get_rule(specific.id, self.user)
+        self.assertFalse(errors)
+        self.assertEqual(len(detail.points), 2)
+        self.assertEqual(detail.points[0].marginality, "-0.0200")
+        self.assertEqual(detail.points[1].coefficient, "0.8700")
+
+        # Правка источника не затрагивает клон
+        self.service.update_rule(
+            source_rule.id,
+            UpdateElasticityRuleDTO(
+                name="Источник изменён",
+                points=[{"marginality": "0.9", "coefficient": "0.1"}],
+            ),
+            self.user,
+        )
+        detail_after, _ = self.service.get_rule(specific.id, self.user)
+        self.assertEqual(detail_after.name, "Уголь экспорт")
+        self.assertEqual(len(detail_after.points), 2)
+        self.assertEqual(detail_after.points[1].coefficient, "0.8700")
+
+    def test_clone_set_denied_without_read_access(self):
+        Setting.objects.filter(code=SHARE_SCENARIOS_CODE).delete()
+        Setting.objects.create(
+            code=SHARE_SCENARIOS_CODE,
+            description="",
+            value=SHARE_MODE_OWN,
+        )
+        source, _ = self.service.create_set("Чужой набор", self.user)
+        other = User.objects.create_user(login="elasticity_other", password="test_pass")
+
+        cloned, errors = self.service.create_set(
+            "Попытка клона",
+            other,
+            source_set_id=source.id,
+        )
+        self.assertIsNone(cloned)
+        self.assertTrue(any("Нет прав" in err for err in errors))
+
 
 class ElasticityMatchingTests(TestCase):
     def setUp(self) -> None:
