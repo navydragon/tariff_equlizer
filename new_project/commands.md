@@ -82,6 +82,22 @@ python manage.py create_base_scenario
 python manage.py load_base_btd
 ```
 
+### `shift_tariff_rule_year_coefficients` (scenarios)
+
+В **отдельных** тарифных решениях сценария копирует коэффициенты с года-источника на год-назначение и ставит в году-источнике `1`. BTD не трогает.
+
+| Параметр | Описание |
+|----------|----------|
+| `--scenario-id` | ID сценария (обязательный) |
+| `--from-year` | Год-источник (после переноса = 1) |
+| `--to-year` | Год-назначение |
+| `--dry-run` | Только посчитать, без записи |
+
+```bash
+python manage.py shift_tariff_rule_year_coefficients \
+  --scenario-id 1 --from-year 2026 --to-year 2027
+```
+
 ---
 
 ## Справочники (core)
